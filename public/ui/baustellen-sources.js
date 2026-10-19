@@ -4,12 +4,33 @@
   const LOCAL="http://127.0.0.1:5051",REMOTE="https://pc-alex02.tail610122.ts.net";
   const requests=new Map(),unavailable=new Map(),collections=new Map();
   const loaded=new Map();
+  const identityTokens=value=>new Set(String(value||"").toLocaleLowerCase("de-AT").normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"").split(/[^a-z0-9]+/)
+    .filter(word=>word.length>=4&&!["gmbh","gesellschaft","firma","projekt","baustelle",
+      "malen","fenster","sanierung","umbau","neubau","arbeiten","krista"].includes(word)));
+  function verifyWWIdentity(ref,identity,{quiet=false}={}){
+    const expectedIndex=Number(ref.projectIndex||0),actualIndex=Number(identity?.projectIndex||0);
+    const sourceNumber=String(identity?.projectNumber||"");
+    const expectedNumber=String(ref.projectNumber||"");
+    let valid=Boolean(identity)&&actualIndex>0&&sourceNumber===expectedNumber;
+    if(expectedIndex>0)valid=valid&&expectedIndex===actualIndex;
+    else{
+      const expected=[ref.expectedName,ref.expectedCustomer,ref.expectedCompany].flatMap(value=>[...identityTokens(value)]);
+      const actual=new Set([identity?.title,identity?.company,identity?.customer].flatMap(value=>[...identityTokens(value)]));
+      valid=valid&&expected.length>0&&expected.some(word=>actual.has(word));
+    }
+    if(valid)return true;
+    if(quiet)return false;
+    throw new Error("Nummernkollision oder fehlende WinWorker-Kundenidentität bei Projekt "+
+      expectedNumber+" ("+String(ref.expectedName||"KRISTINE").slice(0,70)+"). Fremde Rechnungen, Regie und Stunden sind gesperrt.");
+  }
   const url=path=>{const u=new URL(path,location.origin);if(token)u.searchParams.set("token",token);return u.pathname+u.search};
   async function json(path,options={}){
     const response=await fetch(url(path),{signal:AbortSignal.timeout(20000),...options}),data=await response.json();
     if(!response.ok||data?.ok===false)throw new Error(data?.error||`HTTP ${response.status}`);return data;
   }
-  async function brain(kind,projectNumber){
+  async function brain(kind,ref){
+    const projectNumber=String(ref.projectNumber);
     const route=`/api/outgoing/project-${kind==="regie"?"regie-reports":kind}`;
     let lastError;
     for(const host of [LOCAL,REMOTE]){
@@ -18,10 +39,10 @@
       try{
         if(host===LOCAL){if(token)headers["X-Krista-Token"]=token}
         else{const auth=await json(`/admin/api/brain-permit?path=${encodeURIComponent(route)}`);headers["X-Krista-Brain-Permit"]=auth.permit}
-        const response=await fetch(host+route,{method:"POST",headers,body:JSON.stringify({projectNumber}),signal:AbortSignal.timeout(host===LOCAL?3500:15000)});
+        const response=await fetch(host+route,{method:"POST",headers,body:JSON.stringify({projectNumber,expected:{projectNumber,projectIndex:ref.projectIndex,name:ref.expectedName,customer:ref.expectedCustomer,company:ref.expectedCompany}}),signal:AbortSignal.timeout(host===LOCAL?3500:15000)});
         const data=await response.json();if(!response.ok||!data?.ok){if([401,403,404,503].includes(response.status))unavailable.set(key,Date.now()+30000);throw new Error(data?.error||`HTTP ${response.status}`)}
         return data;
-      }catch(error){lastError=error;if(error.name==="TypeError"||["TimeoutError","AbortError"].includes(error.name))unavailable.set(key,Date.now()+30000)}
+      }catch(error){lastError=error;if(/Nummernkollision|Kundenidentität|WinWorker-Kunden-ID|Projektindex|KRISTINE-Akte/i.test(String(error?.message||error)))throw error;if(error.name==="TypeError"||["TimeoutError","AbortError"].includes(error.name))unavailable.set(key,Date.now()+30000)}
     }
     throw new Error("WinWorker ist nicht erreichbar. Die Verbindung zum Büro-Rechner muss verfügbar sein.",{cause:lastError});
   }
@@ -32,7 +53,11 @@
     entry.promise=(async()=>{
       const cachePath=`/admin/api/job/${encodeURIComponent(ref.jobId)}/ww-cache/${kind}?projectNumber=${encodeURIComponent(ref.projectNumber)}`;
       try{
-        const result=await brain(kind,ref.projectNumber);
+        const result=await brain(kind,ref);
+        const source=kind==='regie'?result:result[kind];
+        const identity=source?.projectIdentity;
+        const found=kind==='regie'?Number(result.projectIndex||0)>0:Boolean(source?.found);
+        if(found)verifyWWIdentity(ref,identity);
         let syncedAt=new Date().toISOString(),saved=true;
         if(kind!=="regie"){
           const data=result[kind];if(!data||!Array.isArray(data[kind==="hours"?"rows":"invoices"]))throw new Error("WinWorker liefert keinen vollständigen Stand.");
@@ -40,9 +65,10 @@
         }
         return {...result,cached:false,syncedAt,saved};
       }catch(error){
+        if(/Nummernkollision|Kundenidentität|WinWorker-Kunden-ID|Projektindex passt nicht|Projektidentität|KRISTINE-Akte/i.test(String(error?.message||error)))throw error;
         if(kind!=="regie"){
           const cache=await json(cachePath).catch(()=>null);
-          if(cache?.snapshot)return {ok:true,[kind]:cache.snapshot.data,cached:true,syncedAt:cache.snapshot.syncedAt,error:error.message};
+          if(cache?.snapshot && verifyWWIdentity(ref,cache.snapshot.data?.projectIdentity,{quiet:true}))return {ok:true,[kind]:cache.snapshot.data,cached:true,syncedAt:cache.snapshot.syncedAt,error:error.message};
         }
         throw error;
       }finally{entry.pending=false}
@@ -71,6 +97,17 @@
         row.billingSources.push({...ref,...(result[1].status==="fulfilled"?{data:result[1].value}:{error:sourceError(result[1].reason)})});
       });
       await Promise.all([localPromise,remotePromise]);
+      // Previously imported WW reports may belong to an unrelated project with
+      // the same numeric reference. Hide them without modifying stored data.
+      for(const row of byId.values()){
+        const conflict=row.regieSources.some(source=>/Nummernkollision|Kundenidentität|WinWorker-Kunden-ID|Projektindex passt nicht|KRISTINE-Akte/i.test(String(source.error||'')))||
+          row.billingSources.some(source=>/Nummernkollision|Kundenidentität|WinWorker-Kunden-ID|Projektindex passt nicht|KRISTINE-Akte/i.test(String(source.error||'')));
+        if(conflict){
+          const count=row.documents.filter(doc=>String(doc.source||'').toUpperCase()==='WW').length;
+          row.documents=row.documents.filter(doc=>String(doc.source||'').toUpperCase()!=='WW');
+          row.errors.push('WinWorker-Nummernkollision: '+count+' alte WW-Dokumente werden bis zur eindeutigen Zuordnung ausgeblendet.');
+        }
+      }
       // Multiple WW projects may belong to one member: write once per owner to
       // prevent concurrent read/modify/write operations from losing reports.
       await D.mapLimit([...byId.values()],4,async row=>{
@@ -116,5 +153,5 @@
     return B.aggregatePerformance(values,{jobId,jobName:data.job.name,partial:data.billing.partial,dataUpdatedAt:options.updatedAt});
   }
   function clear(){requests.clear();collections.clear();unavailable.clear()}
-  window.BaustellenSources={ww,load:loadCollection,clear,performance};
+  window.BaustellenSources={ww,load:loadCollection,clear,performance,verifyWWIdentity};
 })();

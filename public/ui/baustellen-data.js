@@ -31,7 +31,7 @@
         const projectNumber=String(link.projectNumber||"").trim();if(!/^\d{2,12}$/.test(projectNumber))continue;
         const key=projectNumber;if(seen.has(key))continue;seen.add(key);
         const owner=rows.find(row=>String(row.wwProjectNumber||row.jobId)===projectNumber)||member;
-        result.push({jobId:String(owner.jobId),projectNumber,projectIndex:positive(link.projectIndex)});
+        result.push({jobId:String(owner.jobId),projectNumber,projectIndex:positive(link.projectIndex),expectedName:String(owner.name||''),expectedCustomer:String(owner.contactName||owner.customerMaster?.name||owner.projectContacts?.owner?.customer||''),expectedCompany:String(owner.customerMaster?.company||'')});
       }
     }
     return result;

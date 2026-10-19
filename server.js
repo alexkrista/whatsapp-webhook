@@ -4869,6 +4869,7 @@ console.log("KRISTINE Archivsuche registriert");
 registerOutgoingBillingBridge(app, {
   dataDir: DATA_DIR,
   requireAdmin,
+  readJobMeta,
   onIssuedProgressInvoices: async ({ jobId, invoices }) => {
     for (const invoice of Array.isArray(invoices) ? invoices : []) {
       if (invoice.progressBilling?.jobId && String(invoice.progressBilling.jobId) !== String(jobId)) continue;

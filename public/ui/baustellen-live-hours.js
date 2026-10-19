@@ -16,6 +16,8 @@
   let wwByJob=new Map();
   let wwByMember=new Map();
   const wwByProject=new Map();
+  const verifiedPairs=new Set();
+  const pairKey=ref=>String(ref.jobId)+'|'+String(ref.projectNumber);
   let savedHoursLoaded=false;
   const reportHoursByJob=new Map();
   let costEmployees=[];
@@ -31,21 +33,21 @@
   const money2=v=>new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR",minimumFractionDigits:2,maximumFractionDigits:2}).format(num(v));
   const dateLabel=v=>{const s=String(v||"").trim().slice(0,10),m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/),year=Number(m?.[1]);return m&&year>=1900&&year<=2099?`${m[3]}.${m[2]}.${m[1]}`:"–"};
   const nameKey=v=>String(v||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
-  const canonicalPersonName=v=>({"max-krista":"Maximilian Krista","mandi":"Manuel Faes","mandi-faes":"Manuel Faes","johannes":"Johannes Wiederin","edi-mock":"Edmund Mock","cathrin-grabherr":"Cathrin Anna Grabherr","anna-cathrin-grabherr":"Cathrin Anna Grabherr","cathrin-anna-grabherr":"Cathrin Anna Grabherr"})[nameKey(v)]||String(v||"").trim();
+  const canonicalPersonName=v=>({"max-krista":"Maximilian Krista","mandi":"Manuel Faes","mandi-faes":"Manuel Faes","johannes":"Johannes Wiederin","edi":"Edmund Mock","edi-mock":"Edmund Mock","cathrin-grabherr":"Cathrin Anna Grabherr","anna-cathrin-grabherr":"Cathrin Anna Grabherr","cathrin-anna-grabherr":"Cathrin Anna Grabherr"})[nameKey(v)]||String(v||"").trim();
   const finkNumber=(employee,row={})=>String(row?.finkzeitPersonnelNumber||row?.finkzeitPersonalNumber||row?.personalnummerFinkzeit||row?.personnelNumber||employee?.finkzeitPersonnelNumber||employee?.finkzeitPersonalNumber||employee?.personalnummerFinkzeit||employee?.personnelNumber||employee?.personalNumber||"").trim();
   const identity=(fink,name,fallback="")=>fink?`fink:${fink}`:nameKey(name)?`name:${nameKey(name)}`:`ma:${fallback||"unbekannt"}`;
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
   async function api(p){const r=await fetch(tokenUrl(p));const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
   async function apiWrite(p,body){const r=await fetch(tokenUrl(p),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const t=await r.text();let d;try{d=JSON.parse(t)}catch{}if(!r.ok)throw new Error(d?.error||t||r.statusText);return d}
-  async function loadWwHours(jobId,ownerId=jobId){
-    const d=await window.BaustellenSources.ww("hours",{jobId:String(ownerId),projectNumber:String(jobId)});
-    return parseWwHours(d,jobId);
+  async function loadWwHours(ref){
+    const d=await window.BaustellenSources.ww("hours",ref);
+    return parseWwHours(d,ref.projectNumber);
   }
 
   function combineRefs(refs){
-    const found=refs.flatMap(ref=>wwByProject.has(ref.projectNumber)?[{number:ref.projectNumber,data:wwByProject.get(ref.projectNumber)}]:[]);
+    const found=refs.flatMap(ref=>verifiedPairs.has(pairKey(ref))&&wwByProject.has(ref.projectNumber)?[{number:ref.projectNumber,data:wwByProject.get(ref.projectNumber)}]:[]);
     return {...combineWw(found),expected:refs.length,loaded:found.length,
-      missing:refs.filter(ref=>!wwByProject.has(ref.projectNumber)||wwByProject.get(ref.projectNumber).cached).map(ref=>ref.projectNumber)};
+      missing:refs.filter(ref=>!verifiedPairs.has(pairKey(ref))||!wwByProject.has(ref.projectNumber)||wwByProject.get(ref.projectNumber).cached).map(ref=>ref.projectNumber)};
   }
   function rebuildSavedHours(){
     const refs=D.projects({kind:"collection",collectionMemberJobIds:jobs.filter(j=>!D.isCollection(j)).map(j=>j.jobId)},jobs);
@@ -61,6 +63,10 @@
       const wanted=new Set(batch.map(ref=>ref.projectNumber));
       for(const snapshot of response.snapshots||[]){
         if(!wanted.has(snapshot.projectNumber))continue;
+        const validRefs=batch.filter(ref=>String(ref.projectNumber)===String(snapshot.projectNumber)&&
+          window.BaustellenSources?.verifyWWIdentity?.(ref,snapshot.data?.projectIdentity,{quiet:true}));
+        if(!validRefs.length)continue;
+        validRefs.forEach(ref=>verifiedPairs.add(pairKey(ref)));
         const previous=wwByProject.get(snapshot.projectNumber);
         if(previous&&(!previous.cached||String(previous.syncedAt||"")>=String(snapshot.syncedAt||"")))continue;
         wwByProject.set(snapshot.projectNumber,parseWwHours({hours:snapshot.data,cached:true,syncedAt:snapshot.syncedAt,saved:true},snapshot.projectNumber));
@@ -73,12 +79,12 @@
   function wwProjectNumbers(j){const links=Array.isArray(j?.collectionSummary?.wwProjects)?j.collectionSummary.wwProjects:[];const values=links.map(link=>String(link?.projectNumber||"").trim()).filter(Boolean);if(!values.length)values.push(String(j?.wwProjectNumber||j?.jobId||""));return [...new Set(values.filter(Boolean))]}
   async function loadWwHoursForJob(j){
     const generation=refreshSerial;
-    const refs=D.projects(j,jobs),settled=await D.mapLimit(refs,4,ref=>loadWwHours(ref.projectNumber,ref.jobId));
+    const refs=D.projects(j,jobs),settled=await D.mapLimit(refs,4,ref=>loadWwHours(ref));
     if(generation!==refreshSerial)return combineRefs(refs);
     settled.forEach((result,index)=>{
       const number=refs[index].projectNumber;
-      if(result.status==="fulfilled")wwByProject.set(number,result.value);
-      else if(wwByProject.has(number))wwByProject.set(number,{...wwByProject.get(number),cached:true});
+      if(result.status==="fulfilled"){verifiedPairs.add(pairKey(refs[index]));wwByProject.set(number,result.value)}
+      else verifiedPairs.delete(pairKey(refs[index]));
     });
     rebuildSavedHours();
     const result=combineRefs(refs),missing=result.missing;

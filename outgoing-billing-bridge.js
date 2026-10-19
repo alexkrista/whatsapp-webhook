@@ -3,6 +3,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const DEFAULT_CONNECTOR = "http://127.0.0.1:5051";
+const {checkWwProjectIdentity} = require("./ww-project-identity");
 
 function number(value) {
   const result = Number(value);
@@ -211,6 +212,13 @@ function registerOutgoingBillingBridge(app, options = {}) {
       }
 
       const project = matches[0];
+      if(typeof options.readJobMeta==="function"){
+        const meta=await options.readJobMeta(jobId);
+        const verdict=checkWwProjectIdentity(project,meta,jobId);
+        if(!verdict.ok){
+          return res.status(409).json({ok:false,identityConflict:true,error:verdict.reason});
+        }
+      }
       const projectIndex = number(project.projectIndex);
       if (!projectIndex) throw new Error("WinWorker-Projektindex fehlt.");
       await brainJson(`/api/outgoing/projects/${projectIndex}/sync-history`, {
