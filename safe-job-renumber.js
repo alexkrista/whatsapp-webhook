@@ -99,7 +99,7 @@ function safeRenumber({ dataDir, oldJobId, newJobId, checkpoint = () => {} }) {
       }
       if (after !== before) record(file, after);
     }
-    record(`${SOURCE_ID}/.meta.json`, json({ ...meta, previousJobIds: [...new Set([...(meta.previousJobIds || []), SOURCE_ID])], wwProjectNumber: meta.wwProjectNumber || "", renumberedAt: at }));
+    record(`${SOURCE_ID}/.meta.json`, json({ ...meta, previousJobIds: [...new Set([...(meta.previousJobIds || []), SOURCE_ID])], wwProjectNumber: "", wwProjectIndex: 0, wwProjectLinks: [], renumberedAt: at }));
     record("_system/job-number-aliases.json", json({ ...oldAliases, aliases: { ...oldAliases.aliases, [SOURCE_ID]: newId }, files: { ...oldAliases.files, ...Object.fromEntries(manifest.map(row => [`${newId}/${row.file}`, `${SOURCE_ID}/${row.file}`])) } }));
     const historyFile = `${SOURCE_ID}/.history.jsonl`, existingHistoryChange = changes.find(row => row.file === historyFile);
     const historyBefore = existingHistoryChange?.after ?? (exists(path.join(dataDir, historyFile)) ? fs.readFileSync(path.join(dataDir, historyFile), "utf8") : "");
