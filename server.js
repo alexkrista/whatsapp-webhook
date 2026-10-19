@@ -3765,6 +3765,7 @@ app.post("/admin/api/job/:jobId/safe-renumber", (req, res) => {
   try {
     const source=path.join(DATA_DIR,oldJobId),meta=JSON.parse(fs.readFileSync(path.join(source,".meta.json"),"utf8"));
     if (!/latzer/i.test(String(meta.name||""))) return res.status(409).json({ok:false,error:"Kundenidentität stimmt nicht: Umnummerierung blockiert."});
+    if (Number(meta.wwProjectIndex||0)>0 || (Array.isArray(meta.wwProjectLinks)&&meta.wwProjectLinks.length) || (meta.wwProjectNumber && String(meta.wwProjectNumber)!==oldJobId)) return res.status(409).json({ok:false,error:"Projekt besitzt explizite WinWorker-Verknüpfungen; sichere Prüfung erforderlich."});
     if (fs.existsSync(path.join(DATA_DIR,newJobId))) return res.status(409).json({ok:false,error:"Zielnummer bereits vergeben."});
     const result=require("./safe-job-renumber").safeRenumber({dataDir:DATA_DIR,oldJobId,newJobId});
     if (result.status!=="renumbered" && result.status!=="already_renumbered") return res.status(409).json({ok:false,error:result.reason||result.status});
