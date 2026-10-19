@@ -35,7 +35,7 @@ function filesUnder(root, skip = () => false, relative = "") {
     if (skip(rel)) continue;
     if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) rows.push(...filesUnder(root, skip, rel));
-    else if (entry.isFile()) rows.push(rel);
+    else if (entry.isFile()) rows.push(rel.split(path.sep).join('/'));
   }
   return rows;
 }
