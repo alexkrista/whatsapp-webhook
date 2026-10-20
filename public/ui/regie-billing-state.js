@@ -246,6 +246,7 @@
 
   function summarize(reports,billing={}){
     const invoices=Array.isArray(billing?.invoices)?billing.invoices:[];
+    const hasIssuedInvoice=invoices.some(row=>String(row?.status||"").toLowerCase()==="issued");
     const invoiceBySourceId=new Map();
     for(const invoice of invoices){
       const key=documentKey(invoice?.sourceId??invoice?.source_id);
@@ -257,7 +258,7 @@
       const invoiceUnissued=invoice&&["draft","cancelled"].includes(String(invoice.status||"").toLowerCase());
       // Eine technische Bericht-Markierung allein ist kein Abrechnungsbeleg.
       // Erst eine tatsächlich ausgestellte Rechnung im Projekt bestätigt sie.
-      const automaticBilled=Boolean(invoice)&&String(invoice.status||"").toLowerCase()==="issued"&&!invoiceUnissued;
+      const automaticBilled=Boolean(billedKey)&&!invoiceUnissued&&(Boolean(invoice)&&String(invoice.status||"").toLowerCase()==="issued" || hasIssuedInvoice);
       // Explicit stored correction takes precedence, including KRISTINE-only jobs.
       // Keep separate proof of an issued invoice; a manual correction does not create one.
       const manualBilled=manualStatus==="billed";
