@@ -1,0 +1,17 @@
+name: Baseline collection regression
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/baseline-collection-check.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: node --test TEST/collection-data.test.js TEST/hours-persistence.test.js TEST/customer-access.test.js TEST/customer-invitation-ui.test.js
