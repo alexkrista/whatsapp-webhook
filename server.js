@@ -3761,7 +3761,7 @@ app.get("/admin/api/job/:jobId/history", async (req, res) => {
 app.post("/admin/api/job/:jobId/safe-renumber", (req, res) => {
   if (!requireAdmin(req, res)) return;
   const oldJobId=String(req.params.jobId||""),newJobId=String(req.body?.newJobId||"");
-  if (oldJobId!=="26094" || newJobId!=="26110") return res.status(409).json({ok:false,error:"Erste sichere Umnummerierung ist nur für Latzer 26094 → 26110 freigegeben."});
+  if (oldJobId!=="26094" || !["26111","26112","26113","26114","26115","26116"].includes(newJobId)) return res.status(409).json({ok:false,error:"Nur vorab in WinWorker geprüfte Ersatznummern 26111–26116 sind für Latzer freigegeben."});
   try {
     const source=path.join(DATA_DIR,oldJobId),meta=JSON.parse(fs.readFileSync(path.join(source,".meta.json"),"utf8"));
     if (!/latzer/i.test(String(meta.name||""))) return res.status(409).json({ok:false,error:"Kundenidentität stimmt nicht: Umnummerierung blockiert."});
