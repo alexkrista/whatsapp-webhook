@@ -82,6 +82,15 @@ test('manual report status overrides automatic WW/PDF status and stays calculabl
   ],{invoices:[{sourceId:'doc',status:'issued',kind:'TR',net:100}]});
   assert.equal(state.openRows[0].report.id,'a');assert.equal(state.billedRows[0].report.id,'b');assert.equal(state.unknownRows.length,0);
 });
+test('KRISTINE-only manual billed reports affect totals without any WW invoice',()=>{
+  const rows=[{id:'a',source:'KRISTINE',reportNumber:'1',billingStatus:'billed',totalNet:100,totalHours:2},
+    {id:'b',source:'KRISTINE',reportNumber:'2',billingStatus:'billed',totalNet:200,totalHours:3}];
+  const state=B.summarize(rows,{invoices:[]});
+  assert.equal(state.billedAmount,300);assert.equal(state.openAmount,0);
+  assert.equal(state.billedHours,5);assert.equal(state.openRows.length,0);
+  const corrected=B.summarize([{...rows[0],billingStatus:'open'},rows[1]],{invoices:[]});
+  assert.equal(corrected.openAmount,100);assert.equal(corrected.billedAmount,200);
+});
 test('a report marker without an issued invoice is not treated as billed',()=>{
   const state=B.summarize([{id:'a',source:'WW',reportNumber:'1',totalNet:3488.04,billedDocumentId:'missing'}],{invoices:[]});
   assert.equal(state.billedRows.length,0);assert.equal(state.openRows.length,1);assert.equal(state.openAmount,3488.04);
