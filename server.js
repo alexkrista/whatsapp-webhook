@@ -3757,7 +3757,24 @@ app.get("/admin/api/job/:jobId/history", async (req, res) => {
 });
 
 // Admin API: Baustellennummer Ã¤ndern (Ordner umbenennen)
+// Scoped first rollout: WW 26110 verified free; prevent arbitrary number moves.
+app.post("/admin/api/job/:jobId/safe-renumber", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const oldJobId=String(req.params.jobId||""),newJobId=String(req.body?.newJobId||"");
+  if (oldJobId!=="26094" || newJobId!=="26110") return res.status(409).json({ok:false,error:"Erste sichere Umnummerierung ist nur für Latzer 26094 → 26110 freigegeben."});
+  try {
+    const source=path.join(DATA_DIR,oldJobId),meta=JSON.parse(fs.readFileSync(path.join(source,".meta.json"),"utf8"));
+    if (!/latzer/i.test(String(meta.name||""))) return res.status(409).json({ok:false,error:"Kundenidentität stimmt nicht: Umnummerierung blockiert."});
+    if (Number(meta.wwProjectIndex||0)>0 || (Array.isArray(meta.wwProjectLinks)&&meta.wwProjectLinks.length) || (meta.wwProjectNumber && String(meta.wwProjectNumber)!==oldJobId)) return res.status(409).json({ok:false,error:"Projekt besitzt explizite WinWorker-Verknüpfungen; sichere Prüfung erforderlich."});
+    if (fs.existsSync(path.join(DATA_DIR,newJobId))) return res.status(409).json({ok:false,error:"Zielnummer bereits vergeben."});
+    const result=require("./safe-job-renumber").safeRenumber({dataDir:DATA_DIR,oldJobId,newJobId});
+    if (result.status!=="renumbered" && result.status!=="already_renumbered") return res.status(409).json({ok:false,error:result.reason||result.status});
+    res.json({ok:true,...result});
+  } catch(error) {console.error("Safe renumber failed",error);res.status(500).json({ok:false,error:"Sichere Umnummerierung angehalten; bitte Prüfprotokoll kontrollieren."});}
+});
+
 app.post("/admin/api/job/:jobId/rename", async (req, res) => {
+  return res.status(410).json({ok:false,error:"Alte unsichere Umnummerierung deaktiviert. Bitte sichere Umnummerierung in Stammdaten verwenden."});
   if (!requireAdmin(req, res)) return;
   try {
     const oldJobId = String(req.params.jobId);
