@@ -1,0 +1,24 @@
+name: Safe project renumber regression
+on:
+  pull_request:
+    paths:
+      - 'safe-job-renumber.js'
+      - 'server.js'
+      - 'public/ui/baustellen-knowledge-hub.js'
+      - 'TEST/safe-job-renumber.test.js'
+      - '.github/workflows/safe-job-renumber.yml'
+  workflow_dispatch:
+jobs:
+  renumber:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check server.js
+      - run: node --check public/ui/baustellen-knowledge-hub.js
+      - run: node --check safe-job-renumber.js
+      - run: node --test TEST/safe-job-renumber.test.js TEST/job-renumber.test.js
