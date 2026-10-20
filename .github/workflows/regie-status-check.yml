@@ -1,0 +1,20 @@
+name: Regie status regression
+on:
+  pull_request:
+    paths:
+      - 'public/ui/regie-billing-state.js'
+      - 'TEST/progress-billing.test.js'
+      - '.github/workflows/regie-status-check.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: node --check public/ui/regie-billing-state.js
+      - run: node --test TEST/progress-billing.test.js TEST/regie-billing-state.test.js
