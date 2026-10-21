@@ -19,6 +19,7 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 PEOPLE = ("alex", "bettina", "dunja")
 LOG = logging.getLogger("kristine.stiegenhaus")
@@ -210,8 +211,14 @@ def main():
     parser.add_argument("--dry-run", action="store_true",
                         help="Einmaliger Lese-/Simulationstest ohne Schaltbefehle")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(message)s")
+    log_path = Path(args.config).with_name("presence_scene.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.StreamHandler(),
+                  RotatingFileHandler(log_path, maxBytes=2_000_000,
+                                      backupCount=4, encoding="utf-8")])
     config = load_json(args.config)
     if not isinstance(config, dict):
         raise SystemExit("Konfiguration fehlt; Vorlage erstellen")
