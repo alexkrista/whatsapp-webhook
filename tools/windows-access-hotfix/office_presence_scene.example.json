@@ -1,0 +1,23 @@
+{
+  "enabled": false,
+  "access_config": "C:\\Kristine\\Zutritt\\config.json",
+  "hcu_config": "C:\\Kristine\\HomematicNFC\\config.json",
+  "poll_seconds": 8,
+  "away_grace_seconds": 120,
+  "actors": {
+    "stiegenhaus": {
+      "device_id": "",
+      "channel_index": 1,
+      "expected_label": ""
+    },
+    "little_greene": {
+      "device_id": "",
+      "channel_index": 1,
+      "expected_label": ""
+    }
+  },
+  "sonos": {
+    "ip": "",
+    "source": "previous-current-queue"
+  }
+}
