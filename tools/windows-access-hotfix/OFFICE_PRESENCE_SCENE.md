@@ -1,38 +1,30 @@
-# KRISTINE – GANTNER-Anwesenheit → Stiegenhaus / Little Greene / Musik
+# KRISTINE: Büro-Anwesenheit → Homematic IP „Stiegenhaus“
 
-Stand: 2026-10-21. **Auslieferung standardmäßig ausgeschaltet.**
-Dies ist ein eigener Dienst; weder Türöffner noch Zutrittszeitpläne werden verändert.
+Stand 21.10.2026. Die gesamte Licht-/Little-Greene-/Musik-Szene besteht beim Nutzer bereits. **Nicht einzeln schalten.** KRISTINE sendet nur EIN bzw. AUS an genau eine Homematic-IP-Schaltgruppe „Stiegenhaus“.
 
-## Funktion
-- Eine anwesende Person (Alex ODER Bettina ODER Dunja) reicht für EIN.
-- Erst wenn alle drei false melden und der Zustand 120 Sekunden anhält: AUS.
-- Jede fehlende/ungültige Anwesenheitsinformation bricht den Zyklus ab, ohne Schaltung.
-- HCU-Aktoren ausschließlich mit dauerhaftem setSwitchState(on=true/false), nie mit Tasten-/Torimpulsen.
-- Vor jedem Schalten werden Geräte-IDs, lesbare Namen und schaltbare Kanaltypen mit dem HCU-Systemzustand abgeglichen. Tor-/Türnamen sind gesperrt.
-- Sonos: Play nur beim Wechsel auf Anwesenheit und nur wenn die ausgewählte Zone nicht bereits spielt. Pause bei Abwesenheit nur, wenn die Automatik die Wiedergabe gestartet hat. Es wird kein Musikdienst oder Radiosender erraten. Sonos muss bereits eine abspielbare Quelle haben.
-- Der Zustand bleibt in einer eigenen Datei state.json; die Türsteuerung hat keine Abhängigkeit davon.
+## Steuerung
+- Alex ODER Bettina ODER Dunja ist anwesend ⇒ Gruppe Stiegenhaus EIN.
+- Alle drei abwesend für 120 Sekunden ⇒ Stiegenhaus AUS.
+- Unbekannte Anwesenheit, Netzfehler oder HCU-Antwortfehler ⇒ kein neuer Befehl.
+- Auswertung alle 8 Sekunden aus dem lokalen, bestehenden GANTNER-Zutrittsdienst, ausschließlich per lesendem Status-Endpunkt.
+- Nur bei tatsächlichen Präsenzzustandswechseln ein Schaltbefehl; manuelle Schaltungen werden nicht ständig überschrieben.
+- Bestehende Homematic-/Little-Greene-/Musik-Automationen werden NICHT geändert.
+- Es werden keinerlei GANTNER-Tür- oder Tor-Befehle ausgelöst.
 
-## Vor dem Einschalten zwingend zu klären
-1. In welcher Homematic-IP-Zentrale hängen Stiegenhaus und Little Greene? Die am 21.10.2026 erreichbare HCU listet aktuell diese Bezeichnungen nicht; licht gang darf nicht ohne Bestätigung als Stiegenhaus angenommen werden.
-2. Eindeutige HCU-Geräte-IDs, Kanalnummern und Anzeigenamen beider zu schaltender Lasten.
-3. Welche konkrete Sonos-Zone soll Musik spielen? Der Büro-PC hat per SSDP noch keinen Sonos-Lautsprecher erkannt. IP und Quelle müssen bewusst festgelegt werden.
-4. PC-ALEX02 muss im Firmennetz auf HCU und Sonos zugreifen können.
+## Richtige HCU-Schaltgruppe
+Bei einer lesenden HCU-Abfrage vom 21.10.2026 wurde festgestellt:
+- Die HCU hat mehrere Gruppen mit Namen „Stiegenhaus“ (u.a. META, ACCESS_CONTROL und SWITCHING).
+- Die richtige Gruppe muss deshalb über ihre exakte Gruppen-ID und den Gruppentyp EXTENDED_LINKED_SWITCHING verifiziert werden, nicht allein anhand des Namens.
+- Sie hat als Ausgang einen HmIP-FSM16-Aktor „licht gang“, Schaltkanal 1. Die Taster gehören zu derselben Gruppe.
+- Schaltbefehl: /hmip/group/switching/setState mit groupId und on (boolean).
+- Niemals ein direktes sendDoorCommand/startImpulse am Taster oder Türöffner senden.
 
-## Lokale Einrichtung
-Auf PC-ALEX02: C:\Kristine\PresenceScenes\office_presence_scene.py
-Die Vorlage office_presence_scene.example.json nach config.json kopieren und enabled: false belassen. Keine Zugangstokens kopieren: Das Modul liest die bestehenden, lokalen GANTNER- und HCU-Konfigurationen.
+## Sichere Einrichtung
+1. Quellcode lokal nach C:\Kristine\PresenceScenes\office_presence_scene.py kopieren.
+2. Vorlage als C:\Kristine\PresenceScenes\config.json anlegen. IDs ausschließlich lokal eintragen, nicht ins öffentliche GitHub-Repository.
+3. enabled bleibt zuerst false, bis der Lesetest der Gruppe, die manuelle Aktorprüfung und die Zustandsprüfung erfolgreich sind.
+4. Trockenlauf ohne Schalten: python C:\Kristine\PresenceScenes\office_presence_scene.py --dry-run
+5. Danach erst enabled true setzen und mit --watch eine beaufsichtigte Probe machen.
+6. Nach Verifikation von EIN, AUS, Nachlauf, manueller Steuerung und Türfunktions-Unabhängigkeit darf ein automatischer Windows-Start eingerichtet werden.
 
-Trockenlauf, garantiert ohne Aktorschaltung:
-python C:\Kristine\PresenceScenes\office_presence_scene.py --config C:\Kristine\PresenceScenes\config.json --dry-run
-
-Nur nach bestätigter Zuordnung, Messung und Testfreigabe: enabled: true, dann
-python C:\Kristine\PresenceScenes\office_presence_scene.py --config C:\Kristine\PresenceScenes\config.json --watch
-
-Erst nach kontrolliertem EIN, AUS, manuellem Eingriff, Verbindungsausfall und Funktion der Zutrittsanlage einen geplanten automatischen Programmstart einrichten. Nicht ohne diesen Abnahmeschritt als Windows-Dienst installieren.
-
-## Sicherheitsgrenzen
-- Keine Kopplung an Tür-offen/Türfreigabe, sondern an Anwesenheit.
-- Ausgänge sind bei fehlender Konfiguration vollständig inaktiv.
-- Fehlende Sonos-Quelle führt zu einem protokollierten Fehler statt automatischer Auswahl.
-- Beim Ausfall des GANTNER-Dienstes wird kein falsches AUS ausgelöst.
-- Bei Hardware-/Verbindungsfehlern bleibt der Übergang unbestätigt und wird später erneut geprüft.
+Alle Befehle an die HCU werden vor der Übermittlung mit der aktuellen Gruppen- und Aktoridentität gegengeprüft. Ein unbekanntes Gerät führt zum Sicherheitsstopp. Keine HCU-Zugangsdaten, GANTNER-Tokens oder Sonos-Passwörter werden in der Projektquelle gespeichert.
