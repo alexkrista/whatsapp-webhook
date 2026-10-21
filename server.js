@@ -92,6 +92,7 @@ const { positionId, applyAcceptedPaymentTerm, buildAcceptedOrder, buildOrderCalc
 const { cleanDate: cleanOrderScheduleDate, scheduleBase, requestSchedule, proposeSchedule, confirmSchedule, declineProposal, buildPlanningAssignments, customerScheduleView } = require("./order-schedule-workflow");
 const { registerKristineActivityAudit } = require("./kristine-activity-audit");
 const { createContactMasterStore } = require("./contact-master");
+const { createCoverPdf } = require("./baustellen-deckblatt");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -4043,6 +4044,31 @@ app.post("/admin/api/job/:jobId/day/:day/build", async (req, res) => {
   }
 });
 
+
+// A4 print cover for an existing site, including still-empty offer projects.
+// GET only: no job creation and no change to payment, task or job data.
+app.get("/admin/api/job/:jobId/cover.pdf", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const jobId = String(req.params.jobId || "");
+  if (!isSafeJobId(jobId) || isInternalJobId(jobId)) return res.status(400).send("Ungültige Baustellennummer.");
+  if (!fs.existsSync(path.join(DATA_DIR, jobId))) return res.status(404).send("Baustelle nicht gefunden.");
+  try {
+    const meta = await readJobMeta(jobId);
+    let tasks = [];
+    try {
+      const all = JSON.parse(await fsp.readFile(path.join(DATA_DIR, "_kristine", "tasks.json"), "utf8"));
+      if (Array.isArray(all)) tasks = all.filter(t => String(t.jobId || "") === jobId);
+    } catch (_ignored) { /* Cover remains printable before an appointment exists. */ }
+    const bytes = await createCoverPdf({ jobId, meta, tasks, publicBaseUrl: PUBLIC_BASE_URL });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", 'inline; filename="Baustelle_' + jobId + '_Deckblatt.pdf"');
+    res.setHeader("Cache-Control", "private, no-store");
+    res.end(bytes);
+  } catch (error) {
+    console.error("Baustellendeckblatt fehlgeschlagen", {jobId,error:String(error?.message || error)});
+    res.status(500).send("Das Baustellendeckblatt konnte nicht erstellt werden.");
+  }
+});
 
 // Admin: serve Baustellenakte (build if missing/rebuild=1)
 app.get("/admin/akte/:jobId", async (req, res) => {

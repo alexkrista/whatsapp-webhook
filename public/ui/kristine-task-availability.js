@@ -8,7 +8,7 @@
   const byId=id=>document.getElementById(id);
   const safe=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
   const minutes=value=>{const match=String(value||"").match(/^(\d{2}):(\d{2})$/);return match?Number(match[1])*60+Number(match[2]):null};
-  const isAppointment=()=>document.querySelector('input[name="taskType"]:checked')?.value==="Termin";
+  const isAppointment=()=>["Termin","offer_site_visit"].includes(document.querySelector('input[name="taskType"]:checked')?.value);
   const endpoint=path=>typeof window.url==="function"?window.url(path):path;
 
   function overlaps(row){

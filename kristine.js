@@ -3419,6 +3419,7 @@ const open = taskId
           jobId,
           jobName: String(t.jobName || jobMeta.name || "").trim().slice(0, 140),
           taskType: ["Rückruf","Angebot","Problem","Termin","Reklamation","Sonstiges"].includes(String(t.taskType || "")) ? String(t.taskType) : "Sonstiges",
+          appointmentPurpose: t.taskType === "Termin" && t.appointmentPurpose === "offer_site_visit" ? "offer_site_visit" : "",
           priority: ["normal","heute","sofort"].includes(String(t.priority || "")) ? String(t.priority) : "normal",
           creatorId: String(req.kristineActor ? (previousById.get(String(t.id || ""))?.creatorId || req.kristineActor.id) : (t.creatorId || "admin")).slice(0, 100),
           creatorName: String(req.kristineActor ? (previousById.get(String(t.id || ""))?.creatorName || req.kristineActor.name) : (t.creatorName || "Chef / Büro")).trim().slice(0, 140),
