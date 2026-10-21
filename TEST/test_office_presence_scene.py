@@ -1,142 +1,175 @@
+"""Physical-output-free regression tests for the GANTNER -> HCU Stiegenhaus scene."""
 import importlib.util
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "windows-access-hotfix" / "office_presence_scene.py"
-spec = importlib.util.spec_from_file_location("office_presence_scene", SCRIPT)
+FILE = Path(__file__).resolve().parents[1] / "tools" / "windows-access-hotfix" / "office_presence_scene.py"
+spec = importlib.util.spec_from_file_location("office_presence_scene", FILE)
 scene = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(scene)
 
-DEV_A = "3014F711A0000BA0C9A5EE53"
-DEV_B = "3014F711A00001D3C99C8664"
+GROUP_ID = "e14bc1df-2aae-4ba1-9da4-5aa015d4ed12"
+ACTOR_ID = "3014F711A0000BA0C9A5EE53"  # synthetic matching actuator label only, never connected by tests
 
+def cfg():
+    return {
+        "enabled": True,
+        "poll_seconds": 8,
+        "away_grace_seconds": 120,
+        "hcu_config": "dummy-not-read-in-test",
+        "stiegenhaus": {
+            "group_id": GROUP_ID,
+            "expected_label": "Stiegenhaus",
+            "expected_actuator_id": ACTOR_ID,
+            "expected_channel_index": 1,
+            "expected_actuator_label": "licht gang",
+        },
+    }
 
-class SceneTests(unittest.TestCase):
-    def config(self):
-        return {
-            "enabled": True, "poll_seconds": 8, "away_grace_seconds": 120,
-            "hcu_config": "unused",
-            "actors": {
-                "stiegenhaus": {"device_id": DEV_A, "channel_index": 1, "expected_label": "Stiegenhaus"},
-                "little_greene": {"device_id": DEV_B, "channel_index": 1, "expected_label": "Little Greene"}
-            },
-            "sonos": {"ip": "192.168.10.111"}
-        }
+def hcu_state(*, group_type="EXTENDED_LINKED_SWITCHING", label="Stiegenhaus",
+              on=False, actuator=True, actor_label="licht gang"):
+    group = {
+        "label": label,
+        "type": group_type,
+        "metaGroupId": None,
+        "unreach": False,
+        "configPending": False,
+        "on": on,
+        "channels": ([{"deviceId": ACTOR_ID, "channelIndex": 1}] if actuator else []),
+    }
+    device = {
+        "label": actor_label,
+        "functionalChannels": {"1": {"functionalChannelType": "SWITCH_MEASURING_CHANNEL"}},
+    }
+    return {"groups": {GROUP_ID: group}, "devices": {ACTOR_ID: device}}
 
-    def test_or_rule_and_departure_grace(self):
-        people = {"alex": False, "bettina": True, "dunja": False}
-        state, action = scene.next_scene_state({}, people, 100, 120)
-        self.assertEqual(action, "on")
-        self.assertTrue(state["active"])
-        state, action = scene.next_scene_state(state, {"alex": False, "bettina": False, "dunja": False}, 200, 120)
+class FakeHcu:
+    def __init__(self, state=None):
+        self.state = state if state is not None else hcu_state()
+        self.calls = []
+
+    def hcu_get_system_state(self, _settings):
+        return self.state
+
+    def hcu_system_request(self, _settings, path, body, timeout):
+        self.calls.append((path, body))
+        return {"body": {"code": 200}}
+
+class Tests(unittest.TestCase):
+    def test_or_presence_all_three(self):
+        for person in scene.PEOPLE:
+            with self.subTest(person=person):
+                people = {p: p == person for p in scene.PEOPLE}
+                _, transition = scene.next_scene_state({}, people, 100)
+                self.assertEqual(transition, "on")
+
+    def test_switch_off_two_minutes_after_last_person_leaves(self):
+        first, transition = scene.next_scene_state({}, {"alex": True, "bettina": False, "dunja": False}, 0)
+        self.assertEqual(transition, "on")
+        absent = {p: False for p in scene.PEOPLE}
+        grace, transition = scene.next_scene_state(first, absent, 10)
+        self.assertIsNone(transition)
+        still_grace, transition = scene.next_scene_state(grace, absent, 129)
+        self.assertIsNone(transition)
+        off, transition = scene.next_scene_state(still_grace, absent, 131)
+        self.assertEqual(transition, "off")
+        self.assertFalse(off["active"])
+
+    def test_second_employee_prevents_switch_off(self):
+        state, action = scene.next_scene_state({"active": True, "away_since": 10}, {"alex": False, "bettina": True, "dunja": False}, 140)
         self.assertIsNone(action)
-        state, action = scene.next_scene_state(state, {"alex": False, "bettina": False, "dunja": False}, 321, 120)
-        self.assertEqual(action, "off")
-        self.assertFalse(state["active"])
+        self.assertTrue(state["active"])
+        self.assertIsNone(state["away_since"])
 
-    def test_unknown_is_not_absent(self):
+    def test_unavailable_presence_does_not_mean_absence(self):
         with self.assertRaises(ValueError):
             scene.people_present({"alex": False, "bettina": None, "dunja": False})
         with self.assertRaises(ValueError):
-            scene.people_present({"alex": False, "bettina": False})
-
-    def test_second_employee_prevents_switching_off(self):
-        state, action = scene.next_scene_state({"active": True, "away_since": 100},
-                                                 {"alex": False, "bettina": True, "dunja": False}, 230, 120)
-        self.assertIsNone(action)
-        self.assertIsNone(state["away_since"])
-
-    def test_no_repeated_switch_when_presence_unchanged(self):
-        initial, action = scene.next_scene_state({}, {"alex": True, "bettina": False, "dunja": False}, 123, 120)
-        updated, again = scene.next_scene_state(initial, {"alex": True, "bettina": False, "dunja": False}, 131, 120)
-        self.assertEqual(action, "on")
-        self.assertIsNone(again)
-        self.assertEqual(updated["changed_at"], 123)
-
-    def test_dry_run_never_calls_output(self):
-        called = []
-        config = {"away_grace_seconds": 120}
-        result = scene.tick(config, {}, now=500, dry_run=True,
-                            presence_reader=lambda _: {"alex": True, "bettina": False, "dunja": False},
-                            scene_runner=lambda *_: called.append("called"))
-        self.assertEqual(result[1], "on")
-        self.assertEqual(called, [])
-
-    def test_disabled_fails_closed(self):
+            scene.people_present({"alex": False, "dunja": False})
         with self.assertRaises(ValueError):
-            scene.validate_config({"enabled": False})
+            scene.people_present(None)
 
-    def test_misidentified_actor_is_rejected(self):
-        cfg = self.config()
-        class Fake:
-            @staticmethod
-            def hcu_get_system_state(_):
-                return {"devices": {DEV_A: {
-                    "label": "Garagentor",
-                    "functionalChannels": {"1": {"functionalChannelType": "SWITCH_CHANNEL"}}
-                }}}
+    def test_dry_run_reads_gantner_without_switching_group(self):
+        commands = []
+        state, transition, people = scene.tick(
+            cfg(), {}, now=100,
+            dry_run=True,
+            presence_reader=lambda _: {"alex": False, "bettina": False, "dunja": True},
+            group_setter=lambda *_: commands.append("group_called"))
+        self.assertEqual(transition, "on")
+        self.assertEqual(commands, [])
+
+    def test_disabled_config_does_not_actuate(self):
+        invalid = cfg()
+        invalid["enabled"] = False
         with self.assertRaises(ValueError):
-            scene.verify_hcu_actors({}, cfg, Fake())
-
-    def test_hcu_uses_persistent_switch_not_gate_pulse(self):
-        captured = {}
-        class Fake:
-            @staticmethod
-            def hcu_system_request(conf, path, body, timeout):
-                captured.update(path=path, body=body)
-                return {"body": {"code": 200}}
-        scene.set_hcu_switch({}, {"device_id": DEV_A,
-                                 "channel_index": 1, "expected_label": "stiegenhaus"},
-                             False, Fake())
-        self.assertEqual(captured["path"], "/hmip/device/control/setSwitchState")
-        self.assertIs(captured["body"]["on"], False)
-
-    def test_retries_state_after_failed_switch(self):
-        cfg = self.config()
-        actions = []
-        def failing(*_):
-            actions.append("on")
-            raise RuntimeError("hardware offline")
-        with self.assertRaises(RuntimeError):
-            scene.tick(cfg, {}, now=10, dry_run=False,
+            scene.tick(invalid, {}, now=100, dry_run=False,
                        presence_reader=lambda _: {"alex": True, "bettina": False, "dunja": False},
-                       scene_runner=failing)
-        self.assertEqual(actions, ["on"])
+                       group_setter=lambda *_: self.fail("Must not actuate"))
 
-    def test_actor_validation_before_switching_and_existing_music_kept(self):
-        cfg = self.config()
-        calls = []
-        class FakeHcu:
-            @staticmethod
-            def hcu_get_system_state(_):
-                return {"devices": {
-                    DEV_A: {"label": "Stiegenhaus", "functionalChannels": {"1": {"functionalChannelType": "SWITCH_CHANNEL"}}},
-                    DEV_B: {"label": "Little Greene", "functionalChannels": {"1": {"functionalChannelType": "SWITCH_MEASURING_CHANNEL"}}}
-                }}
-            @staticmethod
-            def hcu_system_request(_, path, body, timeout):
-                calls.append((path, body["deviceId"], body["on"]))
-                return {"body": {"code": 200}}
+    def test_exact_group_not_meta_or_access_control(self):
+        for group_type in ("ACCESS_CONTROL", "META", "SWITCHING"):
+            with self.subTest(group_type=group_type):
+                hcu = FakeHcu(hcu_state(group_type=group_type))
+                with self.assertRaises(ValueError):
+                    scene.verify_stiegenhaus(cfg(), {}, hcu)
+                self.assertEqual(hcu.calls, [])
+
+    def test_wrong_member_or_name_prevents_control(self):
+        for fake in (hcu_state(actuator=False), hcu_state(actor_label="Garage")):
+            hcu = FakeHcu(fake)
+            with self.assertRaises(ValueError):
+                scene.verify_stiegenhaus(cfg(), {}, hcu)
+            self.assertEqual(hcu.calls, [])
+
+    def test_one_group_command_not_three_device_commands(self):
+        hcu = FakeHcu(hcu_state(on=False))
         with patch.object(scene, "load_json", return_value={}):
-            with patch.object(scene, "sonos_command", side_effect=AssertionError("music already playing")):
-                state = scene.apply_scene(cfg, True, {}, hcu=FakeHcu(), sonos=lambda _: "PLAYING")
-        self.assertEqual(len(calls), 2)
-        self.assertTrue(all("setSwitchState" in row[0] and row[2] for row in calls))
-        self.assertIsNone(state.get("sonos_started_by_scene"))
+            command_sent = scene.set_stiegenhaus(cfg(), True, module=hcu)
+        self.assertTrue(command_sent)
+        self.assertEqual(hcu.calls, [(
+            "/hmip/group/switching/setState",
+            {"groupId": GROUP_ID, "on": True}
+        )])
 
-    def test_door_not_affected_even_if_accidentally_configured(self):
-        cfg = self.config()
-        class Fake:
-            @staticmethod
-            def hcu_get_system_state(_):
-                return {"devices": {
-                    DEV_A: {"label": "Stiegenhaus Garagentor", "functionalChannels": {"1": {"functionalChannelType": "SWITCH_CHANNEL"}}},
-                    DEV_B: {"label": "Little Greene", "functionalChannels": {"1": {"functionalChannelType": "SWITCH_CHANNEL"}}}
-                }}
-        with self.assertRaises(ValueError):
-            scene.verify_hcu_actors({}, cfg, Fake())
+    def test_group_already_on_needs_no_second_command(self):
+        hcu = FakeHcu(hcu_state(on=True))
+        with patch.object(scene, "load_json", return_value={}):
+            changed = scene.set_stiegenhaus(cfg(), True, module=hcu)
+        self.assertFalse(changed)
+        self.assertEqual(hcu.calls, [])
 
+    def test_off_uses_same_group_and_no_door_control(self):
+        hcu = FakeHcu(hcu_state(on=True))
+        with patch.object(scene, "load_json", return_value={}):
+            changed = scene.set_stiegenhaus(cfg(), False, module=hcu)
+        self.assertTrue(changed)
+        self.assertEqual(hcu.calls, [(
+            "/hmip/group/switching/setState",
+            {"groupId": GROUP_ID, "on": False}
+        )])
+
+    def test_failure_prevents_confirmation(self):
+        calls = []
+        def failing(*_):
+            calls.append("attempted")
+            raise RuntimeError("HCU offline")
+        original = {}
+        with self.assertRaises(RuntimeError):
+            scene.tick(cfg(), original, now=200, dry_run=False,
+                       presence_reader=lambda _: {"alex": True, "bettina": False, "dunja": False},
+                       group_setter=failing)
+        self.assertEqual(calls, ["attempted"])
+        self.assertEqual(original, {})
+
+    def test_only_one_transition_while_present(self):
+        people = {"alex": True, "bettina": False, "dunja": False}
+        a, first = scene.next_scene_state({}, people, 100)
+        b, second = scene.next_scene_state(a, people, 105)
+        self.assertEqual(first, "on")
+        self.assertIsNone(second)
+        self.assertTrue(b["active"])
 
 if __name__ == "__main__":
     unittest.main()
