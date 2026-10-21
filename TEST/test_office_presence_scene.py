@@ -10,7 +10,7 @@ scene = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(scene)
 
 GROUP_ID = "e14bc1df-2aae-4ba1-9da4-5aa015d4ed12"
-ACTOR_ID = "3014F711A0000BA0C9A5EE53"  # synthetic matching actuator label only, never connected by tests
+ACTOR_ID = "AAAAAAAAAAAAAAAAAAAAAAAA"  # synthetic identifier; no real hardware used
 
 def cfg():
     return {
