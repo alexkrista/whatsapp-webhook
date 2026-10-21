@@ -279,12 +279,16 @@ def main():
     args = parser.parse_args()
     log_path = Path(args.config).with_name("presence_scene.log")
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    # pythonw.exe has no console. Keep the rotating logfile operational even
+    # when sys.stderr is None; never let invisible Windows jobs lose logging.
+    handlers = [RotatingFileHandler(log_path, maxBytes=2_000_000,
+                                    backupCount=4, encoding="utf-8")]
+    if sys.stderr is not None:
+        handlers.insert(0, logging.StreamHandler())
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[logging.StreamHandler(),
-                  RotatingFileHandler(log_path, maxBytes=2_000_000,
-                                      backupCount=4, encoding="utf-8")])
+        handlers=handlers)
     config = load_json(args.config)
     if not isinstance(config, dict):
         raise SystemExit("Konfiguration fehlt; Vorlage erstellen")
