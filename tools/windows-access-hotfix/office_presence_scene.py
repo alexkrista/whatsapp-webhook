@@ -225,6 +225,15 @@ def main():
     if args.watch:
         validate_config(config)  # Fail before any loop/actuator call.
     while True:
+        # Re-read on every poll: changing enabled=false stops real output immediately.
+        current_config = load_json(args.config)
+        if not isinstance(current_config, dict):
+            LOG.error("Konfiguration nicht mehr lesbar; Automatik beendet")
+            break
+        if args.watch and current_config.get("enabled") is not True:
+            LOG.warning("Automatik per Konfiguration deaktiviert; Prozess beendet")
+            break
+        config = current_config
         state = load_json(args.state, {}) or {}
         try:
             updated, transition, present = tick(
