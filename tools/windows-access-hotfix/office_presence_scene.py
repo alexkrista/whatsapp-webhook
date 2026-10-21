@@ -19,6 +19,7 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
 PEOPLE = ("alex", "bettina", "dunja")
@@ -60,6 +61,71 @@ def next_scene_state(state, people, now, away_grace=120):
         result["changed_at"] = now
         return result, ("on" if desired else "off")
     return result, None
+
+
+# All times are office-PC local (Europe/Vienna) wall-clock times.
+# Checking the source less often never weakens the GANTNER door rules.
+def schedule_interval_minutes(moment):
+    if moment.weekday() >= 5:
+        return None
+    minute = moment.hour * 60 + moment.minute
+    if minute < 390 or minute >= 1080:  # 00:00-06:30 / 18:00-24:00
+        return 15
+    if minute < 495:                   # 06:30-08:15
+        return 1
+    if minute < 705:                   # 08:15-11:45
+        return 15
+    if minute < 735:                   # 11:45-12:15
+        return 1
+    return 5                           # 12:15-18:00
+
+
+def is_scheduled_minute(moment):
+    interval = schedule_interval_minutes(moment)
+    if interval is None:
+        return False
+    minute = moment.hour * 60 + moment.minute
+    if minute < 390:
+        start = 0
+    elif minute < 495:
+        start = 390
+    elif minute < 705:
+        start = 495
+    elif minute < 735:
+        start = 705
+    elif minute < 1080:
+        start = 735
+    else:
+        start = 1080
+    return (minute - start) % interval == 0
+
+
+def next_regular_screening(now):
+    """Return next scheduled local datetime STRICTLY later than now."""
+    cursor = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    for _ in range(8 * 24 * 60):
+        if is_scheduled_minute(cursor):
+            return cursor
+        cursor += timedelta(minutes=1)
+    raise RuntimeError("Kein Werktagstermin innerhalb einer Woche gefunden")
+
+
+def next_screening(now, state, away_grace=120):
+    """Preserve 2-minute OFF followup even during a 15-minute screening window.
+
+    Weekend is never polled, including for an expiry after Friday midnight.
+    """
+    regular = next_regular_screening(now)
+    since = state.get("away_since") if isinstance(state, dict) else None
+    people = state.get("last_people") if isinstance(state, dict) else None
+    if state.get("active") and isinstance(since, (int, float)) and isinstance(people, dict):
+        if all(people.get(person) is False for person in PEOPLE):
+            deadline = datetime.fromtimestamp(since + away_grace)
+            if deadline <= now:
+                deadline = now + timedelta(seconds=60)  # bounded error retry
+            if deadline.weekday() < 5 and deadline < regular:
+                return deadline
+    return regular
 
 
 def load_json(file, fallback=None):
@@ -224,8 +290,9 @@ def main():
         raise SystemExit("Konfiguration fehlt; Vorlage erstellen")
     if args.watch:
         validate_config(config)  # Fail before any loop/actuator call.
+    next_due = None
     while True:
-        # Re-read on every poll: changing enabled=false stops real output immediately.
+        # Re-read even while waiting. Disable without restarting door services.
         current_config = load_json(args.config)
         if not isinstance(current_config, dict):
             LOG.error("Konfiguration nicht mehr lesbar; Automatik beendet")
@@ -235,6 +302,15 @@ def main():
             break
         config = current_config
         state = load_json(args.state, {}) or {}
+        if args.watch:
+            current = datetime.now()
+            if next_due is None:
+                # First start: take the current minute when it is a valid slot.
+                next_due = current if is_scheduled_minute(current) else next_screening(
+                    current, state, config.get("away_grace_seconds", 120))
+            if current < next_due:
+                time.sleep(min(30, max(.1, (next_due - current).total_seconds())))
+                continue
         try:
             updated, transition, present = tick(
                 config, state, dry_run=not args.watch
@@ -245,11 +321,15 @@ def main():
                      transition or "keine")
             if args.watch:
                 save_json(args.state, updated)
+                state = updated
         except Exception as error:
             LOG.warning("Sicherheitsstopp; keine Zustandsbestätigung: %s", error)
         if not args.watch:
             break
-        time.sleep(config.get("poll_seconds", 8))
+        next_due = next_screening(datetime.now(), state,
+                                  config.get("away_grace_seconds", 120))
+        LOG.info("Nächste Anwesenheitsprüfung: %s",
+                 next_due.strftime("%a %d.%m. %H:%M:%S"))
 
 
 if __name__ == "__main__":
