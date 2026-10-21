@@ -1,7 +1,12 @@
-"""KRISTINE office presence scene. Separate from GANTNER door control.
+"""KRISTINE Büro-Anwesenheit -> EINE Homematic-IP-Gruppe 'Stiegenhaus'.
 
-OFF by default. Never run with --watch until the HCU actor IDs and Sonos zone
-have been verified and config.enabled explicitly set true.
+Wenn Alex ODER Bettina ODER Dunja anwesend sind, wird ausschließlich
+die bestehende Stiegenhaus-Gruppe geschaltet. Licht/Little Greene/Musik
+laufen wie bisher durch die bereits eingerichtete Homematic-Automatik.
+Dieser Dienst greift niemals in die GANTNER-Türsteuerung ein.
+
+Sicherheit: Standardmäßig disabled, exakte Gruppen- und Aktorprüfung vor
+jedem Schalten, keine Umschaltung bei unvollständiger Anwesenheit.
 """
 from __future__ import annotations
 
@@ -13,30 +18,30 @@ import re
 import sys
 import time
 import urllib.request
-import xml.etree.ElementTree as ET
-from datetime import datetime
 from pathlib import Path
 
 PEOPLE = ("alex", "bettina", "dunja")
-LOG = logging.getLogger("kristine.presence_scene")
+LOG = logging.getLogger("kristine.stiegenhaus")
 HCU_SCRIPT_DIR = Path(r"C:\Kristine\HomematicNFC")
 DEFAULT_CONFIG = Path(r"C:\Kristine\PresenceScenes\config.json")
 DEFAULT_STATE = Path(r"C:\Kristine\PresenceScenes\state.json")
+UUID_PATTERN = re.compile(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", re.I)
+DEVICE_PATTERN = re.compile(r"[a-f0-9]{24}", re.I)
 
 
 def people_present(status):
-    """Only explicit boolean presence readings count. Missing = UNKNOWN, not away."""
+    """Missing or non-boolean presence is unknown, not 'away'."""
     if not isinstance(status, dict) or any(type(status.get(name)) is not bool for name in PEOPLE):
-        raise ValueError("GANTNER-Anwesenheit unvollständig; keine Schaltung.")
+        raise ValueError("GANTNER-Anwesenheit unvollständig; keine Schaltung")
     return {name: status[name] for name in PEOPLE}
 
 
 def next_scene_state(state, people, now, away_grace=120):
-    """Pure decision; no device calls. Returns updated state and optional transition."""
-    if not all(type(people.get(person)) is bool for person in PEOPLE):
-        raise ValueError("Missing presence")
+    """Calculate a desired transition; this function never switches devices."""
+    if not isinstance(people, dict) or any(type(people.get(name)) is not bool for name in PEOPLE):
+        raise ValueError("Unvollständige Anwesenheit")
     if not isinstance(now, (int, float)) or away_grace < 0:
-        raise ValueError("Invalid timing")
+        raise ValueError("Ungültige Zeitvorgabe")
     result = dict(state)
     was_active = bool(result.get("active", False))
     if any(people.values()):
@@ -44,7 +49,7 @@ def next_scene_state(state, people, now, away_grace=120):
         desired = True
     else:
         since = result.get("away_since")
-        if since is None or since > now:
+        if not isinstance(since, (int, float)) or since > now:
             since = now
         result["away_since"] = since
         desired = False if now - since >= away_grace else was_active
@@ -56,67 +61,58 @@ def next_scene_state(state, people, now, away_grace=120):
     return result, None
 
 
-def load_json(path, fallback=None):
-    path = Path(path)
+def load_json(file, fallback=None):
+    path = Path(file)
     if not path.is_file():
         return fallback
-    with path.open(encoding="utf-8") as file:
-        return json.load(file)
+    with path.open(encoding="utf-8") as stream:
+        return json.load(stream)
 
 
-def save_json(path, data):
-    path = Path(path)
+def save_json(file, value):
+    path = Path(file)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(path.name + ".tmp")
-    with temp.open("w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2, ensure_ascii=False)
-        file.write("\n")
+    with temp.open("w", encoding="utf-8") as stream:
+        json.dump(value, stream, ensure_ascii=False, indent=2)
+        stream.write("\n")
     os.replace(temp, path)
 
 
 def local_gantner_status(config):
-    """Reads local GANTNER status; never writes to the door controller."""
-    credentials = load_json(config["access_config"])
-    if not isinstance(credentials, dict) or not credentials.get("admin_token"):
-        raise ValueError("GANTNER-Konfiguration nicht verfügbar")
-    port = int(credentials.get("http_port", 8788))
+    """Read ONLY: local GANTNER service status. Never write door state."""
+    settings = load_json(config["access_config"])
+    if not isinstance(settings, dict) or not settings.get("admin_token"):
+        raise ValueError("GANTNER-Zugang nicht eingerichtet")
+    port = int(settings.get("http_port", 8788))
     if not 1 <= port <= 65535:
-        raise ValueError("Invalid local port")
-    # localhost only; no remote token leakage and no config credentials in logs.
-    url = "http://127.0.0.1:%d/api/status/%s" % (
-        port, credentials["admin_token"]
+        raise ValueError("Ungültiger lokaler GANTNER-Port")
+    # Credentials never enter logs or remote GitHub.
+    endpoint = "http://127.0.0.1:%d/api/status/%s" % (
+        port, settings["admin_token"]
     )
-    with urllib.request.urlopen(url, timeout=5) as response:
+    with urllib.request.urlopen(endpoint, timeout=5) as response:
         return json.load(response)
 
 
-def validate_actor(actor, name):
-    device_id = str(actor.get("device_id", "")).strip()
-    channel = actor.get("channel_index")
-    label = str(actor.get("expected_label", "")).strip()
-    if not re.fullmatch(r"[A-Fa-f0-9]{24}", device_id):
-        raise ValueError(name + ": HCU-Geräte-ID fehlt oder ist ungültig")
-    if type(channel) is not int or channel < 1 or channel > 50:
-        raise ValueError(name + ": schaltbarer HCU-Kanal fehlt")
-    if len(label) < 3:
-        raise ValueError(name + ": eindeutiger erwarteter Gerätename fehlt")
-    return device_id, channel, label
-
-
 def validate_config(config):
-    if config.get("enabled") is not True:
-        raise ValueError("Automatik ist deaktiviert (sicherer Ausgangszustand).")
-    actors = config.get("actors") or {}
-    for name in ("stiegenhaus", "little_greene"):
-        validate_actor(actors.get(name) or {}, name)
-    sonos_ip = str((config.get("sonos") or {}).get("ip", "")).strip()
-    pieces = sonos_ip.split(".")
-    if len(pieces) != 4 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in pieces):
-        raise ValueError("Sonos-IP fehlt; keine Anlage wird geraten.")
-    poll = config.get("poll_seconds", 8)
-    grace = config.get("away_grace_seconds", 120)
-    if not 5 <= poll <= 120 or not 30 <= grace <= 3600:
-        raise ValueError("Ungültige Zeitgrenzen")
+    if not isinstance(config, dict) or config.get("enabled") is not True:
+        raise ValueError("Stiegenhaus-Automatik ist deaktiviert")
+    group = config.get("stiegenhaus") or {}
+    group_id = str(group.get("group_id", "")).strip()
+    group_label = str(group.get("expected_label", "")).strip()
+    actuator_id = str(group.get("expected_actuator_id", "")).strip()
+    actuator_label = str(group.get("expected_actuator_label", "")).strip()
+    if not UUID_PATTERN.fullmatch(group_id):
+        raise ValueError("Eindeutige Stiegenhaus-Gruppen-ID fehlt")
+    if group_label.casefold() != "stiegenhaus":
+        raise ValueError("Stiegenhaus-Gruppenbezeichnung stimmt nicht")
+    if not DEVICE_PATTERN.fullmatch(actuator_id) or not actuator_label:
+        raise ValueError("Zu Stiegenhaus gehörender Schaltaktor nicht bestätigt")
+    if not 5 <= config.get("poll_seconds", 8) <= 120:
+        raise ValueError("Abfrageintervall ungültig")
+    if not 30 <= config.get("away_grace_seconds", 120) <= 3600:
+        raise ValueError("Nachlaufzeit ungültig")
     return True
 
 
@@ -127,143 +123,114 @@ def hcu_module():
     return hcu_nfc_gate
 
 
-def verify_hcu_actors(hcu_config, config, module=None):
-    """Read-only fail-closed verification of every channel prior to changing state."""
+def verify_stiegenhaus(config, hcu_config, module=None):
+    """Read-only verification of the exact user-created switching group."""
+    validate_config(config)
     module = module or hcu_module()
-    devices = module.hcu_get_system_state(hcu_config).get("devices", {})
-    results = []
-    for name in ("stiegenhaus", "little_greene"):
-        device_id, channel, expected = validate_actor(config["actors"][name], name)
-        device = devices.get(device_id)
-        if not isinstance(device, dict):
-            raise ValueError(name + ": Gerät nicht an dieser HCU gefunden")
-        label = str(device.get("label", ""))
-        if expected.casefold() not in label.casefold():
-            raise ValueError(name + ": Gerätelabel stimmt nicht überein")
-        if re.search(r"tor|garage|tür|tuer|door|latch|schloss", label, re.I):
-            raise ValueError(name + ": Tür-/Torgerät darf nicht als Lichtaktor dienen")
-        channels = device.get("functionalChannels") or {}
-        info = channels.get(str(channel)) or channels.get(channel)
-        if not isinstance(info, dict) or "SWITCH" not in str(info.get("functionalChannelType", "")).upper():
-            raise ValueError(name + ": Kanal ist kein Schaltkanal")
-        results.append((device_id, channel, label))
-    return results
+    state = module.hcu_get_system_state(hcu_config)
+    groups = state.get("groups") or {}
+    devices = state.get("devices") or {}
+    spec = config["stiegenhaus"]
+    group = groups.get(spec["group_id"])
+    if not isinstance(group, dict):
+        raise ValueError("Konfigurierte Stiegenhaus-Gruppe nicht an HCU gefunden")
+    if str(group.get("label", "")).strip().casefold() != "stiegenhaus":
+        raise ValueError("Gruppenbezeichnung hat sich geändert")
+    if group.get("type") != "EXTENDED_LINKED_SWITCHING":
+        raise ValueError("Gruppe ist kein freigegebener Stiegenhaus-Schalter")
+    # Guard against the OTHER Stiegenhaus groups (ACCESS_CONTROL, META, SWITCHING).
+    if group.get("metaGroupId"):
+        raise ValueError("Unerwartete Untergruppe – schalten verweigert")
+    if group.get("unreach") is True or group.get("configPending") is True:
+        raise RuntimeError("Stiegenhaus-Gruppe derzeit nicht bereit")
+    member = {
+        "deviceId": spec["expected_actuator_id"],
+        "channelIndex": int(spec.get("expected_channel_index", 1)),
+    }
+    if member not in (group.get("channels") or []):
+        raise ValueError("Bestätigter Schaltaktor fehlt in der Gruppe")
+    device = devices.get(member["deviceId"])
+    if not isinstance(device, dict):
+        raise ValueError("Verknüpfter Lichtaktor nicht gefunden")
+    label = str(device.get("label", "")).strip()
+    if label.casefold() != str(spec["expected_actuator_label"]).strip().casefold():
+        raise ValueError("Aktorname stimmt nicht mit geprüfter Zuordnung")
+    if re.search(r"tor|garage|tür|tuer|door|schloss|latch", label, flags=re.I):
+        raise ValueError("Tür- oder Toraktor ist kein erlaubter Lichtaktor")
+    channel = (device.get("functionalChannels") or {}).get(str(member["channelIndex"]), {})
+    if "SWITCH" not in str(channel.get("functionalChannelType", "")).upper():
+        raise ValueError("Verknüpfter Kanal ist kein Schaltkanal")
+    if type(group.get("on")) is not bool:
+        raise ValueError("Stiegenhaus-Schaltzustand ist unbekannt")
+    return group
 
 
-def set_hcu_switch(hcu_config, actor, on, module=None):
+def set_stiegenhaus(config, enabled, *, module=None):
+    """Exactly ONE group switch command. No direct Little Greene or Sonos calls."""
     module = module or hcu_module()
-    device_id, channel, _ = validate_actor(actor, "aktor")
-    msg = module.hcu_system_request(
-        hcu_config,
-        "/hmip/device/control/setSwitchState",
-        {"deviceId": device_id, "channelIndex": channel, "on": bool(on)},
-        timeout=12,
-    )
-    if (msg.get("body") or {}).get("code") != 200:
-        raise RuntimeError("HCU Schaltbefehl nicht bestätigt")
-
-
-def sonos_command(ip, command, timeout=4):
-    """Local Sonos AVTransport, specific chosen IP only, no cloud permissions."""
-    if command not in ("GetTransportInfo", "Play", "Pause"):
-        raise ValueError("Invalid Sonos command")
-    args = "<InstanceID>0</InstanceID>"
-    if command == "Play":
-        args += "<Speed>1</Speed>"
-    body = (
-        '<?xml version="1.0" encoding="utf-8"?>'
-        '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
-        '<s:Body><u:%s xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">'
-        '%s</u:%s></s:Body></s:Envelope>' % (command, args, command)
-    ).encode()
-    request = urllib.request.Request(
-        "http://%s:1400/MediaRenderer/AVTransport/Control" % ip,
-        body,
-        method="POST",
-        headers={
-            "Content-Type": 'text/xml; charset="utf-8"',
-            "SOAPACTION": '"urn:schemas-upnp-org:service:AVTransport:1#%s"' % command,
-        },
-    )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read()
-
-
-def sonos_state(ip):
-    root = ET.fromstring(sonos_command(ip, "GetTransportInfo"))
-    for el in root.iter():
-        if el.tag.split("}")[-1] == "CurrentTransportState":
-            return el.text or ""
-    raise RuntimeError("Sonos status not received")
-
-
-def apply_scene(config, active, state, *, hcu=None, sonos=None):
-    """Only invoked on actual state transitions; never continuously force devices."""
-    hcu = hcu or hcu_module()
     hcu_config = load_json(config["hcu_config"])
     if not isinstance(hcu_config, dict):
         raise ValueError("HCU-Konfiguration fehlt")
-    verify_hcu_actors(hcu_config, config, hcu)
-    seen = set()
-    for name in ("stiegenhaus", "little_greene"):
-        actor = config["actors"][name]
-        key = (actor["device_id"], actor["channel_index"])
-        if key not in seen:
-            set_hcu_switch(hcu_config, actor, active, hcu)
-            seen.add(key)
-    ip = config["sonos"]["ip"]
-    transport = sonos or sonos_state
-    current = transport(ip)
-    if active and current != "PLAYING":
-        sonos_command(ip, "Play")
-        state["sonos_started_by_scene"] = True
-    elif not active and state.get("sonos_started_by_scene") and current == "PLAYING":
-        sonos_command(ip, "Pause")
-        state["sonos_started_by_scene"] = False
-    return state
+    group = verify_stiegenhaus(config, hcu_config, module)
+    if group["on"] is bool(enabled):
+        LOG.info("Stiegenhaus bereits %s – kein weiterer Befehl",
+                 "EIN" if enabled else "AUS")
+        return False
+    msg = module.hcu_system_request(
+        hcu_config,
+        "/hmip/group/switching/setState",
+        {"groupId": config["stiegenhaus"]["group_id"], "on": bool(enabled)},
+        timeout=12,
+    )
+    if (msg.get("body") or {}).get("code") != 200:
+        raise RuntimeError("HCU hat den Stiegenhaus-Gruppenbefehl nicht bestätigt")
+    return True
 
 
-def tick(config, state, *, now=None, dry_run=True, presence_reader=local_gantner_status,
-         scene_runner=apply_scene):
+def tick(config, state, *, now=None, dry_run=True,
+         presence_reader=local_gantner_status, group_setter=set_stiegenhaus):
     now = time.time() if now is None else now
-    people = people_present(presence_reader(config))
-    new_state, transition = next_scene_state(
-        state, people, now, config.get("away_grace_seconds", 120))
+    present = people_present(presence_reader(config))
+    updated, transition = next_scene_state(
+        state, present, now, config.get("away_grace_seconds", 120)
+    )
     if transition and not dry_run:
         validate_config(config)
-        # Keep previous active state until all commands have succeeded.
-        scene_runner(config, transition == "on", new_state)
-    return new_state, transition, people
+        # State is returned (and persisted by main) ONLY after switch success.
+        group_setter(config, transition == "on")
+    return updated, transition, present
 
 
 def main():
-    parser = argparse.ArgumentParser(description="KRISTINE Büro-Anwesenheitsszene")
+    parser = argparse.ArgumentParser(description="KRISTINE Stiegenhaus Anwesenheitsautomatik")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
-    parser.add_argument("--watch", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--watch", action="store_true",
+                        help="Echte Automatik mit Schaltbefehlen")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Einmaliger Lese-/Simulationstest ohne Schaltbefehle")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     config = load_json(args.config)
     if not isinstance(config, dict):
-        raise SystemExit("Bitte zuerst config.json aus der Vorlage erstellen.")
-    if args.watch and args.dry_run:
-        raise SystemExit("--watch und --dry-run getrennt verwenden.")
+        raise SystemExit("Konfiguration fehlt; Vorlage erstellen")
     if args.watch:
-        validate_config(config)
+        validate_config(config)  # Fail before any loop/actuator call.
     while True:
         state = load_json(args.state, {}) or {}
         try:
-            new_state, transition, people = tick(
-                config, state, dry_run=(not args.watch))
-            LOG.info("Anwesenheit %s; Aktion %s; %s",
-                     {k: bool(v) for k, v in people.items()},
-                     transition or "keine", "aktiv" if args.watch else "TEST, nichts geschaltet")
+            updated, transition, present = tick(
+                config, state, dry_run=not args.watch
+            )
+            LOG.info("%s; Anwesenheit=%s; Aktion=%s",
+                     "AKTIV" if args.watch else "TEST OHNE SCHALTUNG",
+                     {k: bool(v) for k, v in present.items()},
+                     transition or "keine")
             if args.watch:
-                save_json(args.state, new_state)
+                save_json(args.state, updated)
         except Exception as error:
-            LOG.warning("Keine Schaltung; Quelle/Aktor prüfen: %s", type(error).__name__)
+            LOG.warning("Sicherheitsstopp; keine Zustandsbestätigung: %s", error)
         if not args.watch:
             break
         time.sleep(config.get("poll_seconds", 8))
