@@ -1,0 +1,25 @@
+name: Office presence scene safety
+on:
+  pull_request:
+    paths:
+      - 'tools/windows-access-hotfix/office_presence_scene.py'
+      - 'tools/windows-access-hotfix/office_presence_scene.example.json'
+      - 'TEST/test_office_presence_scene.py'
+      - '.github/workflows/office-presence-scene.yml'
+  workflow_dispatch:
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax and config
+        run: |
+          python -m py_compile tools/windows-access-hotfix/office_presence_scene.py
+          python -m json.tool tools/windows-access-hotfix/office_presence_scene.example.json > /dev/null
+      - name: No-hardware regression tests
+        run: python -m unittest -v TEST.test_office_presence_scene
