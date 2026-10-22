@@ -1928,7 +1928,19 @@ def install(ns):
             path = Path(str(invoice.get("pdf_path") or ""))
             if not path.is_file():
                 raise ValueError("Rechnungs-PDF fehlt.")
-            return send_file(path, mimetype="application/pdf", as_attachment=False, download_name=public_pdf_name(invoice))
+            # KRISTINE invoices retain their immutable issued PDF in the archive,
+            # while the customer-facing download uses the current layout.
+            # Never re-render imported WinWorker originals or change financial data.
+            if str(invoice.get("source") or "").upper() != "WW" and str(invoice.get("status") or "").lower() == "issued":
+                invoice = enrich_correction(store.invoice(invoice_id, live=True))
+                display_dir = output_root / "_Aktuelle_Darstellung"
+                display_dir.mkdir(parents=True, exist_ok=True)
+                display_path = display_dir / f"Rechnung_{invoice_id}_aktuell.pdf"
+                render_invoice_pdf(invoice, store.settings(), display_path)
+                path = display_path
+            response = send_file(path, mimetype="application/pdf", as_attachment=False, download_name=public_pdf_name(invoice), conditional=False)
+            response.headers["Cache-Control"] = "no-store"
+            return response
         except Exception as exc:
             return _json_error(jsonify, exc, 404)
 
