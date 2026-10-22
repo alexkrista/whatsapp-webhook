@@ -221,7 +221,6 @@ def render_invoice_pdf(invoice, settings, destination):
     document_title = _kind_title(invoice)
     project_number = run.get("project_number") or ""
     worker = invoice.get("worker") or settings.get("default_worker") or ""
-    carry_amount = _d(invoice.get("cumulative_gross"))
 
     def ww_page(canvas, doc):
         canvas.saveState()
@@ -284,7 +283,7 @@ def render_invoice_pdf(invoice, settings, destination):
                 self.drawString(left, height - 10 * mm, f"Seite {self._pageNumber}/{page_count}")
                 if self._pageNumber > 1:
                     self.setFont(bold_font, 9.2)
-                    self.drawString(left, height - 25 * mm, f"Übertrag Rechnungssumme: EUR {money(carry_amount)}")
+                    self.drawString(left, height - 25 * mm, "Fortsetzung der Rechnungspositionen")
                     self.setStrokeColor(colors.HexColor("#9aa397"))
                     self.setLineWidth(0.5)
                     self.line(left, height - 28 * mm, width - right, height - 28 * mm)
@@ -429,12 +428,15 @@ def render_invoice_pdf(invoice, settings, destination):
             labor_net += net
         visible_position += 1
         report_position += 1
+        # Bei Regieberichten wird der Materialrabatt einmal gesammelt ausgewiesen.
+        # Einzelpositionen zeigen davor ihren ungekürzten Gesamtpreis.
+        grouped_material_discount = bool(disc and report_number and in_material)
         line_rows.append([
             f"{report_number}.{report_position}" if report_number else str(visible_position),
             money(quantity), str(line.get("unit") or ""), Paragraph(desc, base),
-            money(ep), "" if disc else money(net),
+            money(ep), money(raw_total) if grouped_material_discount else ("" if disc else money(net)),
         ])
-        if disc:
+        if disc and not grouped_material_discount:
             # Show per-unit discount next to percentage; display discounted EP and total.
             unit_discount = (raw_total - net) / quantity if quantity else Decimal("0")
             discounted_unit = net / quantity if quantity else Decimal("0")
