@@ -32,22 +32,13 @@ def _project_number(value):
 
 def _selected_jobs(payload):
     payload = payload if isinstance(payload, dict) else {}
-    closed_members = {
-        str(job_id)
-        for collection in payload.get("collections") or []
-        if str((collection or {}).get("status") or "") == "Geschlossen"
-        for job_id in ((collection or {}).get("collectionMemberJobIds") or [])
-    }
     selected = {}
     for raw in payload.get("jobs") or []:
         job = raw if isinstance(raw, dict) else {}
         number = _project_number(job.get("jobId"))
-        if (
-            number
-            # Auch ältere/geschlossene Baustellen mit noch nicht abgerechneten Stunden
-            # brauchen einen Rechnungsabgleich. Die SR-Prüfung erfolgt im Tower.
-            and number not in closed_members
-        ):
+        # Monatsliste braucht auch Mitglieder geschlossener Sammlungen.
+        # Die bestehende Offene-Liste filtert diese weiterhin im Browser.
+        if number:
             selected[number] = copy.deepcopy(job)
     return selected
 
@@ -137,6 +128,7 @@ def build_snapshot(ns, *, now=None, sync_invoices=True):
         summary["recordedHoursNet"] = project_hours(
             number, before_date=cutoff_exclusive, project=project
         )
+        summary["recordedMonthHoursNet"] = project_hours(number, before_date=cutoff_exclusive, project=project, from_date=now.replace(day=1).date().isoformat())
         billing["summary"] = summary
         billing_by_project[number] = billing
 
@@ -148,7 +140,8 @@ def build_snapshot(ns, *, now=None, sync_invoices=True):
         ]
 
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
+        "month": now.strftime("%Y-%m"),
         "generatedAt": now.isoformat(timespec="seconds"),
         "hoursThroughDate": through_date,
         "cutoffExclusive": cutoff_exclusive,

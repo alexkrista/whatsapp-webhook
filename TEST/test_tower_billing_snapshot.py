@@ -36,7 +36,7 @@ class TowerBillingSnapshotTests(unittest.TestCase):
                 "collectionMemberJobIds": ["26083"],
             }],
         })
-        self.assertEqual(list(selected), ["26082"])
+        self.assertEqual(list(selected), ["26082", "26083", "26084"])
 
     def test_snapshot_uses_yesterday_hours_and_reports(self):
         calls = {"hours": [], "history": 0, "open": 0}
@@ -52,8 +52,10 @@ class TowerBillingSnapshotTests(unittest.TestCase):
 
         project = {"projectNumber": "26082", "projectIndex": 82}
 
-        def hours(number, before_date=None, project=None):
-            calls["hours"].append((number, before_date, project))
+        def hours(number, before_date=None, project=None, from_date=None):
+            calls["hours"].append((number, before_date, project, from_date))
+            if from_date:
+                return 12.5
             return 477.875
 
         def reports(_project):
@@ -81,7 +83,9 @@ class TowerBillingSnapshotTests(unittest.TestCase):
         self.assertEqual(value["hoursThroughDate"], "2026-09-14")
         self.assertEqual(value["billingByProject"]["26082"]["summary"]["recordedHoursNet"], 477.875)
         self.assertEqual([row["reportNumber"] for row in value["reportsByProject"]["26082"]], ["19"])
-        self.assertEqual(calls["hours"], [("26082", "2026-09-15", project)])
+        self.assertEqual(value["month"], "2026-09")
+        self.assertEqual(value["billingByProject"]["26082"]["summary"]["recordedMonthHoursNet"], 12.5)
+        self.assertEqual(calls["hours"], [("26082", "2026-09-15", project, None), ("26082", "2026-09-15", project, "2026-09-01")])
         self.assertEqual(calls["open"], 1)
         self.assertEqual(calls["history"], 1)
 
