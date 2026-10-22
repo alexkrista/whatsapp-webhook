@@ -552,17 +552,18 @@ def install(ns):
             return None
         return matches[0]
 
-    def project_recorded_hours_net(project_number, before_date=None, project=None):
+    def project_recorded_hours_net(project_number, before_date=None, project=None, from_date=None):
         """Sum WinWorker net hours; optionally stop before an ISO date."""
         project = project or project_by_number(project_number)
         if not project or not callable(ww_hours_source):
             return 0.0
         cutoff = str(before_date or "")[:10]
+        start = str(from_date or "")[:10]
         grouped = {}
         for row in ww_hours_source([int(project.get("projectIndex") or 0)]):
             day = str(row.get("date") or "")[:10]
             person = str(row.get("finkNumber") or row.get("maIndex") or row.get("employeeName") or "").strip()
-            if not day or not person or (cutoff and day >= cutoff):
+            if not day or not person or (cutoff and day >= cutoff) or (start and day < start):
                 continue
             key = (day, person)
             grouped[key] = grouped.get(key, 0.0) + float(row.get("netHours") or 0)

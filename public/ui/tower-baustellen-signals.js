@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="20260915-billing-snapshot-5";
+  const VERSION="20261022-month-worked-1";
   const BRAIN_URL="https://pc-alex02.tail610122.ts.net";
   const token=new URLSearchParams(location.search).get("token")||"";
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
@@ -51,6 +51,7 @@
   function buildLiveMap(b){
     liveByJob=new Map();
     completedLiveByJob=new Map();
+    monthLiveByJob=new Map();
     const events=Array.isArray(b?.timeEvents)?b.timeEvents:[];
     const archive=Array.isArray(b?.projectTimeArchive)?b.projectTimeArchive:[];
     const states=b?.states||{};
@@ -106,6 +107,7 @@
       const [jobId,,date]=key.split('|');
       const net=Math.max(0,num(gross)-.25);
       liveByJob.set(jobId,num(liveByJob.get(jobId))+net);
+      if(date.slice(0,7)===currentMonth())monthLiveByJob.set(jobId,num(monthLiveByJob.get(jobId))+net);
       if(!today||date<today)completedLiveByJob.set(jobId,num(completedLiveByJob.get(jobId))+net);
     }
   }
@@ -148,6 +150,37 @@
     return rows.sort((a,b)=>num(b.amountToInvoice)-num(a.amountToInvoice));
   }
 
+
+  function currentMonth(){return new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Vienna',year:'numeric',month:'2-digit'}).format(new Date())}
+  let monthLiveByJob=new Map(),snapshotMonth='';
+  function monthRows(jobs){
+    const B=window.KristaRegieBilling;
+    return jobs.map(job=>{
+      const id=String(job.jobId),billing=billingByJob[id],reports=reportsByJob[id]||[];
+      const monthHours=num(monthLiveByJob.get(id))+(snapshotMonth===currentMonth()?num(billing?.summary?.recordedMonthHoursNet):0);
+      if(monthHours<=.005)return null;
+      const known=billingReady&&!!billing&&snapshotMonth===currentMonth()&&!billing.partial;
+      const issued=B?.issuedInvoices(billing?.invoices)||[];
+      const invoiced=issued.some(i=>['RE','SR'].includes(String(i.kind||'').toUpperCase()));
+      const recorded=num(billing?.summary?.recordedHoursNet),totalHours=Math.max(recorded+num(completedLiveByJob.get(id)),num(calc(job).actualHours));
+      const p=known&&B?.performanceForJob(snapshotJobsByJob[id]||job,{billing,reports,actualHours:totalHours,regieHours:reports.reduce((s,r)=>s+num(r.totalHours),0)});
+      const billed=known?Number(billing.summary?.billedNet):NaN;
+      return {job,monthHours,invoiced,open:p?.complete?p.amountToInvoice:null,billed:Number.isFinite(billed)?billed:null};
+    }).filter(Boolean).sort((a,b)=>Number(a.invoiced)-Number(b.invoiced)||String(a.job.name||a.job.jobId).localeCompare(String(b.job.name||b.job.jobId),'de',{numeric:true}));
+  }
+  function renderMonth(jobs){
+    const main=document.querySelector('body>main');if(!main)return;
+    let host=document.getElementById('towerMonthWorked');if(!host){host=document.createElement('div');host.id='towerMonthWorked';main.insertBefore(host,document.getElementById('towerBillableWrap')||main.firstChild)}
+    const rows=monthRows(jobs),unknownOpen=rows.filter(r=>r.open===null).length,unknownBilled=rows.filter(r=>r.billed===null).length;
+    const amount=v=>v===null?'Daten prüfen':window.KristaRegieBilling.formatMoney(v);
+    const totals='<div class="ts-month-totals"><span>Summe offen <strong>'+amount(rows.reduce((s,r)=>s+num(r.open),0))+'</strong>'+(unknownOpen?' + '+unknownOpen+' prüfen':'')+'</span><span>Summe abgerechnet <strong>'+amount(rows.reduce((s,r)=>s+num(r.billed),0))+'</strong>'+(unknownBilled?' + '+unknownBilled+' prüfen':'')+'</span></div>';
+    host.innerHTML='<button type="button" class="ts-billable"><div><span>Baustellen diesen Monat gearbeitet</span><small>'+esc(currentMonth())+' · '+rows.length+' Baustellen</small></div><strong>'+rows.length+'</strong></button>';
+    let dialog=document.getElementById('towerMonthWorkedDialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='towerMonthWorkedDialog';dialog.className='ts-billable-dialog';document.body.appendChild(dialog)}
+    dialog.innerHTML='<div class="ts-billable-head"><div><h2>Baustellen diesen Monat gearbeitet</h2><small>'+esc(currentMonth())+' · Monatsstunden; Beträge netto, gesamter Baustellenstand inkl. Teilrechnungen.</small><small>'+esc(snapshotNote())+'</small></div><button type="button" data-month-close>Schließen</button></div><div class="ts-billable-list">'+totals+'<p>Rechnung / SR: leicht durchgestrichen · ohne Rechnung / SR: fett. Ungeklärte Beträge sind nicht in den Summen enthalten.</p><div class="ts-month-row head"><span>Baustelle</span><span>Stunden im Monat</span><span>Offen</span><span>Abgerechnet</span></div>'+rows.map(r=>'<a class="ts-month-row" href="'+tokenUrl('/kristine/baustellen')+'#'+encodeURIComponent(r.job.jobId)+'"><span class="'+(r.invoiced?'ts-month-invoiced':'ts-month-open')+'">'+esc(r.job.name||r.job.jobId)+'<small>#'+esc(r.job.jobId)+' · '+(r.invoiced?'Rechnung / SR vorhanden':r.billed===null?'Rechnungsstand prüfen':'keine Rechnung / SR')+'</small></span><span>'+hours(r.monthHours)+'</span><span>'+amount(r.open)+'</span><span>'+amount(r.billed)+'</span></a>').join('')+(rows.length?'':'<p>Noch keine Monatsstunden gefunden.</p>')+'</div>';
+    host.querySelector('button').onclick=()=>dialog.showModal();dialog.querySelector('[data-month-close]').onclick=()=>dialog.close();dialog.onclick=e=>{if(e.target===dialog)dialog.close()};
+    if(!document.getElementById('towerMonthCss')){const s=document.createElement('style');s.id='towerMonthCss';s.textContent='.ts-month-row{display:grid;grid-template-columns:minmax(180px,1fr) repeat(3,minmax(100px,.4fr));gap:12px;padding:12px 4px;border-bottom:1px solid #e5e1d8;color:#202520;text-decoration:none}.ts-month-row small{display:block;font-size:11px;font-weight:400;color:#707670}.ts-month-invoiced{font-weight:400;text-decoration:line-through;text-decoration-color:#a5aaa5;text-decoration-thickness:1px;color:#747b74}.ts-month-open{font-weight:800}.ts-month-totals{display:flex;flex-wrap:wrap;gap:24px;padding:16px;background:#f7f5ef;border-radius:12px}.ts-month-totals strong{display:block;font-size:22px}.ts-month-row.head{font-size:11px;font-weight:700}@media(max-width:760px){.ts-month-row{grid-template-columns:1fr 1fr}.ts-month-row.head{display:none}}';document.head.appendChild(s)}
+  }
+
   function snapshotNote(){
     if(billingPending)return'Berechnung läuft …';
     if(!billingReady)return'Noch kein gespeicherter Abrechnungsstand';
@@ -158,6 +191,7 @@
 
   function applyBillingSnapshot(snapshot){
     billingReady=!!snapshot?.ready;
+    snapshotMonth=String(snapshot?.month||"");
     billingByJob=snapshot?.billingByProject||{};
     reportsByJob=snapshot?.reportsByProject||{};
     snapshotJobsByJob=snapshot?.jobsByProject||{};
@@ -187,6 +221,7 @@
   function renderBillable(jobs){
     const dash=document.querySelector('.dashboard'),main=document.querySelector('body>main');if(!main)return;
     lastJobs=jobs;
+    renderMonth(jobs);
     let wrap=document.getElementById('towerBillableWrap');if(!wrap){wrap=document.createElement('div');wrap.id='towerBillableWrap';wrap.className='ts-billable-wrap';const signals=document.getElementById('towerSignals');if(signals)main.insertBefore(wrap,signals);else if(dash)main.insertBefore(wrap,dash);else main.appendChild(wrap)}
     const B=window.KristaRegieBilling,allRows=billableRows(jobs),rows=allRows.filter(row=>!row.hidden),hiddenRows=allRows.filter(row=>row.hidden),incomplete=rows.filter(row=>!row.complete).length,total=rows.reduce((sum,row)=>sum+num(row.amountToInvoice),0);
     const billingNote=`${snapshotNote()}${billingReady?` · ${rows.length} Baustelle(n)`:''}${incomplete?` · ${incomplete} prüfen`:''}`;
