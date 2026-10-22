@@ -44,8 +44,9 @@ def _selected_jobs(payload):
         number = _project_number(job.get("jobId"))
         if (
             number
+            # Auch ältere/geschlossene Baustellen mit noch nicht abgerechneten Stunden
+            # brauchen einen Rechnungsabgleich. Die SR-Prüfung erfolgt im Tower.
             and number not in closed_members
-            and str(job.get("status") or "") in ACTIVE_BILLING_STATUSES
         ):
             selected[number] = copy.deepcopy(job)
     return selected
