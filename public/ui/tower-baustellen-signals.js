@@ -121,7 +121,7 @@
     const rows=[];
     for(const j of jobs){
       if(closedCollectionMembers.has(String(j?.jobId||'')))continue;
-      if(!['Auftrag','Laufend','Fertig – nicht abgerechnet'].includes(String(j.status||'')))continue;
+      // Status darf Baustellen mit gebuchten, noch ungeprüften Stunden nicht ausblenden.
       const id=String(j.jobId),sourceJob=snapshotJobsByJob[id]||j,billing=billingByJob[id]||{partial:true},reports=reportsByJob[id]||[];
       // Der Brain-Snapshot liefert hier die reinen WinWorker-Stunden. Die
       // Baustellenakte ergänzt dazu die in KRISTINE gebuchten Stunden. Für die
@@ -139,7 +139,11 @@
       const performance=window.KristaRegieBilling.performanceForJob(sourceJob,{billing,reports,actualHours:totalHours,regieHours,dataUpdatedAt:billingSnapshotAt,hoursThroughDate:billingThroughDate});
       const invoices=Array.isArray(billing?.invoices)?billing.invoices:[];
       const hasBusinessData=totalHours>.005||reports.length>0||contract(sourceJob)>.005||invoices.length>0;
-      if(!performance.hasClosingInvoice&&(performance.amountToInvoice>.005||!performance.complete&&hasBusinessData))rows.push({job:j,hidden:!!j.towerBillingHidden,...performance});
+      const hasUnbilledHours=totalHours>.005;
+      if(!performance.hasClosingInvoice&&(performance.amountToInvoice>.005||hasUnbilledHours||!performance.complete&&hasBusinessData)){
+        const needsReview=hasUnbilledHours&&!(performance.amountToInvoice>.005);
+        rows.push({job:j,hidden:!!j.towerBillingHidden,...performance,complete:needsReview?false:performance.complete,amountToInvoice:needsReview?null:performance.amountToInvoice});
+      }
     }
     return rows.sort((a,b)=>num(b.amountToInvoice)-num(a.amountToInvoice));
   }
