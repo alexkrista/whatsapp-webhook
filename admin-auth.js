@@ -68,6 +68,12 @@ function requireAdmin(req, res, options = {}) {
     req.headers["x-krista-user-name"] = actor.name;
     return true;
   }
+  // Employee/user administration, planning and Brain permits require a person.
+  // Legacy KGO tokens and their shared cookies cannot confer these grants.
+  if (requiredPermission(req)) {
+    res.status(403).json({ ok:false, error:"Bitte persönlich anmelden" });
+    return false;
+  }
   const secret = String(options.secret ?? process.env.ADMIN_TOKEN ?? "").trim();
   if (!secret) {
     res.status(503).json({ ok: false, error: "ADMIN_TOKEN fehlt" });
