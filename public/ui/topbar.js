@@ -243,7 +243,7 @@
   function loadTowerSignals() {
     if (window.location.pathname.toLowerCase().includes("kontrollzentrum")) {
       loadScriptOnce("/public/ui/regie-billing-state.js?v=20261007-lieferscheine-1", "data-krista-regie-billing-state");
-      loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20261022-month-worked-1", "data-krista-tower-signals");
+      loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20261023-month-print-1", "data-krista-tower-signals");
     }
   }
 
