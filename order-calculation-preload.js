@@ -312,9 +312,12 @@ function registerRoutes(app) {
     const jobId = safeJobId(req.params.jobId);
     if (!jobId) return res.status(400).json({ ok: false, error: "Invalid jobId" });
     const calculation = await readCalculation(jobId);
+    let regieOnly=false;
+    try{const meta=JSON.parse(await fsp.readFile(path.join(DATA_DIR,jobId,".meta.json"),"utf8"));regieOnly=meta.regieOnly===true}catch(error){if(error.code!=="ENOENT")throw error}
     res.json({
       ok: true,
       jobId,
+      regieOnly,
       hasCalculation: !!calculation,
       subject: calculation?.subject || "",
       scope: calculation ? employeeScope(calculation) : { order: [], regie: [], addOrder: [], addRegie: [] },

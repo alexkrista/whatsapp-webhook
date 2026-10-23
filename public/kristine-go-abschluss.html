@@ -135,7 +135,7 @@ function buildDay(events){
 function setStatus(kind,done,text,bad=false){const cap=kind.charAt(0).toUpperCase()+kind.slice(1),status=document.getElementById("status"+cap),copy=document.getElementById("text"+cap);status.textContent=done?"✓":"!";status.className=`status ${done?"ok":bad?"bad":"open"}`;if(copy)copy.textContent=text}
 function setPhotoChip(id,state,label){const el=document.getElementById(id);el.className=`photo-chip ${state}`;el.querySelector("b").textContent=label}
 
-let employee=null,assignment=null,employeeState=null,day=null,openRegieDraft=null,editableSegments=[];
+let employee=null,assignment=null,employeeState=null,day=null,openRegieDraft=null,editableSegments=[],regieRequiredJobs=[];
 let checks={time:false,photos:false,regie:false};
 
 function updateTimeTotals(){
@@ -198,19 +198,27 @@ async function init(){
   setStatus("time",checks.time,checks.time?`${duration(day.workMinutes)} Arbeit · ${duration(day.pauseMinutes)} Pause`:"noch keine Arbeitszeit");
   checks.photos=false;setStatus("photo",false,"Bitte Ja oder Nein wählen");
   const draftData=await api(`/kristine/api/regie/drafts?employeeId=${encodeURIComponent(employeeId)}&date=${encodeURIComponent(today)}`);openRegieDraft=draftData.drafts?.[0]||null;
+  const regieStatus=await api("/kristine/api/regie/required?"+new URLSearchParams({employeeId,date:today}));
+  regieRequiredJobs=regieStatus.missing||[];
   checks.regie=false;setStatus("regie",false,openRegieDraft?"Regiebericht offen – jetzt fertig machen":"Bitte Ja oder Nein wählen",Boolean(openRegieDraft));
   if(openRegieDraft){const row=document.querySelector('[data-kind="regie"]');row.querySelector('.action-chip').textContent='Jetzt fertig';document.getElementById('openWarning').textContent='Regiebericht noch offen: Bitte jetzt fertig machen und an Alex senden. Erst danach kannst du den Tagesabschluss bestätigen.'}
+  if(regieRequiredJobs.length){
+    setStatus("regie",false,"100 % Regie: Bericht fehlt – "+regieRequiredJobs.map(j=>j.jobName).join(", "),true);
+    document.getElementById("openWarning").textContent="Regiebericht erforderlich: Tätigkeit und Material ergänzen. Erst danach den Tag abschließen.";
+    const no=document.querySelector('[data-choice="regie-no"]');if(no){no.disabled=true;no.title="Bei 100 % Regie ist ein Bericht erforderlich."}
+    const row=document.querySelector('[data-kind="regie"]');if(row)row.querySelector(".action-chip").textContent="Bericht!";
+  }else if((regieStatus.jobs||[]).some(j=>j.required)&&!openRegieDraft){checks.regie=true;setStatus("regie",true,"Regieberichte vorhanden")}
   updateProgress();
   const noteKey=`kg-finish-note:${today}:${employeeId}`,note=document.getElementById("note");note.value=localStorage.getItem(noteKey)||"";note.addEventListener("input",event=>localStorage.setItem(noteKey,event.target.value));
   document.getElementById("loading").classList.add("hidden");document.getElementById("content").classList.remove("hidden");
  }catch(error){document.getElementById("loading").textContent=`Tagesabschluss konnte nicht geladen werden: ${error.message}`}
 }
 
-document.querySelectorAll("[data-kind]").forEach(row=>row.addEventListener("click",()=>{const kind=row.dataset.kind;if(kind==="regie"){location.href=withParams("/public/regie-assistant.html",{jobId:openRegieDraft?.jobId||assignment?.jobId||"",date:today,returnTo:"/public/kristine-go-abschluss.html"});return}location.href=withParams("/public/kristine-go.html",{action:kind,returnTo:"/public/kristine-go-abschluss.html"})}));
+document.querySelectorAll("[data-kind]").forEach(row=>row.addEventListener("click",()=>{const kind=row.dataset.kind;if(kind==="regie"){location.href=withParams("/public/regie-assistant.html",{jobId:regieRequiredJobs[0]?.jobId||openRegieDraft?.jobId||assignment?.jobId||"",date:today,returnTo:"/public/kristine-go-abschluss.html"});return}location.href=withParams("/public/kristine-go.html",{action:kind,returnTo:"/public/kristine-go-abschluss.html"})}));
 
-document.querySelectorAll('[data-choice]').forEach(button=>button.addEventListener('click',()=>{const raw=button.dataset.choice,kind=raw.replace('-no',''),yes=!raw.endsWith('-no');if(kind==='photos'){checks.photos=true;setStatus('photo',true,yes?'Fotos vollständig':'Heute keine Fotos erforderlich')}if(kind==='regie'&&!openRegieDraft){checks.regie=true;setStatus('regie',true,yes?'Regie erledigt':'Keine Regie erforderlich')}document.querySelectorAll(`[data-choice^="${kind}"]`).forEach(x=>x.classList.remove('on'));button.classList.add('on');updateProgress()}));
+document.querySelectorAll('[data-choice]').forEach(button=>button.addEventListener('click',()=>{const raw=button.dataset.choice,kind=raw.replace('-no',''),yes=!raw.endsWith('-no');if(kind==='photos'){checks.photos=true;setStatus('photo',true,yes?'Fotos vollständig':'Heute keine Fotos erforderlich')}if(kind==='regie'&&regieRequiredJobs.length){toast('100 % Regie: Bitte den fehlenden Bericht erstellen.');return}if(kind==='regie'&&!openRegieDraft){checks.regie=true;setStatus('regie',true,yes?'Regie erledigt':'Keine Regie erforderlich')}document.querySelectorAll(`[data-choice^="${kind}"]`).forEach(x=>x.classList.remove('on'));button.classList.add('on');updateProgress()}));
 
-document.getElementById('saveTimes').addEventListener('click',async()=>{const button=document.getElementById('saveTimes');button.disabled=true;try{const saved=await api(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(today)}`,{method:'PUT',body:JSON.stringify({employeeName:employeeName(employee),segments:editableSegments,reason:'Korrektur beim Tagesabschluss',correctedBy:employeeName(employee)})});editableSegments=saved.segments||editableSegments;renderTimeline();updateTimeTotals();checks.time=true;setStatus('time',true,'Zeiten und Baustellen gespeichert');button.textContent='✓ Zeiten gespeichert';button.classList.remove('dirty');updateProgress()}catch(error){toast(error.message)}finally{button.disabled=false}});
+document.getElementById('saveTimes').addEventListener('click',async()=>{const button=document.getElementById('saveTimes');button.disabled=true;try{const saved=await api(`/kristine/api/segments/${encodeURIComponent(employeeId)}/${encodeURIComponent(today)}`,{method:'PUT',body:JSON.stringify({employeeName:employeeName(employee),segments:editableSegments,reason:'Korrektur beim Tagesabschluss',correctedBy:employeeName(employee)})});editableSegments=saved.segments||editableSegments;renderTimeline();updateTimeTotals();checks.time=true;setStatus('time',true,'Zeiten und Baustellen gespeichert');button.textContent='✓ Zeiten gespeichert';button.classList.remove('dirty');const fresh=await api('/kristine/api/regie/required?'+new URLSearchParams({employeeId,date:today}));regieRequiredJobs=fresh.missing||[];const no=document.querySelector('[data-choice="regie-no"]');if(no)no.disabled=regieRequiredJobs.length>0;if(regieRequiredJobs.length){checks.regie=false;setStatus('regie',false,'100 % Regie: Regiebericht fehlt',true)}updateProgress()}catch(error){toast(error.message)}finally{button.disabled=false}});
 
 const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition,speak=document.getElementById('speakNote');
 if(!SpeechRecognition)speak.hidden=true;else speak.addEventListener('click',()=>{const recognition=new SpeechRecognition();recognition.lang='de-AT';recognition.interimResults=false;speak.classList.add('listening');speak.textContent='🎙️ Ich höre zu …';recognition.onresult=e=>{const note=document.getElementById('note'),text=e.results[0][0].transcript;note.value=[note.value.trim(),text].filter(Boolean).join(' ');note.dispatchEvent(new Event('input'))};recognition.onerror=()=>toast('Spracherkennung hat nicht geklappt.');recognition.onend=()=>{speak.classList.remove('listening');speak.textContent='🎙️ Notiz sprechen'};recognition.start()});

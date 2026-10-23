@@ -13,7 +13,7 @@ test('day close edits invalidate confirmation and display normalized saved times
  const job=row.querySelector('select');job.value='B';job.dispatchEvent(new w.Event('change'));assert.equal(d.getElementById('finish').disabled,true);
  const from=row.querySelector('.seg-from');from.value='06:45';from.dispatchEvent(new w.Event('change'));
  assert.equal(d.querySelector('.timeline-row.up select'),null);assert.match(d.querySelector('.timeline-row.up').textContent,/Werkstatt/);
- let sent;w.fetch=async(url,options)=>{sent=JSON.parse(options.body);return{ok:true,json:async()=>({ok:true,segments:sent.segments.map((s,i)=>i===0?{...s,from:'07:00'}:s)})}};
+ let sent;w.fetch=async(url,options)=>{if(String(url).includes('/regie/required'))return{ok:true,json:async()=>({ok:true,jobs:[],missing:[]})};sent=JSON.parse(options.body);return{ok:true,json:async()=>({ok:true,segments:sent.segments.map((s,i)=>i===0?{...s,from:'07:00'}:s)})}};
  d.getElementById('saveTimes').click();await new Promise(resolve=>setImmediate(resolve));
  assert.equal(sent.segments[0].jobId,'B');assert.equal(sent.segments[0].from,'06:45');assert.equal(sent.segments[1].type,'lunch');
  assert.equal(d.querySelector('.seg-from').value,'07:00');assert.equal(d.querySelector('.seg-job').value,'B');assert.equal(d.getElementById('finish').disabled,false);assert.equal(d.getElementById('saveTimes').classList.contains('dirty'),false);
