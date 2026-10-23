@@ -1,0 +1,15 @@
+"use strict";
+const assert=require("node:assert/strict"),vm=require("node:vm"),fs=require("node:fs"),path=require("node:path");
+const {JSDOM}=require("jsdom"),B=require("../public/ui/regie-billing-state");
+let source=fs.readFileSync(path.join(__dirname,"../public/ui/tower-baustellen-signals.js"),"utf8");
+source=source.replace("  if(document.readyState==='loading')","  window.printTest={monthPrintHtml};return;\n  if(document.readyState==='loading')");
+const ctx={window:{KristaRegieBilling:B},location:{search:""},URLSearchParams,URL,Intl,Date,Map,Set};vm.createContext(ctx);vm.runInContext(source,ctx);
+const rows=Array.from({length:60},(_,i)=>({job:{jobId:String(i),name:i===0?"A < B & C":"Baustelle "+i},monthHours:i+1,invoiced:i%2===0,open:i===1?null:10,billed:i===1?null:20}));
+const html=ctx.window.printTest.monthPrintHtml(rows),doc=new JSDOM(html).window.document;
+assert.equal(doc.querySelectorAll("tbody tr").length,60);
+assert.equal(doc.querySelector("tbody td").childNodes[0].textContent,"A < B & C");
+assert(doc.querySelector(".invoiced"));assert(doc.querySelector(".open"));
+assert.match(doc.querySelector(".summary").textContent,/590,00/);assert.match(doc.querySelector(".summary").textContent,/Beträge prüfen/);
+assert.match(doc.querySelector("style").textContent,/display:table-header-group/);assert.match(doc.querySelector("style").textContent,/A4 landscape/);
+assert.equal(doc.querySelectorAll("script").length,0);assert(!html.includes("overflow:auto"));
+console.log("OK: print includes all 60 rows, totals, unknown values, invoice marking and escaped names");
