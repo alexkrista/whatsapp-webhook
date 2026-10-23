@@ -3763,19 +3763,22 @@ app.get("/admin/api/job/:jobId/history", async (req, res) => {
 
 // Admin API: Baustellennummer Ã¤ndern (Ordner umbenennen)
 // Scoped first rollout: WW 26110 verified free; prevent arbitrary number moves.
-app.post("/admin/api/job/:jobId/safe-renumber", (req, res) => {
-  if (!requireAdmin(req, res)) return;
-  const oldJobId=String(req.params.jobId||""),newJobId=String(req.body?.newJobId||"");
-  if (oldJobId!=="26094" || !["26111","26112","26113","26114","26115","26116"].includes(newJobId)) return res.status(409).json({ok:false,error:"Nur vorab in WinWorker geprüfte Ersatznummern 26111–26116 sind für Latzer freigegeben."});
-  try {
-    const source=path.join(DATA_DIR,oldJobId),meta=JSON.parse(fs.readFileSync(path.join(source,".meta.json"),"utf8"));
-    if (!/latzer/i.test(String(meta.name||""))) return res.status(409).json({ok:false,error:"Kundenidentität stimmt nicht: Umnummerierung blockiert."});
-    if (Number(meta.wwProjectIndex||0)>0 || (Array.isArray(meta.wwProjectLinks)&&meta.wwProjectLinks.length) || (meta.wwProjectNumber && String(meta.wwProjectNumber)!==oldJobId)) return res.status(409).json({ok:false,error:"Projekt besitzt explizite WinWorker-Verknüpfungen; sichere Prüfung erforderlich."});
-    if (fs.existsSync(path.join(DATA_DIR,newJobId))) return res.status(409).json({ok:false,error:"Zielnummer bereits vergeben."});
+let renumberBusy=false;
+app.post("/admin/api/job/:jobId/safe-renumber",async(req,res)=>{
+  if(!requireAdmin(req,res))return;
+  if(renumberBusy)return res.status(409).json({ok:false,error:"Eine Nummernänderung läuft bereits."});
+  renumberBusy=true;
+  try{
+    const oldJobId=String(req.params.jobId||""),newJobId=String(req.body?.newJobId||"").trim(),expectedName=String(req.body?.expectedName||"");
+    const connector=String(process.env.OUTGOING_CONNECTOR||process.env.ARCHIVE_CONNECTOR||"http://127.0.0.1:5051").replace(/\/+$/,"");
+    const brainJson=async p=>{const response=await fetch(connector+p,{headers:{Accept:"application/json",...(process.env.ADMIN_TOKEN?{"X-Krista-Token":process.env.ADMIN_TOKEN}:{})},signal:AbortSignal.timeout(15000)}),data=await response.json();if(!response.ok||!data.ok)throw Error("WinWorker-/Rechnungsbuch-Abgleich derzeit nicht erreichbar. Nummer bleibt unverändert.");return data};
+    await require("./job-renumber-guard").verifyRenumber({dataDir:DATA_DIR,oldJobId,newJobId,expectedName,brainJson});
     const result=require("./safe-job-renumber").safeRenumber({dataDir:DATA_DIR,oldJobId,newJobId});
-    if (result.status!=="renumbered" && result.status!=="already_renumbered") return res.status(409).json({ok:false,error:result.reason||result.status});
+    if(!["renumbered","already_renumbered"].includes(result.status))return res.status(409).json({ok:false,error:result.reason||result.status});
+    Object.assign(jobAliases,jobRenumber.createAliasResolver(DATA_DIR));
     res.json({ok:true,...result});
-  } catch(error) {console.error("Safe renumber failed",error);res.status(500).json({ok:false,error:"Sichere Umnummerierung angehalten; bitte Prüfprotokoll kontrollieren."});}
+  }catch(error){console.error("Safe renumber stopped",error.message);res.status(409).json({ok:false,error:String(error.message||"Nummernänderung angehalten; bitte Prüfprotokoll kontrollieren.")})}
+  finally{renumberBusy=false}
 });
 
 app.post("/admin/api/job/:jobId/rename", async (req, res) => {
