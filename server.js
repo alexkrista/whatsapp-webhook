@@ -2666,6 +2666,7 @@ async function readJobMeta(jobId) {
       contractAmount: Math.max(0, Number(meta.contractAmount || 0)),
       externalServices: Math.max(0, Number(meta.externalServices || 0)),
       materialPercent: Math.min(100, Math.max(0, Number(meta.materialPercent || 0))),
+      regieOnly: meta.regieOnly === true,
       regieHourlyRate: Math.max(0, Number(meta.regieHourlyRate ?? 75)),
       regieMaterialMarkup: Math.max(0, Number(meta.regieMaterialMarkup ?? 80)),
       plannedRegieHours: Math.max(0, Number(meta.plannedRegieHours || 0)),
@@ -2747,6 +2748,7 @@ async function writeJobMeta(jobId, patch) {
     contractAmount: Math.max(0, Number(patch.contractAmount ?? existing.contractAmount ?? 0)),
     externalServices: Math.max(0, Number(patch.externalServices ?? existing.externalServices ?? 0)),
     materialPercent: Math.min(100, Math.max(0, Number(patch.materialPercent ?? existing.materialPercent ?? 0))),
+    regieOnly: patch.regieOnly === undefined ? existing.regieOnly === true : patch.regieOnly === true,
     regieHourlyRate: Math.max(0, Number(patch.regieHourlyRate ?? existing.regieHourlyRate ?? 75)),
     regieMaterialMarkup: Math.max(0, Number(patch.regieMaterialMarkup ?? existing.regieMaterialMarkup ?? 80)),
     plannedRegieHours: Math.max(0, Number(patch.plannedRegieHours ?? existing.plannedRegieHours ?? 0)),
@@ -3205,6 +3207,7 @@ app.get("/admin/api/jobs", async (req, res) => {
         contractAmount: Number(meta.contractAmount || 0),
         externalServices: Number(meta.externalServices || 0),
         materialPercent: Number(meta.materialPercent || 0),
+        regieOnly: meta.regieOnly === true,
         regieHourlyRate: Number(meta.regieHourlyRate ?? 75),
         regieMaterialMarkup: Number(meta.regieMaterialMarkup ?? 80),
         plannedRegieHours: Number(meta.plannedRegieHours || 0),
@@ -3329,6 +3332,7 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
       contractAmount: req.body?.contractAmount,
       externalServices: req.body?.externalServices,
       materialPercent: req.body?.materialPercent,
+      regieOnly: req.body?.regieOnly,
       regieHourlyRate: req.body?.regieHourlyRate,
       regieMaterialMarkup: req.body?.regieMaterialMarkup,
       plannedRegieHours: req.body?.plannedRegieHours,
@@ -3336,7 +3340,7 @@ app.put("/admin/api/job/:jobId/meta", async (req, res) => {
     });
     const deletedGeneratedPdfs = before.name !== meta.name ? await deleteGeneratedPdfsForJob(jobId) : 0;
     const changed = [];
-    for (const key of ["name","status","towerBillingHidden","offerFollowUpAt","offerRejectedAt","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","contactEmail","wwAddressId","wwCustomerNumber","customerMasterStatus","billingRate","contractAmount","externalServices","materialPercent","regieHourlyRate","regieMaterialMarkup","plannedRegieHours"]) {
+    for (const key of ["name","status","towerBillingHidden","offerFollowUpAt","offerRejectedAt","street","houseNumber","postalCode","city","addressExtra","contactName","contactPhone","contactEmail","wwAddressId","wwCustomerNumber","customerMasterStatus","billingRate","contractAmount","externalServices","materialPercent","regieOnly","regieHourlyRate","regieMaterialMarkup","plannedRegieHours"]) {
       if (String(before[key] ?? "") !== String(meta[key] ?? "")) changed.push(key);
     }
     if (JSON.stringify(before.customerMaster || {}) !== JSON.stringify(meta.customerMaster || {})) changed.push("customerMaster");
@@ -4775,6 +4779,7 @@ registerRegieAssistant(app, {
   readDocumentation,
   writeDocumentation,
   sendRegieMail: sendMailWithAttachment,
+  readHoursBootstrap: () => kristine.getHoursBootstrap(),
 });
 customerNotifications = require("./customer-activity-notifications").createActivityNotifications({
   dataDir:DATA_DIR,sendMail:sendMailWithLink,sendWhatsApp:sendWhatsAppKristineReply,

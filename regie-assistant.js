@@ -682,7 +682,7 @@ function registerRegieAssistant(app, options) {
     const delivery = documentType === "delivery_note";
     const jobId = safeId(body.jobId || existing.jobId);
     if (!jobId) throw new Error("Bitte eine Baustelle auswählen.");
-    if (!clean(body.description || existing.description, 4000)) throw new Error("Beschreibung der Arbeit fehlt.");
+    if (!clean(body.description || existing.description, 4000) && (finish || (body.source || existing.source) !== "missing-hours")) throw new Error("Beschreibung der Arbeit fehlt.");
     const meta = typeof readJobMeta === "function" ? await readJobMeta(jobId) : {};
     const precheckPending = existing.reviewStatus === "bettina_pending" || existing.processingStatus === "bettina_review";
     const priceLocked = ["prepared", "completed"].includes(existing.status) && !precheckPending;
@@ -914,6 +914,67 @@ function registerRegieAssistant(app, options) {
     const materialSuggestions = machineMaterialRows(paintBookings, materialMaster, reports, jobId, date, safeId(req.query.reportId));
     res.json({ ok: true, suggestions, stampedSuggestions, materialSuggestions });
   });
+
+  const missingHours=require("./regie-missing-hours");
+  const viennaDay=()=>new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Vienna"}).format(new Date());
+  async function missingPlan(jobId){
+    const meta=await readJobMeta(jobId);
+    if(!meta)throw new Error("Baustelle fehlt.");
+    const job={...meta,jobId},sources=await hourSources();
+    const bootstrap=typeof options.readHoursBootstrap==="function"?await options.readHoursBootstrap():{timeEvents:sources[0],projectTimeArchive:sources[1],employees:sources[2],today:viennaDay()};
+    const recorded=await missingHours.recordedRows({dataDir,job,bootstrap});
+    const yesterday=new Date(viennaDay()+"T12:00:00Z");yesterday.setUTCDate(yesterday.getUTCDate()-1);
+    const localHour=Number(new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Vienna",hour:"2-digit",hourCycle:"h23"}).format(new Date()));
+    const throughDate=localHour>=18?viennaDay():yesterday.toISOString().slice(0,10);
+    const plan=missingHours.missingHoursPlan({jobId,rows:recorded.rows,reports:await readJson(REPORTS,[]),documents:typeof readDocumentation==="function"?await readDocumentation(jobId):[],employees:sources[2],throughDate});
+    return {...plan,jobId,jobName:meta.name||jobId,regieOnly:meta.regieOnly===true,throughDate,missingProjects:recorded.missingProjects};
+  }
+  async function reconcileMissingTasks(){
+    if(typeof options.readHoursBootstrap!=="function")return;
+    const jobIds=(await fsp.readdir(dataDir)).filter(id=>/^\d{2,12}$/.test(id));
+    const plans=[];
+    for(const jobId of jobIds){const meta=await readJobMeta(jobId);if(meta?.regieOnly===true)plans.push(await missingPlan(jobId))}
+    const tasks=await readJson(TASKS,[]),assignee=await bettinaAssignee(),now=new Date().toISOString(),open=new Set();
+    for(const p of plans)for(const day of p.days.filter(d=>d.missing>.01||d.draftIds.length)){
+      const id="regie_missing_"+p.jobId+"_"+day.date;open.add(id);
+      const old=tasks.find(t=>t.id===id),next={...old,id,title:"Regiebericht fehlt – "+p.jobName+" · "+dateLabel(day.date),taskType:"Regiebericht",priority:"heute",jobId:p.jobId,jobName:p.jobName,assigneeId:assignee.id,assigneeName:assignee.name,dueDate:viennaDay(),reminder:"100 % Regie: "+day.booked+" h gebucht / "+day.reported+" h in Berichten. Tätigkeit und Material ergänzen.",status:"open",createdAt:old?.createdAt||now,updatedAt:now,completedAt:null,source:"regie-missing-hours",reportDate:day.date};
+      if(old)Object.assign(old,next);else tasks.unshift(next);
+    }
+    for(const task of tasks)if(task.source==="regie-missing-hours"&&!open.has(task.id)){task.status="done";task.completedAt=now;task.updatedAt=now}
+    await writeJson(TASKS,tasks.slice(0,20000));
+  }
+  app.get("/kristine/api/regie-reports/missing-hours",async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{const jobId=safeId(req.query.jobId);if(!jobId)throw new Error("Baustelle auswählen.");res.json({ok:true,...await missingPlan(jobId)})}
+    catch(error){res.status(400).json({ok:false,error:String(error.message||error)})}
+  });
+  app.post("/kristine/api/regie-reports/missing-hours",async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{
+      const jobId=safeId(req.body?.jobId);if(!jobId)throw new Error("Baustelle auswählen.");
+      const plan=await missingPlan(jobId),created=[];
+      if(plan.issues.length)throw new Error("Stundenabgleich prüfen: "+plan.issues.join("; "));
+      // Recompute under the same mutation queue as report saves; client totals are never trusted.
+      for(const day of plan.days.filter(d=>d.create>.01)){
+        const reports=await readJson(REPORTS,[]);
+        const draft=reports.find(r=>String(r.jobId)===jobId&&r.date===day.date&&r.source==="missing-hours"&&r.status==="draft");
+        const employees=(draft?.employees||[]).map(e=>({...e}));
+        for(const e of day.employees.filter(e=>e.create>.01)){
+          const existing=employees.find(p=>normalizedName(p.name)===normalizedName(e.name));
+          if(existing)existing.hours=round(num(existing.hours)+e.create);else employees.push({id:e.id,name:e.name,hours:e.create});
+        }
+        created.push(await persistReport({...draft,jobId,jobName:plan.jobName,date:day.date,source:"missing-hours",description:draft?.description||"",employees,materials:draft?.materials||[],internalNote:draft?.internalNote||"Aus fehlenden gebuchten Stunden übernommen. Tätigkeit und Material ergänzen."},false));
+      }
+      await reconcileMissingTasks();
+      res.status(201).json({ok:true,created:created.map(r=>({id:r.id,date:r.date,reportNumber:r.reportNumber,hours:r.totals.laborHours})),plan:await missingPlan(jobId)});
+    }catch(error){res.status(400).json({ok:false,error:String(error.message||error)})}
+  });
+  if(typeof options.readHoursBootstrap==="function"){
+    const runMissingCheck=()=>{const run=pending.then(reconcileMissingTasks);pending=run.catch(error=>console.warn("Regie-Tageskontrolle:",error.message));};
+    const dailyTimer=setInterval(runMissingCheck,15*60*1000);dailyTimer.unref?.();
+    const startupTimer=setTimeout(runMissingCheck,30000);startupTimer.unref?.();
+  }
+
   app.get("/kristine/api/regie-reports/:id", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const reports = await readJson(REPORTS, []), report = reports.find(row => row.id === safeId(req.params.id));
