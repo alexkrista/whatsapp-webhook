@@ -54,10 +54,12 @@
   function render(data) {
     const card = installCard();
     if (!card) return;
-    if (!data?.hasCalculation) {
+    if (!data?.hasCalculation && !data?.regieOnly) {
       card.classList.add("kg-hidden");
       return;
     }
+    card.style.border="";card.style.background="";
+    if(data.regieOnly){card.classList.remove("kg-hidden");showRegieRequirement(data,card);return}
     const scope = data.scope || {};
     const order = Array.isArray(scope.order) ? scope.order : [];
     const regie = Array.isArray(scope.regie) ? scope.regie : [];
@@ -65,6 +67,19 @@
     const addRegie = Array.isArray(scope.addRegie) ? scope.addRegie : [];
     card.classList.remove("kg-hidden");
     card.innerHTML = `<div class="kg-scope-head"><div><div class="kg-eyebrow">Auftrag kurz & klar</div><h2>Was ist hier beauftragt?</h2></div><small>ohne Preise</small></div><div class="kg-scope-grid">${group("Auftrag", "", order, "✓")}${group("Regie", "regie", regie, "≡")}${group("Nachtrag Auftrag", "add-order", addOrder, "+")}${group("Nachtrag Regie", "add-regie", addRegie, "+≡")}</div>${regie.length || addRegie.length ? '<div class="kg-scope-rule">Regie nur auf den orange/violett markierten Positionen erfassen. Alles andere gehört zum Auftrag.</div>' : ''}`;
+  }
+  function showRegieRequirement(data,card){
+    const employeeId=new URLSearchParams(location.search).get("employeeId")||localStorage.getItem("kristineGoEmployeeId")||"";
+    const date=new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Vienna"}).format(new Date());
+    const target=new URL("/public/regie-assistant.html",location.origin);if(token)target.searchParams.set("token",token);target.searchParams.set("employeeId",employeeId);target.searchParams.set("jobId",data.jobId);target.searchParams.set("date",date);
+    card.innerHTML='<div style="font-size:23px;font-weight:900;color:#9a3d12">100 % REGIE</div><h2 style="font-size:23px">Heute Regiebericht erstellen!</h2><p data-regie-required>Alle Arbeiten dieser Baustelle gehören in den Tagesbericht. Tätigkeit und Material ergänzen.</p><a style="display:block;padding:14px;background:#a64b18;color:white;text-align:center;border-radius:12px;font-size:18px;font-weight:850" href="'+esc(target.pathname+target.search)+'">Bericht erstellen / fertig machen</a>';
+    card.style.border="2px solid #c77522";card.style.background="#fff4df";
+    if(employeeId)api("/kristine/api/regie/required?"+new URLSearchParams({employeeId,date,jobId:data.jobId})).then(result=>{
+      if(data.jobId!==lastJobId||!card.isConnected)return;
+      const status=result.jobs.find(j=>j.jobId===data.jobId);if(!status)return;
+      const format=h=>Number(h||0).toLocaleString("de-AT",{maximumFractionDigits:2})+" h";
+      card.querySelector("[data-regie-required]").textContent="Gebucht: "+format(status.booked)+" · Regiestunden: "+format(status.reported)+(status.complete?" · Bericht vorhanden.":" · Bericht erforderlich! Tätigkeit und Material ergänzen.");
+    }).catch(()=>{});
   }
   async function loadForCurrentSite(force = false) {
     const jobId = jobIdFromSiteTitle();
@@ -96,6 +111,8 @@
     const employee = document.getElementById("kgEmployeeName");
     if (employee) new MutationObserver(() => { lastJobId = ""; setTimeout(() => loadForCurrentSite(true), 80); }).observe(employee, { childList: true, characterData: true, subtree: true });
     setTimeout(() => loadForCurrentSite(true), 250);
+    window.addEventListener("focus",()=>loadForCurrentSite(true));
+    setInterval(()=>{if(!document.hidden)loadForCurrentSite(true)},60000);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", install, { once: true });
   else install();

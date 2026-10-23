@@ -267,6 +267,12 @@ function registerDayClose(app, {
     };
   }
 
+  app.get("/kristine/api/regie/required",async(req,res)=>{
+    if(typeof requireAdmin==="function"&&!requireAdmin(req,res))return;
+    try{res.json(await require("./kgo-regie-required").employeeRegieRequirements({dataDir,employeeId:String(req.query.employeeId||""),date:String(req.query.date||localDate()),jobId:String(req.query.jobId||""),employeeMaster:await readEmployees(),readJobMeta:readJobMetaLocal}))}
+    catch(error){res.status(400).json({ok:false,error:String(error.message||error)})}
+  });
+
   app.get("/kristine/api/active-jobs", async (req, res) => {
     if (typeof requireAdmin === "function" && !requireAdmin(req, res)) return;
     try {
@@ -530,6 +536,9 @@ function registerDayClose(app, {
           error: "Mitarbeiter nicht gefunden",
         });
       }
+
+      const regieRequirements=await require("./kgo-regie-required").employeeRegieRequirements({dataDir,employeeId,date,employeeMaster:employees,readJobMeta:readJobMetaLocal});
+      if(regieRequirements.missing.length)return res.status(409).json({ok:false,code:"REGIE_REQUIRED",error:"100 % Regie: Regiebericht fehlt – bitte Tätigkeit und Material ergänzen.",jobs:regieRequirements.missing});
 
       const now = new Date().toISOString();
       const finishedAt = localTime();
