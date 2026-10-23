@@ -84,7 +84,7 @@ def protect_remote_archive_access():
 
     # KRISTINE ACCESS CONTROL V3 AUTH
     # Physisch nur am Tailscale-Listener; zusätzlich KRISTINE Admin-Token.
-    if request.path.startswith("/access-control/") or request.path in {"/tower/live-summary", "/tower/billing-snapshot"}:
+    if request.path.startswith("/access-control/") or request.path in {"/tower/live-summary", "/tower/billing-snapshot", "/tower/month-worked-hours"}:
         if request.method == "OPTIONS":
             return None
         supplied = str(request.headers.get("X-Krista-Token") or "")
@@ -147,7 +147,7 @@ def archive_security_headers(response):
         "frame-ancestors 'none'"
     )
     # KRISTINE ACCESS CONTROL V3 CORS
-    if request.path.startswith("/access-control/") or request.path in {"/tower/live-summary", "/tower/billing-snapshot", "/project/address-search", "/project/address-projects", "/project/open-orders", "/project/search", "/project/documents", "/api/outgoing/project-hours", "/pdf", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}:
+    if request.path.startswith("/access-control/") or request.path in {"/tower/live-summary", "/tower/billing-snapshot", "/tower/month-worked-hours", "/project/address-search", "/project/address-projects", "/project/open-orders", "/project/search", "/project/documents", "/api/outgoing/project-hours", "/pdf", "/ww-materials/sync", "/ww-materials/search", "/ww-suppliers/search"}:
         origin = str(request.headers.get("Origin") or "")
         if origin == "https://protokoll.krista.at":
             response.headers["Access-Control-Allow-Origin"] = origin
@@ -8106,7 +8106,7 @@ def status():
     return jsonify({
         "ok": True,
         "connector": "kristine-archive",
-        "version": "0.14.101",
+        "version": "0.14.103",
         "pdfIndex": str(DB),
         "pdfIndexExists": DB.exists(),
         "jobCreateReady": bool(KRISTINE_ADMIN_TOKEN),
@@ -9467,7 +9467,7 @@ if __name__ == "__main__":
     print("Status : http://127.0.0.1:5051/status")
     print("Suche  : http://127.0.0.1:5051/search?q=6844%20Fusonic")
     print("Schema : http://127.0.0.1:5051/schema-hints")
-    print("Version: 0.14.101 - Rechnungstext direkt unter Empfaengeradresse")
+    print("Version: 0.14.103 - Rechnungstext direkt unter Empfaengeradresse")
     print(f"Handy  : http://{TAILSCALE_IP}:5051/status")
     print("Schema-Index rebuild: http://127.0.0.1:5051/schema-index/rebuild")
     print("Schema-Index status : http://127.0.0.1:5051/schema-index/status")
