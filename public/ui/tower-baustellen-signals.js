@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="20261023-month-print-1";
+  const VERSION="20261023-live-invoices-1";
   const BRAIN_URL="https://pc-alex02.tail610122.ts.net";
   const token=new URLSearchParams(location.search).get("token")||"";
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
@@ -151,6 +151,32 @@
   }
 
 
+
+  let liveInvoiceAt="";
+  function invoiceMatchesJob(invoice,job){
+    const generic=new Set(['gmbh','gesmbh','firma','projekt','baustelle','auftrag','arbeiten','malen','maler','fenster','sanierung','umbau','neubau','haus','wohnung','privat','herr','frau','krista','installation','einrichtung','material']);
+    const words=v=>String(v||'').normalize('NFKD').toLowerCase().replace(/[\u0300-\u036f]/g,'').split(/[^a-z0-9]+/).filter(w=>w.length>=4&&!generic.has(w));
+    const expected=new Set([job.name,job.contactName,job.customerMaster?.name,job.projectContacts?.owner?.customer].flatMap(words));
+    const actual=[invoice.customer,invoice.projectTitle].flatMap(words);
+    return actual.some(w=>expected.has(w));
+  }
+  function mergeLiveInvoiceBook(bookRows,year,jobs){
+    const B=window.KristaRegieBilling;
+    for(const job of jobs){
+      const id=String(job.jobId),base=billingByJob[id],old=Array.isArray(base?.invoices)?base.invoices:[];
+      const candidates=(bookRows||[]).filter(i=>String(i.projectNumber)===id&&i.status==='issued'&&!i.demoExcluded),conflict=candidates.some(i=>!invoiceMatchesJob(i,job));
+      const fresh=candidates.filter(i=>invoiceMatchesJob(i,job)).map(i=>({...i,issueDate:i.invoiceDate}));
+      const oldYear=old.filter(i=>String(i.issueDate||i.invoiceDate||'').slice(0,4)===String(year));
+      const keep=old.filter(i=>!oldYear.includes(i));
+      const merged=fresh.map(i=>({...oldYear.find(o=>String(o.invoiceNumber)===String(i.invoiceNumber)),...i}));
+      const allocationIncomplete=fresh.some(i=>i.kind==='TR'&&!oldYear.some(o=>String(o.invoiceNumber)===String(i.invoiceNumber)))&&!fresh.some(i=>['RE','SR'].includes(i.kind));
+      const oldNet=B.issuedInvoices(oldYear).reduce((s,i)=>s+num(i.net),0);
+      const freshNet=B.issuedInvoices(merged).reduce((s,i)=>s+num(i.net),0);
+      billingByJob[id]={...base,partial:conflict||!base||!!base.partial||allocationIncomplete,identityConflict:conflict,invoices:[...keep,...merged],summary:{...base?.summary,billedNet:num(base?.summary?.billedNet)-oldNet+freshNet},liveInvoices:true};
+    }
+    liveInvoiceAt=new Date().toISOString();
+  }
+
   function currentMonth(){return new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Vienna',year:'numeric',month:'2-digit'}).format(new Date())}
   let monthLiveByJob=new Map(),snapshotMonth='';
   function monthRows(jobs){
@@ -159,12 +185,12 @@
       const id=String(job.jobId),billing=billingByJob[id],reports=reportsByJob[id]||[];
       const monthHours=num(monthLiveByJob.get(id))+(snapshotMonth===currentMonth()?num(billing?.summary?.recordedMonthHoursNet):0);
       if(monthHours<=.005)return null;
-      const known=billingReady&&!!billing&&snapshotMonth===currentMonth()&&!billing.partial;
+      const known=billingReady&&!!billing&&(!snapshotMonth||snapshotMonth===currentMonth()||billing.liveInvoices)&&!billing.partial;
       const issued=B?.issuedInvoices(billing?.invoices)||[];
       const invoiced=issued.some(i=>['RE','SR'].includes(String(i.kind||'').toUpperCase()));
       const recorded=num(billing?.summary?.recordedHoursNet),totalHours=Math.max(recorded+num(completedLiveByJob.get(id)),num(calc(job).actualHours));
       const p=known&&B?.performanceForJob(snapshotJobsByJob[id]||job,{billing,reports,actualHours:totalHours,regieHours:reports.reduce((s,r)=>s+num(r.totalHours),0)});
-      const billed=known?Number(billing.summary?.billedNet):NaN;
+      const billed=(known||billing?.liveInvoices&&!billing?.identityConflict)?Number(billing.summary?.billedNet):NaN;
       return {job,monthHours,invoiced,open:p?.complete?p.amountToInvoice:null,billed:Number.isFinite(billed)?billed:null};
     }).filter(Boolean).sort((a,b)=>Number(a.invoiced)-Number(b.invoiced)||String(a.job.name||a.job.jobId).localeCompare(String(b.job.name||b.job.jobId),'de',{numeric:true}));
   }
@@ -200,8 +226,9 @@
     if(billingPending)return'Berechnung läuft …';
     if(!billingReady)return'Noch kein gespeicherter Abrechnungsstand';
     const through=billingThroughDate?new Date(billingThroughDate+'T12:00:00').toLocaleDateString('de-AT'):'';
+    const invoiceNote=liveInvoiceAt?' · Rechnungen aktuell '+new Date(liveInvoiceAt).toLocaleTimeString('de-AT',{hour:'2-digit',minute:'2-digit'}):'';
     const built=billingSnapshotAt?new Date(billingSnapshotAt).toLocaleString('de-AT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
-    return`${through?'Stand bis '+through:''}${through&&built?' · ':''}${built?'berechnet '+built:''}`||'Gespeicherter Abrechnungsstand';
+    return (`${through?'Stand bis '+through:''}${through&&built?' · ':''}${built?'berechnet '+built:''}`||'Gespeicherter Abrechnungsstand')+invoiceNote;
   }
 
   function applyBillingSnapshot(snapshot){
@@ -282,7 +309,7 @@
     wrap.innerHTML=`<div class="ts-head"><div><h2>Heute wichtig</h2><p>Aufgaben, Angebote, Abrechnungen und Auftragsfreigaben auf einen Blick.</p></div><span class="ts-count">${openTasks.length+offers.length+orders.length+rows.length} Signale</span></div><div class="ts-grid">${pane('Aufgaben','tasks',openTasks.map(taskItem))}${pane('Angebote','offers',[...offers.map(workflowItem),...offerSignals.map(signalItem)])}${pane('Abrechnungen','billing',billing.map(signalItem))}${pane('Aufträge','orders',[...orders.map(workflowItem),...orderSignals.map(signalItem)])}</div><div class="ts-footer"><a href="${tokenUrl('/kristine/baustellen')}">Alle Baustellen öffnen →</a></div>`;wrap.dataset.ready='1'
   }
 
-  async function load(){if(loading)return;loading=true;try{const [j,b,w]=await Promise.all([api('/admin/api/jobs'),api('/kristine/api/bootstrap').catch(()=>({})),api('/kristool/api/workflows').catch(()=>({workflows:[]}))]);const jobs=j.jobs||[],boot=b||{};lastJobs=jobs;baustellenHours=j.baustellenHours||null;closedCollectionMembers=new Set((j.collections||[]).filter(collection=>String(collection?.status||'')==='Geschlossen').flatMap(collection=>collection?.collectionMemberJobIds||[]).map(String));buildLiveMap(boot);const kpi=patchKpis(j.baustellenHours,boot);render(signals(jobs,boot),w.workflows||[],boot.tasks||[]);if(retryTimer){clearTimeout(retryTimer);retryTimer=null}window.__kristaTowerHours={live:kpi.totalOpen,source:"baustellen",updatedAt:j.baustellenHours?.calculatedAt};billingPending=!billingReady;renderBillable(jobs);try{const snapshot=await brainApi('/tower/billing-snapshot',20000);applyBillingSnapshot(snapshot)}catch(error){if(!billingReady)billingReady=false;console.warn('Tower Abrechnungsstand',error)}finally{billingPending=false;renderBillable(jobs)}}catch(e){console.warn('Tower Baustellen-Signale',e);renderPending('Verbindung wird erneut hergestellt …');billingPending=false;if(!retryTimer)retryTimer=setTimeout(()=>{retryTimer=null;load()},5000)}finally{loading=false}}
+  async function load(){if(loading)return;loading=true;try{const [j,b,w]=await Promise.all([api('/admin/api/jobs'),api('/kristine/api/bootstrap').catch(()=>({})),api('/kristool/api/workflows').catch(()=>({workflows:[]}))]);const jobs=j.jobs||[],boot=b||{};lastJobs=jobs;baustellenHours=j.baustellenHours||null;closedCollectionMembers=new Set((j.collections||[]).filter(collection=>String(collection?.status||'')==='Geschlossen').flatMap(collection=>collection?.collectionMemberJobIds||[]).map(String));buildLiveMap(boot);const kpi=patchKpis(j.baustellenHours,boot);render(signals(jobs,boot),w.workflows||[],boot.tasks||[]);if(retryTimer){clearTimeout(retryTimer);retryTimer=null}window.__kristaTowerHours={live:kpi.totalOpen,source:"baustellen",updatedAt:j.baustellenHours?.calculatedAt};billingPending=!billingReady;renderBillable(jobs);try{const snapshot=await brainApi('/tower/billing-snapshot',20000);applyBillingSnapshot(snapshot)}catch(error){if(!billingReady)billingReady=false;console.warn('Tower Abrechnungsstand',error)}finally{billingPending=false}try{const year=currentMonth().slice(0,4),book=await brainApi('/outgoing/invoice-book/items?year='+year,30000);mergeLiveInvoiceBook(book.items,year,jobs)}catch(error){console.warn('Tower aktuelles Rechnungsbuch',error)}renderBillable(jobs)}catch(e){console.warn('Tower Baustellen-Signale',e);renderPending('Verbindung wird erneut hergestellt …');billingPending=false;if(!retryTimer)retryTimer=setTimeout(()=>{retryTimer=null;load()},5000)}finally{loading=false}}
   function init(){installCss();renderPending();renderBillable([]);load();timer=setInterval(load,60000);window.addEventListener('beforeunload',()=>{if(timer)clearInterval(timer);if(retryTimer)clearTimeout(retryTimer)},{once:true});window.TowerBaustellenSignals={version:VERSION,reload:load,debug:()=>window.__kristaTowerHours||null}}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();

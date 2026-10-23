@@ -1,0 +1,14 @@
+"use strict";
+const assert=require("node:assert/strict"),fs=require("node:fs"),vm=require("node:vm"),path=require("node:path"),B=require("../public/ui/regie-billing-state");
+const src=fs.readFileSync(path.join(__dirname,"../public/ui/tower-baustellen-signals.js"),"utf8");
+const ctx={window:{KristaRegieBilling:B},location:{search:""},URLSearchParams,URL,Intl,Date,Map,Set};vm.createContext(ctx);
+vm.runInContext(src.replace("  if(document.readyState==='loading')","  window.liveTest={mergeLiveInvoiceBook,monthRows,applyBillingSnapshot,buildLiveMap,currentMonth};return;\n  if(document.readyState==='loading')"),ctx);
+const api=ctx.window.liveTest,year=api.currentMonth().slice(0,4),job={jobId:"26104",name:"Linher Karlheinz"};
+api.buildLiveMap({today:year+"-10-23",projectTimeArchive:[{employeeId:"r",date:year+"-10-05",segments:[{type:"work",jobId:"26104",from:"07:00",to:"12:00"}]}]});
+api.applyBillingSnapshot({ready:true,billingByProject:{"26104":{found:true,invoices:[],summary:{billedNet:0,recordedHoursNet:0}}}});
+const invoice={projectNumber:"26104",customer:"Linher Karlheinz",projectTitle:"Linher Karlheinz",status:"issued",kind:"RE",invoiceNumber:"202610008",invoiceDate:year+"-10-23",net:3356.67,source:"KRISTINE"};
+api.mergeLiveInvoiceBook([invoice],year,[job]);let row=api.monthRows([job])[0];
+assert.equal(row.invoiced,true);assert.equal(row.billed,3356.67);assert.equal(row.open,0);
+api.mergeLiveInvoiceBook([invoice],year,[job]);assert.equal(api.monthRows([job])[0].billed,3356.67);
+api.mergeLiveInvoiceBook([{...invoice,customer:"Anderer Kunde",projectTitle:"Fremdes Haus"}],year,[job]);row=api.monthRows([job])[0];assert.equal(row.invoiced,false);assert.equal(row.billed,null);
+console.log("OK: Linher issued invoice overrides overnight snapshot, no double counting, mismatched customer blocked");
