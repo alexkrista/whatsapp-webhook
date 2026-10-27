@@ -95,7 +95,7 @@ const { createContactMasterStore } = require("./contact-master");
 const { createCoverPdf } = require("./baustellen-deckblatt");
 
 const app = express();
-require("./camper-project").registerCamper(app);
+const camperProject = require("./camper-project").registerCamper(app);
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
@@ -1864,6 +1864,7 @@ const kristineOutlook = installOutlookCalendar(app, {
   logger: console,
 });
 console.log("✅ KRISTINE Outlook-Kalender registriert");
+camperProject.connectMailbox(kristineOutlook.accessToken);
 installKristineSharedMailbox(app, {
   dataDir: DATA_DIR,
   requireAdmin,
