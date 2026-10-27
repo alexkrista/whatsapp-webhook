@@ -95,6 +95,7 @@ const { createContactMasterStore } = require("./contact-master");
 const { createCoverPdf } = require("./baustellen-deckblatt");
 
 const app = express();
+require("./camper-project").registerCamper(app);
 app.use(express.json({ limit: "25mb" }));
 
 // ===================== Version =====================
