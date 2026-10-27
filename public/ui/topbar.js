@@ -5,6 +5,7 @@
   const BRAIN_ORIGIN = new URL(BRAIN_URL).origin;
 
   const WORLDS = [
+    { key: "camper", label: "CAMPER", icon: "🚐", href: "/camper/enter", subtitle: "Camperwerkstatt · Egon und Elio" },
     { key: "kristower", label: "KRISTOWER", icon: "⌂", href: "/kontrollzentrum", subtitle: "Überblick, Führung und Entscheidungen" },
     { key: "kriszeit", label: "KRISZEIT", icon: "⏱", href: "/kristool-preview/", subtitle: "Zeitkontrolle, Auswertung und Finkzeit" },
     { key: "krisdrive", label: "KRISDRIVE", icon: "🚐", href: "/public/krisdrive.html", subtitle: "Live-Fahrzeuge, Fahrer, Positionen und Fahrten" },
@@ -45,6 +46,7 @@
     if (hash === "#schedules") return "kriszeit";
     if (isKristineBaustellenPath()) return "kristine";
     if (pathname.includes("baustellen.html")) return "krisadmin";
+    if (pathname.startsWith("/camper")) return "camper";
     if (pathname.includes("krisdrive")) return "krisdrive";
     if (pathname.includes("kristool-preview")) return "kriszeit";
     if (pathname.includes("kontrollzentrum")) return "kristower";
