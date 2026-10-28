@@ -2,6 +2,8 @@
 const fs=require('node:fs'), fsp=require('node:fs/promises'),path=require('node:path'),crypto=require('node:crypto'),{promisify}=require('node:util');
 const scrypt=promisify(crypto.scrypt);
 const cookie='camper_session';
+const {pipeline}=require('node:stream/promises'),{Transform}=require('node:stream');
+const MAX_FILE=250*1024*1024;
 const empty=()=>({revision:0,budget:{egon:0,elio:0},tasks:[],costs:[],hours:[],decisions:[],files:[],mails:[],ideas:[],purchases:[]});
 function createStore(dir){let queue=Promise.resolve();const file=path.join(dir,'project.json');return {async read(){try{return Object.assign(empty(),JSON.parse(await fsp.readFile(file,'utf8')));}catch(e){if(e.code==='ENOENT')return empty();throw e;}},update(fn){const op=queue.then(async()=>{const state=await this.read();await fn(state);state.revision++;await fsp.mkdir(dir,{recursive:true});const tmp=file+'.'+crypto.randomUUID()+'.tmp';await fsp.writeFile(tmp,JSON.stringify(state),{mode:0o600});await fsp.rename(tmp,file);return state;});queue=op.catch(()=>{});return op;}};}
 function modelUrl(value){if(!value)return '';const u=new URL(value);if(u.protocol!=='https:'||u.username||u.password||!['app.sketchup.com','connect.trimble.com','web.connect.trimble.com','3dwarehouse.sketchup.com'].includes(u.hostname))throw Error('Bitte einen HTTPS-Link von SketchUp oder Trimble Connect verwenden.');return u.href;}
@@ -13,10 +15,13 @@ function details(kind,b,out){
  if(!out.types.length)throw Error('Mindestens eine Eintragsart auswählen.');
  out.time=String(b.time||'').slice(0,5);
  if(out.types.includes('appointment')&&(!/^\d{4}-\d{2}-\d{2}$/.test(out.date)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(out.time)))throw Error('Für Termine bitte Datum und Uhrzeit angeben.');
+ for(const key of ['askedDate','dueEgon','dueElio','decidedEgon','decidedElio']){out[key]=String(b[key]||'').slice(0,10);if(out[key]&&!/^\d{4}-\d{2}-\d{2}$/.test(out[key]))throw Error('Datum ungültig.');}
+ for(const key of ['personEgon','personElio'])out[key]=String(b[key]||'').slice(0,80);
+ for(const key of ['decisionStatusEgon','decisionStatusElio'])out[key]=['offen','entschieden','vertagt'].includes(b[key])?b[key]:'offen';
  out.answerEgon=String(b.answerEgon||'').slice(0,5000);out.answerElio=String(b.answerElio||'').slice(0,5000);
  out.sourceIdea=String(b.sourceIdea||'').slice(0,80);
  }
- if(kind==='ideas'){out.url=webUrl(b.url);out.imageUrl=webUrl(b.imageUrl);out.topic=String(b.topic||'').slice(0,80);}
+ if(kind==='ideas'){out.url=webUrl(b.url);out.imageUrl=webUrl(b.imageUrl);out.topic=String(b.topic||'').slice(0,80);out.fileId=String(b.fileId||'').slice(0,80);}
  if(kind==='purchases'){
  out.stage=['anfrage','angebot','bestellung','rechnung'].includes(b.stage)?b.stage:'anfrage';
  out.supplier=String(b.supplier||'').slice(0,160);
@@ -56,17 +61,58 @@ function registerCamper(app,options={}){
  router.get('/api/users',wrap(async(req,res)=>{if(!req.camperActor.admin)return res.sendStatus(403);res.json((await users()).map(({id,name,login,disabled})=>({id,name,login,disabled})));}));
  router.post('/api/users',wrap(async(req,res)=>{if(!req.camperActor.admin)return res.sendStatus(403);const {name,login,password}=req.body;if(!name||name.length>80||!/^[a-z0-9_.@+-]{3,100}$/i.test(login||'')||typeof password!=='string'||password.length<12||password.length>200)throw Error('Name, Benutzername und Passwort mit mindestens 12 Zeichen erforderlich.');const salt=crypto.randomBytes(16).toString('hex'),hash=(await scrypt(password,salt,64)).toString('hex');const op=usersQueue.then(async()=>{const rows=await users();if(rows.some(x=>x.login===login.toLowerCase()))throw Error('Benutzername bereits vorhanden.');rows.push({id:crypto.randomUUID(),name,login:login.toLowerCase(),salt,hash});await fsp.mkdir(dir,{recursive:true});const tmp=usersFile+'.tmp';await fsp.writeFile(tmp,JSON.stringify(rows),{mode:0o600});await fsp.rename(tmp,usersFile);});usersQueue=op.catch(()=>{});await op;res.status(201).json({ok:true});}));
  router.patch('/api/users/:id',wrap(async(req,res)=>{if(!req.camperActor.admin)return res.sendStatus(403);const op=usersQueue.then(async()=>{const rows=await users();const row=rows.find(x=>x.id===req.params.id);if(!row)throw Error('Benutzer nicht gefunden.');row.disabled=!!req.body.disabled;const tmp=usersFile+'.tmp';await fsp.writeFile(tmp,JSON.stringify(rows),{mode:0o600});await fsp.rename(tmp,usersFile);});usersQueue=op.catch(()=>{});await op;res.json({ok:true});}));
+
+ async function bankData(){
+ const base=String(process.env.OUTGOING_CONNECTOR||process.env.ARCHIVE_CONNECTOR||'http://127.0.0.1:5051').replace(/\/+$/,'');
+ const response=await (options.fetch||fetch)(base+'/revolut/balances',{headers:{Accept:'application/json',...(process.env.ADMIN_TOKEN?{'X-Krista-Token':process.env.ADMIN_TOKEN}:{})},signal:AbortSignal.timeout(15000)});
+ const data=await response.json();if(!response.ok||!data.ok||!Array.isArray(data.accounts))throw Error('Revolut-Kontostand derzeit nicht erreichbar.');
+ return data;
+ }
+ router.get('/api/bank-balance',wrap(async(req,res)=>{
+ const data=await bankData();let selected=(await store.read()).tgeAccountId;
+ if(!selected){const matches=data.accounts.filter(a=>/^(man[\s_-]*)?tge$/i.test(String(a.name||'').trim())&&a.state!=='closed');if(matches.length===1){selected=matches[0].id;await store.update(s=>{if(!s.tgeAccountId)s.tgeAccountId=selected;else selected=s.tgeAccountId;});}}
+ const a=data.accounts.find(a=>a.id===selected);
+ res.json({account:a?{id:a.id,name:a.name,balance:a.balance,currency:a.currency}:null,fetchedAt:data.fetchedAt,stale:!!data.stale,...(req.camperActor.admin?{accounts:data.accounts.map(a=>({id:a.id,name:a.name,currency:a.currency}))}:{})});
+ }));
+ router.put('/api/bank-account',wrap(async(req,res)=>{
+ if(!req.camperActor.admin)return res.sendStatus(403);
+ const data=await bankData();const a=data.accounts.find(a=>a.id===req.body.id);if(!a)throw Error('Konto nicht gefunden.');
+ await store.update(s=>{s.tgeAccountId=a.id;});res.json({ok:true});
+ }));
+
  router.get('/api/state',wrap(async(req,res)=>res.json(await store.read())));
  const kinds=['tasks','costs','hours','decisions','mails','ideas','purchases'];
  function validate(kind,b){const out={vehicle:['egon','elio','both'].includes(b.vehicle)?b.vehicle:'both',title:String(b.title||'').trim().slice(0,300),notes:String(b.notes||'').slice(0,10000),person:String(b.person||'').slice(0,80),date:String(b.date||'').slice(0,10)};if(!out.title)throw Error('Bitte eine Bezeichnung eingeben.');if(kind==='tasks'||kind==='decisions')out.status=['offen','in-arbeit','freigabe','erledigt'].includes(b.status)?b.status:'offen';if(kind==='costs'||kind==='hours'){const n=Number(b.amount);if(!Number.isFinite(n)||n<=0||n>10000000)throw Error('Bitte einen positiven Betrag bzw. Stundenwert eingeben.');out.amount=n;}if(kind==='costs')out.status=['einzahlung','geplant','bestellt','bezahlt'].includes(b.status)?b.status:'geplant';return details(kind,b,out);}
  router.put('/api/budget',wrap(async(req,res)=>{const b=req.body;if(!['egon','elio'].every(k=>Number.isFinite(b[k])&&b[k]>=0&&b[k]<100000000))throw Error('Budget ungültig.');res.json(await store.update(s=>{if(b.revision!==s.revision)throw Object.assign(Error('Projekt wurde inzwischen geändert. Bitte neu laden.'),{status:409});s.budget={egon:b.egon,elio:b.elio};}));}));
  router.post('/api/items/:kind',wrap(async(req,res)=>{const kind=req.params.kind;if(!kinds.includes(kind))return res.sendStatus(404);const value=validate(kind,req.body);res.status(201).json(await store.update(s=>s[kind].push({...value,id:crypto.randomUUID(),version:1,by:req.camperActor.name,created:new Date().toISOString()})));}));
- router.patch('/api/items/:kind/:id',wrap(async(req,res)=>{const kind=req.params.kind;if(!kinds.includes(kind))return res.sendStatus(404);const value=validate(kind,req.body);res.json(await store.update(s=>{const row=s[kind].find(x=>x.id===req.params.id);if(!row)throw Error('Eintrag fehlt.');if(row.version!==req.body.version)throw Object.assign(Error('Eintrag wurde inzwischen geändert. Bitte neu laden.'),{status:409});Object.assign(row,value,{version:row.version+1,by:req.camperActor.name,updated:new Date().toISOString()});}));}));
+ router.patch('/api/items/:kind/:id',wrap(async(req,res)=>{const kind=req.params.kind;if(!kinds.includes(kind))return res.sendStatus(404);const value=validate(kind,req.body);res.json(await store.update(s=>{const row=s[kind].find(x=>x.id===req.params.id);if(!row)throw Error('Eintrag fehlt.');if(row.version!==req.body.version)throw Object.assign(Error('Eintrag wurde inzwischen geändert. Bitte neu laden.'),{status:409});if(['tasks','decisions'].includes(kind)){const {history,...before}=row;row.history=[...(history||[]),{at:new Date().toISOString(),by:req.camperActor.name,before}];}
+ Object.assign(row,value,{version:row.version+1,by:req.camperActor.name,updated:new Date().toISOString()});}));}));
  router.delete('/api/items/:kind/:id',wrap(async(req,res)=>{const kind=req.params.kind;if(!kinds.includes(kind))return res.sendStatus(404);res.json(await store.update(s=>{const i=s[kind].findIndex(x=>x.id===req.params.id);if(i<0||s[kind][i].version!==req.body.version)throw Object.assign(Error('Eintrag geändert oder bereits gelöscht. Bitte neu laden.'),{status:409});s[kind].splice(i,1);}));}));
- const types={'.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.pdf':'application/pdf','.skp':'application/octet-stream','.eml':'message/rfc822'};
- router.post('/api/files',express.raw({type:'application/octet-stream',limit:'50mb'}),wrap(async(req,res)=>{const name=String(req.query.name||'').slice(0,180),ext=path.extname(name).toLowerCase(),type=types[ext];if(!type||!Buffer.isBuffer(req.body)||!req.body.length)throw Error('JPEG, PNG, PDF, SKP oder EML bis 50 MB auswählen.');const b=req.body;if(type==='application/pdf'&&!b.subarray(0,5).equals(Buffer.from('%PDF-'))||type==='image/jpeg'&&!(b[0]===255&&b[1]===216)||type==='image/png'&&b.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')throw Error('Dateiinhalt passt nicht zum Dateityp.');const url=modelUrl(req.query.modelUrl),id=crypto.randomUUID(),disk=id+ext;await fsp.mkdir(path.join(dir,'files'),{recursive:true});await fsp.writeFile(path.join(dir,'files',disk),b,{flag:'wx',mode:0o600});try{res.status(201).json(await store.update(s=>s.files.push({id,name,disk,type,size:b.length,vehicle:['egon','elio'].includes(req.query.vehicle)?req.query.vehicle:'both',category:ext==='.eml'?'mail':fileCategories.includes(req.query.category)?req.query.category:'plan',modelUrl:url,versionLabel:String(req.query.version||'').slice(0,80),purchaseId:String(req.query.purchaseId||'').slice(0,80),created:new Date().toISOString(),by:req.camperActor.name})));}catch(e){await fsp.unlink(path.join(dir,'files',disk));throw e;}}));
 
- const fileCategories=['plan','angebot','rechnung','sonstiges'];
+ const types={'.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.webp':'image/webp','.pdf':'application/pdf','.skp':'application/octet-stream','.eml':'message/rfc822','.mp4':'video/mp4','.webm':'video/webm','.mov':'video/quicktime'};
+ router.post('/api/files',wrap(async(req,res)=>{
+ const name=path.basename(String(req.query.name||'')).slice(0,180),ext=path.extname(name).toLowerCase(),type=types[ext];
+ if(!type||(!['idee'].includes(req.query.category)&&['.mp4','.mov','.webm'].includes(ext)))throw Error('Dateityp für diese Ablage nicht unterstützt.');
+ const id=crypto.randomUUID(),disk=id+ext,folder=path.join(dir,'files'),target=path.join(folder,disk),temp=target+'.part';
+ const url=modelUrl(req.query.modelUrl);await fsp.mkdir(folder,{recursive:true});
+ let size=0;const signature=[];let signatureSize=0;
+ const limit=new Transform({transform(chunk,enc,done){size+=chunk.length;if(size>MAX_FILE)return done();if(signatureSize<16){const part=chunk.subarray(0,16-signatureSize);signature.push(part);signatureSize+=part.length;}done(null,chunk);}});
+ try{
+ await pipeline(req,limit,fs.createWriteStream(temp,{flags:'wx',mode:0o600}));
+ const b=Buffer.concat(signature);
+ if(size>MAX_FILE)throw Object.assign(Error('Datei zu groß (maximal 250 MB).'),{status:413});
+ if(!size)throw Error('Datei ist leer.');
+ if(type==='application/pdf'&&!b.subarray(0,5).equals(Buffer.from('%PDF-'))||type==='image/jpeg'&&!(b[0]===255&&b[1]===216)||type==='image/png'&&b.subarray(0,8).toString('hex')!=='89504e470d0a1a0a'||type==='image/webp'&&b.subarray(8,12).toString()!=='WEBP'||['.mp4','.mov'].includes(ext)&&b.subarray(4,8).toString()!=='ftyp'||ext==='.webm'&&b.subarray(0,4).toString('hex')!=='1a45dfa3')throw Error('Dateiinhalt passt nicht zum Dateityp.');
+ await fsp.rename(temp,target);
+ const result=await store.update(s=>{
+ const assignment=fileAssignment({...req.query,category:ext==='.eml'?'mail':req.query.category},s),now=new Date().toISOString();
+ s.files.push({id,name,disk,type,size,...assignment,modelUrl:url,version:1,versionLabel:String(req.query.version||'').slice(0,80),created:now,by:req.camperActor.name});
+ if(assignment.category==='idee')s.ideas.push({id:crypto.randomUUID(),version:1,title:name,vehicle:assignment.vehicle,fileId:id,url:'',imageUrl:'',topic:'',notes:'',created:now,by:req.camperActor.name});
+ });res.status(201).json(result);
+ }catch(e){await fsp.unlink(temp).catch(()=>{});await fsp.unlink(target).catch(()=>{});throw e;}
+ }));
+
+ const fileCategories=['plan','angebot','rechnung','sonstiges','idee','mail'];
  function fileAssignment(b,s){const category=fileCategories.includes(b.category)?b.category:'plan';const purchaseId=String(b.purchaseId||'');if(purchaseId&&!s.purchases.some(p=>p.id===purchaseId))throw Error('Einkaufsvorgang fehlt.');return {category,purchaseId,vehicle:['egon','elio','both'].includes(b.vehicle)?b.vehicle:'both'};}
  router.post('/api/mailbox/messages/:id/attachments/:aid/import',wrap(async(req,res)=>{
  const bytesFile=await mailbox.attachment(req.params.id,req.params.aid);
@@ -85,8 +131,8 @@ function registerCamper(app,options={}){
  Object.assign(f,fileAssignment(req.body,s),{version:(f.version||1)+1,updated:new Date().toISOString()});
  }))));
 
- router.get('/api/files/:id',wrap(async(req,res)=>{const row=(await store.read()).files.find(x=>x.id===req.params.id);if(!row)return res.sendStatus(404);res.type(row.type);res.set('Content-Security-Policy',"default-src 'none'; sandbox");res.set('Content-Disposition',`${req.query.download||!['image/jpeg','image/png','application/pdf'].includes(row.type)?'attachment':'inline'}; filename*=UTF-8''${encodeURIComponent(row.name).replace(/'/g,'%27')}`);res.sendFile(path.join(dir,'files',row.disk));}));
+ router.get('/api/files/:id',wrap(async(req,res)=>{const row=(await store.read()).files.find(x=>x.id===req.params.id);if(!row)return res.sendStatus(404);res.type(row.type);res.set('Content-Security-Policy',"default-src 'none'; sandbox");res.set('Content-Disposition',`${req.query.download||!['image/jpeg','image/png','image/webp','application/pdf','video/mp4','video/webm','video/quicktime'].includes(row.type)?'attachment':'inline'}; filename*=UTF-8''${encodeURIComponent(row.name).replace(/'/g,'%27')}`);res.sendFile(path.join(dir,'files',row.disk));}));
  router.get(['','/','/app.js','/style.css'],(req,res)=>{if(req.query.token&&['/',''].includes(req.path)){res.set('Referrer-Policy','no-referrer');if(!admin(req,res))return;return res.redirect(303,'/camper/');}const name=req.path==='/app.js'?'app.js':req.path==='/style.css'?'style.css':'index.html';res.sendFile(path.join(__dirname,'camper-public',name));});
- router.use((err,req,res,next)=>{if(res.headersSent)return next(err);res.status(err.status||400).json({error:err.status===413?'Datei zu groß (maximal 50 MB).':err.message});});app.use('/camper',router);return {store,connectMailbox(accessToken){mailbox=require('./camper-mailbox').createCamperMailbox(accessToken);}};
+ router.use((err,req,res,next)=>{if(res.headersSent)return next(err);res.status(err.status||400).json({error:err.status===413?'Datei zu groß (maximal 250 MB).':err.message});});app.use('/camper',router);return {store,connectMailbox(accessToken){mailbox=require('./camper-mailbox').createCamperMailbox(accessToken);}};
 }
 module.exports={registerCamper,createStore,modelUrl};
