@@ -180,18 +180,34 @@ catch {
       (Get-Service -Name $serviceName).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(8))
     }
   } catch {}
-  if ($wasServiceRunning) {
+  # Wenn der Dienst erstmalig angelegt wurde, aber nicht sauber startet,
+  # den unbenutzbaren Dienst wieder entfernen. Sonst würde der alte
+  # Benutzer-Installer künftig fälschlich auf den defekten Dienst umleiten.
+  if (-not $previousServiceExists) {
+    try {
+      if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
+        & sc.exe delete $serviceName | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+          Write-Warning "Nicht gestarteten Dienst bitte manuell entfernen (sc.exe delete $serviceName)."
+        }
+      }
+    }
+    catch { Write-Warning "Nicht gestarteten Dienst bitte manuell entfernen: $_" }
+  }
+  else {
+    # Bei Aktualisierung des bestehenden Dienstes Dateien zurückstellen,
+    # auch wenn der bisherige Dienst vor der Aktualisierung gestoppt war.
     try {
       foreach ($file in @("kristine-paint-service.exe","kristine-paint-local-bridge.ps1","service.args")) {
         $original = Join-Path $root $file
         if (Test-Path "$original.bak") { Copy-Item -LiteralPath "$original.bak" -Destination $original -Force }
       }
-      Start-Service -Name $serviceName -ErrorAction Stop
+      if ($wasServiceRunning) { Start-Service -Name $serviceName -ErrorAction Stop }
     }
-    catch { Write-Warning "Vorherigen Dienst bitte manuell pruefen: $_" }
+    catch { Write-Warning "Vorherigen Dienst bitte manuell prüfen: $_" }
   }
-  elseif ($wasLegacyRunning -and (Test-Path $legacyPath)) {
-    # Rueckfall auf den bereits vorhandenen, vorher laufenden Benutzer-Dienst.
+  if ($wasLegacyRunning -and (Test-Path $legacyPath)) {
+    # Rückfall auf die bereits vorher laufende Benutzer-Bridge.
     try {
       $legacyArgs = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $legacyPath + '"'
       Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -ArgumentList $legacyArgs
