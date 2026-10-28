@@ -10,6 +10,7 @@
   const printedJobs = new Set();
   let weighing = false;
   let scanTimer = null;
+  let bridgeStartRequestedAt = 0;
 
   const el = (id) => document.getElementById(id);
   const tokenized = (url) => url + (url.includes("?") ? "&" : "?") + (token ? "token=" + encodeURIComponent(token) : "").replace(/[?&]$/, "");
@@ -89,17 +90,53 @@
   }
 
   async function checkHardware() {
+    const start = el("returnBridgeStartBtn");
     try {
       const data = await localApi("/health");
+      if (start) {
+        start.hidden = true;
+        start.disabled = false;
+        start.textContent = "▶ Dienst starten";
+      }
+      bridgeStartRequestedAt = 0;
       const scaleOk = !!data.scale?.available;
       const printerOk = !!data.printer?.available;
       if (scaleOk && printerOk) setHardwareState("● Waage + Zebra bereit", true);
       else setHardwareState(`● ${scaleOk ? "Waage" : "Waage fehlt"} · ${printerOk ? "Zebra" : "Zebra fehlt"}`, false);
       return scaleOk && printerOk;
     } catch {
-      setHardwareState("● Hardware-Dienst nicht gestartet", false);
+      setHardwareState(
+        bridgeStartRequestedAt && Date.now() - bridgeStartRequestedAt < 12000
+          ? "● Start angefordert – ggf. Windows-Bestätigung erlauben"
+          : "● Hardware-Dienst nicht gestartet",
+        false
+      );
+      if (start) {
+        start.hidden = false;
+        start.disabled = false;
+        start.textContent = "▶ Dienst starten";
+      }
       return false;
     }
+  }
+
+  function requestBridgeStart() {
+    const start = el("returnBridgeStartBtn");
+    bridgeStartRequestedAt = Date.now();
+    if (start) {
+      start.disabled = true;
+      start.textContent = "▶ Start wird angefordert …";
+    }
+    setHardwareState("● Starte Hardware-Dienst am Misch-PC …", false);
+
+    // Nur der Misch-PC hat den lokalen URL-Protokollhandler installiert.
+    // Der Browser kann Windows-Dienste nicht selbst starten.
+    const link = document.createElement("a");
+    link.href = "kristinepaint://start";
+    link.style.display = "none";
+    document.body.appendChild(link);
+    try { link.click(); } finally { link.remove(); }
+    [2500, 6000, 11000].forEach((delay) => setTimeout(checkHardware, delay));
   }
 
   async function readWeight() {
@@ -270,6 +307,8 @@
     style.textContent = `
       .return-hardware-line{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-4px 0 12px;font-size:12px;font-weight:800;color:#687068}
       .return-hardware-line.ok{color:#23673e}.return-hardware-line.err{color:#a7322d}
+      #returnBridgeStartBtn{margin:-5px 0 12px}
+      #returnBridgeStartBtn[hidden]{display:none}
       .return-weight-wrap{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;align-items:center}
       .return-weight-wrap .btn{min-height:43px;white-space:nowrap}
       #returnFreeLabelOpen{margin:12px 0}
@@ -298,6 +337,15 @@
       state.className = "return-hardware-line";
       state.textContent = "● Hardware wird geprüft …";
       heading.insertAdjacentElement("afterend", state);
+      const start = document.createElement("button");
+      start.id = "returnBridgeStartBtn";
+      start.type = "button";
+      start.className = "btn";
+      start.hidden = true;
+      start.textContent = "▶ Dienst starten";
+      start.title = "Startet den lokalen Zebra-/Waagen-Dienst nur am eingerichteten Misch-PC. Windows kann eine Bestätigung verlangen.";
+      start.addEventListener("click", requestBridgeStart);
+      state.insertAdjacentElement("afterend", start);
       addFreeLabelDialog(heading);
     }
 
