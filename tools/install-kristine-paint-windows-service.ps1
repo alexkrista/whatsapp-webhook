@@ -41,6 +41,8 @@ $wasServiceRunning = $false
 $wasLegacyRunning = $false
 $previousRunValue = $null
 $previousServiceExists = $false
+$createdNewService = $false
+$legacyStopped = $false
 $oldHealth = $null
 $startedNewService = $false
 
@@ -54,8 +56,20 @@ try {
   }
 
   $bridgeSource = Get-Content -LiteralPath (Join-Path $stage "kristine-paint-local-bridge.ps1") -Raw
-  if ($bridgeSource -notmatch "version = '1\.5\.0'") {
-    throw "Unerwartete Bridge-Version. Keine Umstellung."
+  # Dieselbe erwartete Versionsnummer wie im Installer verwenden.
+  # Vorher war der Vergleich irrtuemlich fest auf 1.5.0 verdrahtet.
+  $versionPattern = "(?m)^\s*version\s*=\s*'" + [regex]::Escape($expectedVersion) + "'\s*$"
+  if (-not [regex]::IsMatch($bridgeSource, $versionPattern)) {
+    $found = [regex]::Match($bridgeSource, "(?m)^\s*version\s*=\s*'([^']+)'\s*$")
+    $foundVersion = if ($found.Success) { $found.Groups[1].Value } else { "nicht erkennbar" }
+    throw "Unerwartete Bridge-Version $foundVersion (erwartet $expectedVersion). Keine Umstellung."
+  }
+  $tokens = $null
+  $parseErrors = $null
+  [void][System.Management.Automation.Language.Parser]::ParseFile(
+    (Join-Path $stage "kristine-paint-local-bridge.ps1"), [ref]$tokens, [ref]$parseErrors)
+  if ($parseErrors.Count -gt 0) {
+    throw "Heruntergeladenes Bridge-Skript hat PowerShell-Syntaxfehler. Keine Umstellung."
   }
 
   $compiler = New-Object Microsoft.CSharp.CSharpCodeProvider
@@ -114,6 +128,7 @@ try {
     $stillRunning = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
     if ($stillRunning) {
       Stop-Process -Id $ownerPid -Force -ErrorAction Stop
+      if ($wasLegacyRunning) { $legacyStopped = $true }
       Start-Sleep -Milliseconds 800
     }
   }
@@ -131,6 +146,7 @@ try {
 
   if (-not $previousServiceExists) {
     New-Service -Name $serviceName -DisplayName "KRISTINE Restfarben - Zebra und Waage" -BinaryPathName ('"' + $serviceExe + '"') -StartupType Automatic | Out-Null
+    $createdNewService = $true
   } else {
     & sc.exe config $serviceName start= auto | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Dienstkonfiguration fehlgeschlagen." }
@@ -196,7 +212,10 @@ catch {
   # Wenn der Dienst erstmalig angelegt wurde, aber nicht sauber startet,
   # den unbenutzbaren Dienst wieder entfernen. Sonst würde der alte
   # Benutzer-Installer künftig fälschlich auf den defekten Dienst umleiten.
-  if (-not $previousServiceExists) {
+  # Nur einen Dienst entfernen, den DIESER Installationslauf angelegt hat.
+  # Ein frueher Abbruch in der Versionspruefung darf niemals den bestehenden
+  # funktionierenden Dienst anruehren (Fehler vom 28.10.2026).
+  if ($createdNewService) {
     try {
       if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
         & sc.exe delete $serviceName | Out-Null
@@ -207,7 +226,7 @@ catch {
     }
     catch { Write-Warning "Nicht gestarteten Dienst bitte manuell entfernen: $_" }
   }
-  else {
+  elseif ($previousServiceExists) {
     # Bei Aktualisierung des bestehenden Dienstes Dateien zurückstellen,
     # auch wenn der bisherige Dienst vor der Aktualisierung gestoppt war.
     try {
@@ -219,7 +238,7 @@ catch {
     }
     catch { Write-Warning "Vorherigen Dienst bitte manuell prüfen: $_" }
   }
-  if ($wasLegacyRunning -and (Test-Path $legacyPath)) {
+  if ($legacyStopped -and (Test-Path $legacyPath)) {
     # Rückfall auf die bereits vorher laufende Benutzer-Bridge.
     try {
       $legacyArgs = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $legacyPath + '"'
