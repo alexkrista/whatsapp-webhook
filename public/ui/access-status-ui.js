@@ -103,19 +103,20 @@
         .krista-shell-main.krista-access-v4 .krista-world-icon{display:inline!important}
         .krista-access-slot{
           grid-column:1/-1!important;grid-row:2!important;width:100%!important;
-          display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;
+          display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;
           gap:5px!important;overflow:visible!important;padding-top:2px!important;
         }
         .krista-quick-task{grid-column:1!important;grid-row:1!important}
         .krista-gate-lamp{grid-column:2!important;grid-row:1!important}
         .krista-door-stack{display:contents!important}
-        .krista-services-lamp{grid-column:3!important;grid-row:1!important;width:100%!important}
+        .krista-paint-lamp{grid-column:3!important;grid-row:1!important;width:100%!important}
+        .krista-services-lamp{grid-column:4!important;grid-row:1!important;width:100%!important}
         .krista-door-row{
           grid-column:1/-1!important;grid-row:2!important;
           display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;
           gap:5px!important;width:100%!important;
         }
-        .krista-quick-task,.krista-gate-lamp,.krista-door-lamp,.krista-services-lamp{
+         .krista-quick-task,.krista-gate-lamp,.krista-door-lamp,.krista-services-lamp,.krista-paint-lamp{
           width:100%!important;min-width:0!important;padding-inline:5px!important;
         }
         .krista-door-state{display:inline!important}
