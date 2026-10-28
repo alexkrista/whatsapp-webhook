@@ -6,7 +6,7 @@ test('large OneDrive upload verifies Graph before creating an idempotent tile an
  const routes=[],router={get(p,h){routes.push({p,m:'GET',h});},post(p,h){routes.push({p,m:'POST',h});}},store=createStore(dir);let storedName='',complete=false,deny=false;
  const request=async(url,options)=>{assert.match(options.headers.Authorization,/Bearer fake-token/);const suffix=url.replace('https://graph.microsoft.com/v1.0','');let data={id:'folder',folder:{}};
   if(deny)return {ok:false,status:403};
-  if(suffix.endsWith('createUploadSession')){storedName=JSON.parse(options.body).item.name;data={uploadUrl:'https://example.invalid/upload-secret',expirationDateTime:'2026-10-29T00:00:00Z'};}
+  if(suffix.endsWith('createUploadSession')){const input=JSON.parse(options.body);assert.deepEqual(Object.keys(input),['item']);assert.equal(input.item.fileSize,undefined);storedName=input.item.name;data={uploadUrl:'https://example.invalid/upload-secret',expirationDateTime:'2026-10-29T00:00:00Z'};}
   else if(suffix.includes(storedName)&&storedName)data={id:'item',name:storedName,size:complete?850*1024*1024:1,file:{mimeType:'application/octet-stream'},webUrl:'https://example.sharepoint.com/file',parentReference:{id:'folder',driveId:'drive'}};
   else if(suffix.endsWith('/thumbnails'))data={value:[{medium:{url:'https://example.invalid/thumb'}}]};
   else if(suffix==='/drives/drive/items/item')data={'@microsoft.graph.downloadUrl':'https://example.invalid/download'};
