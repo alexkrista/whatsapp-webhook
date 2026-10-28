@@ -25,7 +25,7 @@ const { JSDOM } = require("jsdom");
     const body = options.body ? JSON.parse(options.body) : {};
     requests.push({ path: u.pathname, query: u.searchParams.toString(), method: options.method || "GET", body });
     if (u.pathname.endsWith("/remove")) { item = {...item, status: body.reason, revision: item.revision + 1}; return response({ok:true,item}); }
-    if (u.pathname === "/health") return response({ scale: { available: true }, printer: { available: true } });
+    if (u.pathname === "/health") return response({ ok: true, version: "1.5.0", scale: { available: true }, printer: { available: true } });
     if (u.pathname === "/print" || u.pathname.endsWith("/ack")) return response({ ok: true });
     if (u.pathname.endsWith("/jobs")) return response({ jobs: [{ id: "A", name: "Alt" }, { id: "B", name: "Neu" }] });
     if (u.pathname.endsWith("/materials")) return response({ materials: [] });
