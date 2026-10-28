@@ -81,6 +81,17 @@ if ([string]$healthResult.version -ne $expectedVersion) {
   throw "Hardware Bridge laeuft noch in Version $($healthResult.version), erwartet wird $expectedVersion. Bitte Windows einmal neu starten."
 }
 
+# Startbutton in KRISTINE auch fuer die bisherige Benutzer-Bridge
+# freischalten. Die URL kann ausschliesslich das feste lokale Skript starten.
+$starterPath = Join-Path $installDir "start-kristine-paint-local-bridge.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/alexkrista/whatsapp-webhook/main/tools/start-kristine-paint-local-bridge.ps1" -OutFile $starterPath
+$protocol = "HKCU:\Software\Classes\kristinepaint"
+$command = "$protocol\shell\open\command"
+New-Item -Path $command -Force | Out-Null
+Set-Item -Path $protocol -Value "URL:KRISTINE Paint Bridge"
+New-ItemProperty -Path $protocol -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
+Set-Item -Path $command -Value ('powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $starterPath + '"')
+
 Write-Host ""
 Write-Host "KRISTINE Restfarben Hardware Bridge aktualisiert und gestartet."
 Write-Host "Version: $($healthResult.version)"
