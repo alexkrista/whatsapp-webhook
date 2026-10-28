@@ -435,7 +435,7 @@
     loadKriszeitToolbar();
     loadCurrentBeulen();
     loadScriptOnce("/public/ui/outlook-services.js?v=20260919-outlook-1", "data-krista-outlook-services");
-    loadScriptOnce("/public/ui/access-status-ui.js?v=20261012-ipad-nav-1", "data-krista-access-status-v3");
+    loadScriptOnce("/public/ui/access-status-ui.js?v=20261028-zebra-status-1", "data-krista-access-status-v3");
     activateKristineHash();
   });
 

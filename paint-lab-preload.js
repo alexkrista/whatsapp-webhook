@@ -110,7 +110,7 @@ function registerPaintHtmlHotfix(app, publicDir) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-return-stock-ui.js?v=20260924-readable-cards"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-return-local-hardware-ui.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-return-local-hardware-ui.js?v=20261028-service-start"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-return-local-hardware-ui.js?v=20261028-multiline-1"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-return-enhancements-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-return-enhancements-ui.js?v=20260910-caparol"></script>\n</body>');

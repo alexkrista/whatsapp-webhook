@@ -11,6 +11,11 @@
   const doorHolds=new Map();
   const doorLocks=new Map();
   let gateLockedUntil=0;
+  // Die Zebra-/Waagen-Bridge ist ausschliesslich lokal am Misch-PC erreichbar.
+  // Der Cloud-Server kennt den Status dieser USB-Geraete nicht.
+  let paintBridge={state:"checking",printer:false,scale:false,version:""};
+  let paintStartRequestedAt=0;
+  let paintCheckInProgress=false;
 
   function taskUrl(){
     const u=new URL("/kristine",location.origin);
@@ -53,7 +58,7 @@
       }
       .krista-door-stack{display:flex!important;align-items:center!important;gap:5px!important;min-width:0!important}
       .krista-door-row{display:flex!important;align-items:center!important;gap:5px!important;min-width:0!important}
-      .krista-quick-task,.krista-gate-lamp,.krista-door-lamp,.krista-system-lamp,.krista-services-lamp{
+      .krista-quick-task,.krista-gate-lamp,.krista-door-lamp,.krista-system-lamp,.krista-services-lamp,.krista-paint-lamp{
         min-height:34px!important;height:34px!important;margin:0!important;padding:6px 8px!important;
         border:1px solid rgba(255,255,255,.18)!important;border-radius:9px!important;
         background:rgba(255,255,255,.07)!important;color:#fff!important;text-decoration:none!important;
@@ -62,7 +67,10 @@
         cursor:pointer!important;white-space:nowrap!important;box-sizing:border-box!important;
       }
       .krista-services-lamp{width:auto!important}
-      .krista-quick-task:hover,.krista-gate-lamp:hover,.krista-door-lamp:hover,.krista-system-lamp:hover,.krista-services-lamp:hover{background:rgba(255,255,255,.14)!important}
+      .krista-paint-lamp{padding-inline:7px!important}
+      .krista-paint-lamp .krista-paint-icon{font-size:15px!important}
+      @media(max-width:1380px){.krista-paint-lamp .krista-paint-word{display:none!important}}
+      .krista-quick-task:hover,.krista-gate-lamp:hover,.krista-door-lamp:hover,.krista-system-lamp:hover,.krista-services-lamp:hover,.krista-paint-lamp:hover{background:rgba(255,255,255,.14)!important}
       .krista-quick-task.active{background:#2f7d4a!important;border-color:#69a47d!important}
       .krista-system-lamp,.krista-services-lamp{padding-inline:7px!important}
       .krista-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:0 0 auto;background:#e7b34d}
@@ -95,19 +103,20 @@
         .krista-shell-main.krista-access-v4 .krista-world-icon{display:inline!important}
         .krista-access-slot{
           grid-column:1/-1!important;grid-row:2!important;width:100%!important;
-          display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;
+          display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;
           gap:5px!important;overflow:visible!important;padding-top:2px!important;
         }
         .krista-quick-task{grid-column:1!important;grid-row:1!important}
         .krista-gate-lamp{grid-column:2!important;grid-row:1!important}
         .krista-door-stack{display:contents!important}
-        .krista-services-lamp{grid-column:3!important;grid-row:1!important;width:100%!important}
+        .krista-paint-lamp{grid-column:3!important;grid-row:1!important;width:100%!important}
+        .krista-services-lamp{grid-column:4!important;grid-row:1!important;width:100%!important}
         .krista-door-row{
           grid-column:1/-1!important;grid-row:2!important;
           display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;
           gap:5px!important;width:100%!important;
         }
-        .krista-quick-task,.krista-gate-lamp,.krista-door-lamp,.krista-services-lamp{
+         .krista-quick-task,.krista-gate-lamp,.krista-door-lamp,.krista-services-lamp,.krista-paint-lamp{
           width:100%!important;min-width:0!important;padding-inline:5px!important;
         }
         .krista-door-state{display:inline!important}
@@ -219,6 +228,78 @@
     return{color:"yellow",state:"?",title:"Sollmodus unbekannt; keine bestätigte Türposition oder Verriegelung."};
   }
 
+
+  function paintLampModel(){
+    if(paintBridge.state==="checking")return{color:"yellow",title:"Zebra / Waage am Misch-PC wird geprüft"};
+    if(paintBridge.state==="ready" && paintBridge.printer)
+      return{color:"green",title:"Zebra druckbereit · Bridge "+paintBridge.version+(paintBridge.scale?" · Waage bereit":" · Waage nicht erreichbar")+" · Klick: Freies Etikett öffnen"};
+    if(paintBridge.state==="ready")
+      return{color:"red",title:"Lokaler Dienst läuft, Zebra ist nicht verfügbar. Bitte Drucker einschalten und Verbindung prüfen."};
+    if(paintStartRequestedAt&&Date.now()-paintStartRequestedAt<12000)
+      return{color:"yellow",title:"Lokaler Dienststart angefordert · ggf. Windows-Freigabe bestätigen"};
+    return{color:"red",title:"Lokaler Zebra-Dienst nicht erreichbar · am Misch-PC klicken zum Starten"};
+  }
+
+  function updatePaintLamp(){
+    const b=document.querySelector("[data-paint-bridge]");
+    if(!b)return;
+    const v=paintLampModel();
+    b.title=v.title;
+    b.setAttribute("aria-label","Drucker: "+v.title);
+    const dot=b.querySelector(".krista-dot");
+    if(dot)dot.className="krista-dot "+v.color;
+  }
+
+  async function loadPaintBridgeStatus(){
+    if(paintCheckInProgress)return;
+    paintCheckInProgress=true;
+    const ctrl=new AbortController();
+    const timeout=setTimeout(()=>ctrl.abort(),2500);
+    try{
+      const resp=await fetch("http://127.0.0.1:17831/health",{cache:"no-store",signal:ctrl.signal});
+      if(!resp.ok)throw new Error("Hardware-Dienst HTTP "+resp.status);
+      const data=await resp.json();
+      if(data.ok!==true)throw new Error("Hardware-Dienst meldet Fehler");
+      paintBridge={state:"ready",printer:!!data.printer?.available,scale:!!data.scale?.available,version:String(data.version||"?")};
+      paintStartRequestedAt=0;
+    }catch(_){
+      paintBridge={state:"offline",printer:false,scale:false,version:""};
+    }finally{
+      clearTimeout(timeout);
+      paintCheckInProgress=false;
+      updatePaintLamp();
+    }
+  }
+
+  function paintFreeLabelUrl(){
+    const url=new URL("/admin/paint",location.origin);
+    if(token)url.searchParams.set("token",token);
+    url.searchParams.set("freeLabel","1");
+    return url.pathname+url.search;
+  }
+
+  function handlePaintClick(){
+    if(paintBridge.state==="ready"){
+      if(!paintBridge.printer){alert("Der lokale Dienst läuft, aber der Zebra ist nicht verfügbar. Bitte Drucker und USB-Anschluss prüfen.");return;}
+      if(location.pathname.toLowerCase().includes("/admin/paint")){
+        document.getElementById("returnStockTabBtn")?.click();
+        document.getElementById("returnFreeLabelOpen")?.click();
+      }else location.href=paintFreeLabelUrl();
+      return;
+    }
+    // Unbekannte Rechner können den Protokollstarter nicht ausführen.
+    // Es werden niemals beliebige Befehle aus dem Browser weitergereicht.
+    if(!confirm("Zebra-/Waagen-Dienst am Misch-PC starten?\n\nNur am eingerichteten Misch-PC möglich."))return;
+    paintStartRequestedAt=Date.now();
+    updatePaintLamp();
+    const a=document.createElement("a");
+    a.href="kristinepaint://start";
+    a.hidden=true;
+    document.body.appendChild(a);
+    try{a.click();}finally{a.remove();}
+    [2000,6000,11000].forEach(ms=>setTimeout(loadPaintBridgeStatus,ms));
+  }
+
   function draw(d){
     d=applyDoorHolds(d);
     last=d;
@@ -245,10 +326,12 @@
       doorHtml+=`<button class="krista-door-lamp${locked?" syncing":""}" data-door="${n}" ${valid?"":"disabled"} aria-label="${labels[n]}: ${v.title} ${action}" title="${v.title} · ${action}${reason?" · Grund: "+reason:""}"><span class="krista-dot ${v.color}"></span><span>${labels[n]}</span><span class="krista-door-state">${v.state}</span></button>`;
     }
     const svcColor=servicesColor();
-    h+=`<div class="krista-door-stack"><div class="krista-door-row">${doorHtml}</div><button class="krista-services-lamp" data-services title="${servicesTitle()}"><span class="krista-dot ${svcColor}"></span><span>Dienste</span></button></div>`;
+    const p=paintLampModel();
+    h+=`<div class="krista-door-stack"><div class="krista-door-row">${doorHtml}</div><button class="krista-paint-lamp" data-paint-bridge type="button" title="${p.title}" aria-label="Drucker: ${p.title}"><span class="krista-paint-icon" aria-hidden="true">🖨</span><span class="krista-dot ${p.color}"></span><span class="krista-paint-word">Zebra</span></button><button class="krista-services-lamp" data-services title="${servicesTitle()}"><span class="krista-dot ${svcColor}"></span><span>Dienste</span></button></div>`;
 
     slot.innerHTML=h;
     slot.querySelector("[data-services]")?.addEventListener("click",openServices);
+    slot.querySelector("[data-paint-bridge]")?.addEventListener("click",handlePaintClick);
     slot.querySelector("[data-gate]")?.addEventListener("click",e=>pulseGate(e.currentTarget));
     slot.querySelectorAll("[data-door]").forEach(b=>b.addEventListener("click",()=>toggle(b)));
   }
@@ -346,8 +429,8 @@
     css();
     if(mount()){
       window.addEventListener("krista:outlook-status",updateServicesLamp);
-      load();loadServicesStatus();
-      setInterval(load,5000);setInterval(loadServicesStatus,5000);
+      load();loadServicesStatus();loadPaintBridgeStatus();
+      setInterval(load,5000);setInterval(loadServicesStatus,5000);setInterval(loadPaintBridgeStatus,15000);
       window.addEventListener("hashchange",()=>setTimeout(()=>{load();loadServicesStatus()},50));
     }else setTimeout(start,250);
   }
