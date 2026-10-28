@@ -86,9 +86,22 @@ try {
   $conn = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $ListenPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($conn) { $ownerPid = [int]$conn.OwningProcess }
   if ($ownerPid) {
-    $commandLine = [string](Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction SilentlyContinue).CommandLine
+    $ownerProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction Stop
+    $commandLine = [string]$ownerProcess.CommandLine
     if ($commandLine -notmatch 'kristine-paint-local-bridge\.ps1') {
       throw "Port $ListenPort wird von einem anderen Programm verwendet. Keine Umstellung."
+    }
+    if (-not $wasServiceRunning) {
+      # Der alte Benutzer-Autostart gehört zum Drucker-Benutzerkonto.
+      # Bei einer Admin-Anmeldung mit anderem Konto könnten weder der
+      # ursprüngliche Autostart noch der Rollback zuverlässig greifen.
+      # Deshalb vor dem ersten Stop zwingend dieselbe Windows-SID prüfen.
+      $ownerInfo = Invoke-CimMethod -InputObject $ownerProcess -MethodName GetOwnerSid -ErrorAction Stop
+      $runningSid = [string]$ownerInfo.Sid
+      $installerSid = [string][Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+      if (-not $runningSid -or $runningSid -ne $installerSid) {
+        throw "Der Misch-PC-Dienst laeuft unter einem anderen Windows-Benutzer. Bitte den Installer mit demselben Benutzerkonto als Administrator starten. Der laufende Druck bleibt unveraendert."
+      }
     }
     $wasLegacyRunning = -not $wasServiceRunning
   }
