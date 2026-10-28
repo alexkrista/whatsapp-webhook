@@ -14,6 +14,7 @@ on:
       - 'tools/install-kristine-paint-local-bridge.ps1'
       - 'tools/install-kristine-paint-windows-service.ps1'
       - 'TEST/paint-free-multiline-zpl.test.ps1'
+      - 'TEST/paint-service-installer-version.test.ps1'
       - 'TEST/paint-free-multiline-ui.test.js'
       - 'TEST/paint-return-stock.test.js'
       - 'TEST/paint-return-stock-ui.test.js'
@@ -33,6 +34,7 @@ on:
       - 'tools/install-kristine-paint-local-bridge.ps1'
       - 'tools/install-kristine-paint-windows-service.ps1'
       - 'TEST/paint-free-multiline-zpl.test.ps1'
+      - 'TEST/paint-service-installer-version.test.ps1'
       - 'TEST/paint-free-multiline-ui.test.js'
       - 'TEST/paint-return-stock.test.js'
       - 'TEST/paint-return-stock-ui.test.js'
@@ -94,3 +96,7 @@ jobs:
       - name: Multiline ZPL generation (no physical print)
         shell: powershell
         run: .\TEST\paint-free-multiline-zpl.test.ps1
+
+      - name: Installer version and safe rollback regression
+        shell: powershell
+        run: .\TEST\paint-service-installer-version.test.ps1
