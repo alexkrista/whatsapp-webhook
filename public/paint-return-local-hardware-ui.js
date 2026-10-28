@@ -41,6 +41,21 @@
     const parts = String(health.version || "").split(".").map(Number);
     if (parts[0] < 1 || (parts[0] === 1 && parts[1] < 5) || !Number.isFinite(parts[0]))
       throw new Error("Druckerdienst am Misch-PC aktualisieren (Version 1.5 erforderlich)");
+    return health;
+  }
+
+  function editableLabelLines(text, label) {
+    const lines = String(text || "").replace(/\r/g, "").split("\n");
+    if (lines.length > 3) throw new Error(label + ": maximal 3 Zeilen (Enter für eine neue Zeile).");
+    const cleaned = lines.map((line) => asciiLabelText(line));
+    if (!cleaned.some(Boolean)) throw new Error(label + ": bitte Text eingeben.");
+    if (cleaned.some((line) => line.length > 26)) throw new Error(label + ": maximal 26 Zeichen pro Zeile.");
+    return cleaned;
+  }
+
+  function versionAtLeast(value, wantedMinor) {
+    const parts = String(value || "").split(".").map(Number);
+    return parts[0] > 1 || (parts[0] === 1 && parts[1] >= wantedMinor);
   }
 
   function asciiLabelText(value) {
@@ -232,11 +247,11 @@
     dialog.setAttribute("aria-labelledby", "returnFreeLabelTitle");
     dialog.innerHTML = `
       <h2 id="returnFreeLabelTitle">Etikett frei drucken</h2>
-      <p class="return-free-help">Hier stehen die Etiketten untereinander. Der Zebra druckt sie wie bisher liegend.</p>
+      <p class="return-free-help">Jeder Text ist frei bearbeitbar. Mit Enter Zeilen anlegen (maximal 3 je Etikett, höchstens 26 Zeichen pro Zeile). Kein Lagerzugang oder Archivvorgang.</p>
       <label for="returnFreeSmall">Kleines Etikett · oben</label>
-      <input id="returnFreeSmall" class="field" maxlength="24" autocomplete="off" placeholder="z. B. 24.09.2026">
+      <textarea id="returnFreeSmall" class="field" rows="3" maxlength="85" autocomplete="off" spellcheck="false" placeholder="z. B.&#10;Erdgelb&#10;20 kg Putz"></textarea>
       <label for="returnFreeBig">Größeres Etikett · unten</label>
-      <input id="returnFreeBig" class="field" maxlength="16" autocomplete="off" placeholder="z. B. LG-59">
+      <textarea id="returnFreeBig" class="field" rows="3" maxlength="85" autocomplete="off" spellcheck="false" placeholder="z. B.&#10;60 g / 20 kg&#10;Erdgelb"></textarea>
       <div class="return-free-options">
         <label for="returnFreeFont">Schriftart<select id="returnFreeFont" class="field"><option value="0">Klar</option><option value="D">Klassisch</option><option value="E">Technisch</option></select></label>
         <label for="returnFreeSize">Schriftgröße<select id="returnFreeSize" class="field"><option value="small">Klein</option><option value="normal" selected>Normal</option><option value="large">Groß</option></select></label>
@@ -253,12 +268,22 @@
     document.body.appendChild(dialog);
     const small = el("returnFreeSmall"), big = el("returnFreeBig"), font = el("returnFreeFont"), size = el("returnFreeSize"), message = el("returnFreeMessage"), print = el("returnFreePrint");
     const refresh = () => {
-      el("returnFreeSmallPreview").textContent = asciiLabelText(small.value).slice(0, 24) || "Kleines Etikett";
-      el("returnFreeBigPreview").textContent = asciiLabelText(big.value).slice(0, 16) || "Größeres Etikett";
-      el("returnFreeBigPreview").style.fontFamily = font.value === "E" ? "monospace" : font.value === "D" ? "Georgia, serif" : "Arial, sans-serif";
-      el("returnFreeSmallPreview").style.fontFamily = el("returnFreeBigPreview").style.fontFamily;
-      el("returnFreeBigPreview").style.fontSize = {small:"22px",normal:"34px",large:"45px"}[size.value];
-      el("returnFreeSmallPreview").style.fontSize = {small:"11px",normal:"14px",large:"18px"}[size.value];
+      const cleanedSmall = small.value.replace(/\r/g, "").split("\n").map(asciiLabelText);
+      const cleanedBig = big.value.replace(/\r/g, "").split("\n").map(asciiLabelText);
+      el("returnFreeSmallPreview").textContent = cleanedSmall.some(Boolean) ? cleanedSmall.join("\n") : "Kleines Etikett";
+      el("returnFreeBigPreview").textContent = cleanedBig.some(Boolean) ? cleanedBig.join("\n") : "Größeres Etikett";
+      const family = font.value === "E" ? "monospace" : font.value === "D" ? "Georgia, serif" : "Arial, sans-serif";
+      el("returnFreeBigPreview").style.fontFamily = family;
+      el("returnFreeSmallPreview").style.fontFamily = family;
+      const factor = {small:.8,normal:1,large:1.18}[size.value] || 1;
+      const longestBig = Math.max(1,...cleanedBig.map(line=>line.length));
+      const longestSmall = Math.max(1,...cleanedSmall.map(line=>line.length));
+      el("returnFreeBigPreview").style.fontSize = Math.min(38*factor,300/longestBig*1.65) + "px";
+      el("returnFreeSmallPreview").style.fontSize = Math.min(19*factor,156/longestSmall*1.65) + "px";
+      const bad = cleanedSmall.length > 3 || cleanedBig.length > 3 ||
+        cleanedSmall.some(line=>line.length>26) || cleanedBig.some(line=>line.length>26);
+      message.textContent = bad ? "Bitte maximal 3 Zeilen und 26 Zeichen pro Zeile verwenden." : "";
+      print.disabled = bad;
     };
     small.addEventListener("input", refresh);
     big.addEventListener("input", refresh);
@@ -267,17 +292,27 @@
     open.addEventListener("click", () => { message.textContent = "";refresh();dialog.showModal();small.focus(); });
     el("returnFreeCancel").addEventListener("click", () => dialog.close());
     print.addEventListener("click", async () => {
-      const labelSmall = asciiLabelText(small.value).slice(0, 24);
-      const labelBig = asciiLabelText(big.value).slice(0, 16);
-      if (!labelSmall || !labelBig) {message.textContent = "Bitte beide Etiketten beschriften.";return;}
+      let labelSmall, labelBig;
+      try {
+        labelSmall = editableLabelLines(small.value, "Kleines Etikett");
+        labelBig = editableLabelLines(big.value, "Großes Etikett");
+      } catch (error) {
+        message.textContent = error.message;return;
+      }
       print.disabled = true;
       message.textContent = "Drucke …";
       try {
-        await requireLabelFeatures();
-        await localApi("/print", { method: "POST", body: JSON.stringify({big:labelBig,small:labelSmall,job:"",font:font.value,size:size.value}) });
-        message.textContent = "Etikett gedruckt ✓";
-      } catch (error) {message.textContent = "Druck fehlgeschlagen: " + error.message;}
-      finally {print.disabled = false;}
+        const health = await requireLabelFeatures();
+        if (!versionAtLeast(health.version, 6)) {
+          throw new Error("Für frei editierbare, mehrzeilige Etiketten die lokale KRISTINE-Bridge auf Version 1.6 aktualisieren.");
+        }
+        await localApi("/print", {
+          method: "POST",
+          body: JSON.stringify({freeText:true,bigLines:labelBig,smallLines:labelSmall,font:font.value,size:size.value}),
+        });
+        message.textContent = "Beide Etiketten gedruckt ✓";
+      } catch (error) { message.textContent = "Druck fehlgeschlagen: " + error.message; }
+      finally { print.disabled = false; }
     });
   }
 
@@ -316,14 +351,14 @@
       #returnFreeLabelDialog::backdrop{background:#0009}
       #returnFreeLabelDialog h2{margin:0 0 6px}
       #returnFreeLabelDialog label{display:block;font-weight:800;margin:14px 0 5px}
-      #returnFreeLabelDialog input{width:100%;box-sizing:border-box}
+      #returnFreeLabelDialog textarea{width:100%;box-sizing:border-box;min-height:80px;resize:vertical;white-space:pre-wrap;line-height:1.35}
       .return-free-options{display:grid;grid-template-columns:1fr 1fr;gap:12px}
       .return-free-options select{width:100%;box-sizing:border-box}
       .return-free-help{margin:0;color:#59665d;font-size:13px}
       .return-free-preview{display:grid;justify-items:center;gap:8px;margin:17px auto;padding:14px;border:1px dashed #acb8ae;border-radius:10px;background:#f1f3f0;overflow:hidden}
-      .return-free-small,.return-free-big{display:grid;place-items:center;box-sizing:border-box;max-width:100%;min-width:0;padding:8px;overflow:hidden;white-space:nowrap;background:#fff;border:1px solid #ced3ce;color:#111}
-      .return-free-small{width:160px;height:56px;font-size:13px;font-weight:700}
-      .return-free-big{width:320px;height:108px;font-size:clamp(20px,5vw,34px);font-weight:900}
+      .return-free-small,.return-free-big{display:grid;place-items:center;box-sizing:border-box;max-width:100%;min-width:0;padding:8px;overflow:hidden;white-space:pre-line;overflow-wrap:anywhere;line-height:1.15;text-align:center;background:#fff;border:1px solid #ced3ce;color:#111}
+      .return-free-small{width:165px;height:82px;font-size:13px;font-weight:700}
+      .return-free-big{width:320px;height:150px;font-size:clamp(18px,5vw,34px);font-weight:900}
       .return-free-actions{display:flex;justify-content:flex-end;gap:8px}
       #returnFreeMessage{min-height:20px}
       @media(max-width:760px){.return-weight-wrap{grid-template-columns:1fr}.return-weight-wrap .btn{width:100%}}
@@ -388,6 +423,13 @@
 
     checkHardware();
     setInterval(checkHardware, 15000);
+    if (qs.get("freeLabel") === "1" && !window.__kristineFreeLabelOpenedFromHeader) {
+      window.__kristineFreeLabelOpenedFromHeader = true;
+      setTimeout(() => {
+        el("returnStockTabBtn")?.click();
+        el("returnFreeLabelOpen")?.click();
+      }, 160);
+    }
     return true;
   }
 
