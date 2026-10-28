@@ -157,7 +157,9 @@
       if (row.dataset.returnEnhanced === "1") return;
       row.dataset.returnEnhanced = "1";
       const noNode = row.querySelector(".return-no");
-      const side = row.querySelector(".return-side");
+      // Aktuelle Rückwarenkarten verwenden .return-actions; alte .return-side
+      // weiterhin unterstützen (auch für historische Ansichten).
+      const side = row.querySelector(".return-actions") || row.querySelector(".return-side");
       const no = Number(String(noNode?.textContent || "").replace(/\D/g, ""));
       if (!no || !side) return;
 
