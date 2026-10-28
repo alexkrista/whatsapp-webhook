@@ -45,6 +45,24 @@ function ConvertTo-SafeLabelText([object]$Value, [int]$MaxLength = 40) {
   return $text.Trim()
 }
 
+
+# Manuelle Etiketten haben bis zu drei bewusst gesetzte Zeilen pro Feld.
+# Nur ungefährlicher ASCII-Text, niemals ungeprüft in Zebra ZPL einsetzen.
+function ConvertTo-FreeLabelLines([object]$Raw, [string]$Field) {
+  if ($Raw -isnot [array]) { throw "$Field muss aus einzelnen Textzeilen bestehen" }
+  if ($Raw.Count -lt 1 -or $Raw.Count -gt 3) { throw "$Field: maximal drei Zeilen erlaubt" }
+  $result = New-Object System.Collections.Generic.List[string]
+  foreach ($value in $Raw) {
+    $line = [string]$value
+    if ($line.Length -gt 26) { throw "$Field: maximal 26 Zeichen pro Zeile" }
+    if ($line -match '[\r\n]') { throw "$Field: unerlaubter Zeilenumbruch" }
+    $clean = ConvertTo-SafeLabelText $line 26
+    $result.Add($clean)
+  }
+  if (-not ($result | Where-Object { $_ -ne "" })) { throw "$Field darf nicht leer sein" }
+  return ,$result.ToArray()
+}
+
 function Get-PmaWeight {
   $port = New-Object System.IO.Ports.SerialPort
   $port.PortName = $ScalePort
@@ -175,6 +193,57 @@ $jobLine
 "@
 }
 
+
+# Freier Text: Die kleine und die grosse Etikettenflaeche werden unabhaengig
+# beschriftet, inklusive expliziter Zeilenumbrueche. Keine Bestandsbuchung.
+# Das automatische Archiv-/Barcodeformat bleibt in New-ReturnLabelZpl.
+function New-FreeReturnLabelZpl([string[]]$BigLines, [string[]]$SmallLines, [string]$Font = '0', [string]$Size = 'normal') {
+  if ($Font -cnotin @('0','D','E')) { throw "Unbekannte Schriftart" }
+  if ($Size -cnotin @('small','normal','large')) { throw "Unbekannte Schriftgroesse" }
+  if ($BigLines.Count -lt 1 -or $BigLines.Count -gt 3 -or $SmallLines.Count -lt 1 -or $SmallLines.Count -gt 3) {
+    throw "Maximal drei Textzeilen je Etikett"
+  }
+  $zpl = New-Object System.Collections.Generic.List[string]
+  $zpl.Add('^XA')
+  $zpl.Add('^PW464')
+  $zpl.Add('^LL352')
+  $zpl.Add('^LT40')
+  $zpl.Add('^LH0,0')
+
+  $longestBig = 1
+  foreach ($line in $BigLines) { $longestBig = [Math]::Max($longestBig, $line.Length) }
+  $bigBase = @{ small=66; normal=85; large=104 }[$Size]
+  if ($BigLines.Count -eq 2) { $bigBase = [Math]::Min($bigBase, 104) }
+  if ($BigLines.Count -eq 3) { $bigBase = [Math]::Min($bigBase, 68) }
+  $bigWidth = [Math]::Max(8,[Math]::Min([int][Math]::Round($bigBase * .60),[int][Math]::Floor(292 / $longestBig)))
+  $bigHeight = [Math]::Max(13,[Math]::Min($bigBase,[int][Math]::Round($bigWidth / .60)))
+  $bigGap = 12
+  $bigBlock = $BigLines.Count * $bigHeight + ($BigLines.Count - 1) * $bigGap
+  $bigStartY = [int][Math]::Round(48 + (274 - $bigBlock)/2)
+  for ($i=0; $i -lt $BigLines.Count; $i++) {
+    if (-not $BigLines[$i]) { continue }
+    $y = $bigStartY + $i * ($bigHeight + $bigGap)
+    $zpl.Add("^FO144,$y^FB305,1,0,C,0^A${Font}N,$bigHeight,$bigWidth^FD$($BigLines[$i])^FS")
+  }
+
+  # Das 16 x 40 mm Etikett liegt links; seine Zeilen sind gedreht.
+  # Bei mehr Zeilen kleinere Schrift und weitere Positionen im 128-dot-Bereich.
+  $longestSmall = 1
+  foreach ($line in $SmallLines) { $longestSmall = [Math]::Max($longestSmall, $line.Length) }
+  $smallBase = @{small=24;normal=31;large=36}[$Size]
+  $smallHeight = [Math]::Min($smallBase, $(if ($SmallLines.Count -eq 3) { 26 } elseif ($SmallLines.Count -eq 2) { 34 } else { 44 }))
+  $smallWidth = [Math]::Max(8,[Math]::Min([int][Math]::Round($smallHeight*.72),[int][Math]::Floor(262/$longestSmall)))
+  $smallPositions = if ($SmallLines.Count -eq 1) { @(56) } elseif ($SmallLines.Count -eq 2) { @(70,30) } else { @(91,58,25) }
+  for ($i=0; $i -lt $SmallLines.Count; $i++) {
+    if (-not $SmallLines[$i]) { continue }
+    $x = $smallPositions[$i]
+    $zpl.Add("^FO$x,57^A${Font}R,$smallHeight,$smallWidth^FD$($SmallLines[$i])^FS")
+  }
+  $zpl.Add('^PQ1,0,0,N')
+  $zpl.Add('^XZ')
+  return ($zpl -join "`n")
+}
+
 function Send-RawZpl([string]$Zpl) {
   $printer = Get-Printer -Name $PrinterName -ErrorAction Stop
   if ($printer.PrinterStatus -eq 'Offline') { throw "Drucker ist offline: $PrinterName" }
@@ -292,7 +361,7 @@ try {
           Write-HttpJson $stream 200 ([ordered]@{
             ok = $true
             service = 'KRISTINE Restfarben Hardware Bridge'
-            version = '1.5.0'
+            version = '1.6.0'
             scale = [ordered]@{ port=$ScalePort; available=($ports -contains $ScalePort) }
             printer = [ordered]@{ name=$PrinterName; available=$printerOk }
           })
@@ -303,15 +372,25 @@ try {
         elseif ($request.Method -eq 'POST' -and $path -eq '/print') {
           if (-not $request.Body) { throw "JSON-Body fehlt" }
           $data = $request.Body | ConvertFrom-Json
-          $big = ConvertTo-SafeLabelText $data.big 16
-          $small = ConvertTo-SafeLabelText $data.small 24
-          $job = ConvertTo-SafeLabelText $data.job 44
-          $custom = $null -ne $data.font -or $null -ne $data.size
           $font = if ($null -ne $data.font) { [string]$data.font } else { '0' }
           $size = if ($null -ne $data.size) { [string]$data.size } else { 'normal' }
-          $barcode = if ($null -ne $data.returnId) { [string]$data.returnId } else { '' }
-          Send-RawZpl (New-ReturnLabelZpl $big $small $job $font $size $custom $barcode)
-          Write-HttpJson $stream 200 ([ordered]@{ ok=$true; big=$big; small=$small; job=$job; printer=$PrinterName })
+          if ($data.freeText -eq $true) {
+            # Expliziter Freitext-Modus; Barcode/Archivdaten sind hier unzulaessig.
+            if ($data.returnId -or $data.job) { throw "Freier Etikettendruck darf keine Archivbuchung anlegen" }
+            $bigLines = ConvertTo-FreeLabelLines $data.bigLines 'Grosses Etikett'
+            $smallLines = ConvertTo-FreeLabelLines $data.smallLines 'Kleines Etikett'
+            Send-RawZpl (New-FreeReturnLabelZpl $bigLines $smallLines $font $size)
+            Write-HttpJson $stream 200 ([ordered]@{ ok=$true; freeText=$true; linesBig=$bigLines.Count; linesSmall=$smallLines.Count; printer=$PrinterName })
+          }
+          else {
+            $big = ConvertTo-SafeLabelText $data.big 16
+            $small = ConvertTo-SafeLabelText $data.small 24
+            $job = ConvertTo-SafeLabelText $data.job 44
+            $custom = $null -ne $data.font -or $null -ne $data.size
+            $barcode = if ($null -ne $data.returnId) { [string]$data.returnId } else { '' }
+            Send-RawZpl (New-ReturnLabelZpl $big $small $job $font $size $custom $barcode)
+            Write-HttpJson $stream 200 ([ordered]@{ ok=$true; big=$big; small=$small; job=$job; printer=$PrinterName })
+          }
         }
         else {
           Write-HttpJson $stream 404 ([ordered]@{ ok=$false; error='Not found' })
