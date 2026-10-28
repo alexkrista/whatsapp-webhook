@@ -7,6 +7,18 @@ param(
 $ErrorActionPreference = "Stop"
 $expectedVersion = "1.5.0"
 
+# Ein bereits installierter Windows-Dienst darf nicht durch eine zweite
+# Benutzer-Bridge auf demselben Port ersetzt oder behindert werden.
+$windowsService = Get-Service -Name "KRISTINEPaintBridge" -ErrorAction SilentlyContinue
+if ($windowsService) {
+  if ($windowsService.Status -ne "Running") {
+    try { Start-Service -Name "KRISTINEPaintBridge" -ErrorAction Stop }
+    catch { throw "KRISTINE laeuft jetzt als Windows-Dienst. Bitte unter Windows-Dienste den Dienst KRISTINE Restfarben pruefen: $($_.Exception.Message)" }
+  }
+  Write-Host "KRISTINE Restfarben laeuft als Windows-Dienst. Keine zweite Bridge gestartet."
+  return
+}
+
 $installDir = Join-Path $env:LOCALAPPDATA "KRISTINE\PaintLocalBridge"
 $bridgePath = Join-Path $installDir "kristine-paint-local-bridge.ps1"
 $sourceUrl = "https://raw.githubusercontent.com/alexkrista/whatsapp-webhook/main/tools/kristine-paint-local-bridge.ps1"
@@ -68,6 +80,17 @@ if (-not $healthResult -or -not $healthResult.ok) {
 if ([string]$healthResult.version -ne $expectedVersion) {
   throw "Hardware Bridge laeuft noch in Version $($healthResult.version), erwartet wird $expectedVersion. Bitte Windows einmal neu starten."
 }
+
+# Startbutton in KRISTINE auch fuer die bisherige Benutzer-Bridge
+# freischalten. Die URL kann ausschliesslich das feste lokale Skript starten.
+$starterPath = Join-Path $installDir "start-kristine-paint-local-bridge.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/alexkrista/whatsapp-webhook/main/tools/start-kristine-paint-local-bridge.ps1" -OutFile $starterPath
+$protocol = "HKCU:\Software\Classes\kristinepaint"
+$command = "$protocol\shell\open\command"
+New-Item -Path $command -Force | Out-Null
+Set-Item -Path $protocol -Value "URL:KRISTINE Paint Bridge"
+New-ItemProperty -Path $protocol -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
+Set-Item -Path $command -Value ('powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $starterPath + '"')
 
 Write-Host ""
 Write-Host "KRISTINE Restfarben Hardware Bridge aktualisiert und gestartet."
