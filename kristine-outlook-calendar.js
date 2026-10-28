@@ -273,7 +273,7 @@ function installOutlookCalendar(app, deps = {}) {
     const expiresAt = Number(token.stored_at || 0) + Number(token.expires_in || 0) * 1000;
     if (token.access_token && Date.now() < expiresAt - 120000) return token.access_token;
     if (!token.refresh_token) throw new Error("Outlook-Anmeldung ist abgelaufen; bitte neu anmelden.");
-    token = { ...token, ...await tokenRequest({ client_id:CLIENT_ID, grant_type:"refresh_token", refresh_token:token.refresh_token, scope:SCOPES + (String(token.scope||"" ).toLowerCase().split(/\s+/).includes("mail.send.shared") ? " Mail.Send.Shared" : "") }) };
+    token = { ...token, ...await tokenRequest({ client_id:CLIENT_ID, grant_type:"refresh_token", refresh_token:token.refresh_token, scope:SCOPES + (String(token.scope||"" ).toLowerCase().split(/\s+/).includes("mail.send.shared") ? " Mail.Send.Shared" : "") + (String(token.scope||"").toLowerCase().split(/\s+/).includes("files.readwrite") ? " Files.ReadWrite" : "") }) };
     token.account = accountFromToken(token) || EXPECTED_ACCOUNT;
     if (token.account !== EXPECTED_ACCOUNT) throw new Error(`Outlook-Konto ${token.account || "unbekannt"} ist nicht für V1 freigegeben.`);
     await saveToken(token);
@@ -807,7 +807,9 @@ ${tel ? `<a class="button secondary" href="${esc(tel)}">☎ Kunde anrufen</a>` :
     if (!allowed(req, res)) return;
     try {
       if (!encryptionSecret()) return res.status(503).json({ ok:false, error:"Token-Verschlüsselung ist nicht konfiguriert." });
-      const response = await fetch(`${LOGIN_ROOT}/devicecode`, { method:"POST", headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body:new URLSearchParams({ client_id:CLIENT_ID, scope:SCOPES + (req.body?.camperMailSend === true ? " Mail.Send.Shared" : "") }) });
+      const priorToken=await loadToken();
+      const priorScopes=String(priorToken?.scope||"").toLowerCase().split(/\s+/);
+      const response = await fetch(`${LOGIN_ROOT}/devicecode`, { method:"POST", headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body:new URLSearchParams({ client_id:CLIENT_ID, scope:SCOPES + ((req.body?.camperMailSend === true || priorScopes.includes("mail.send.shared")) ? " Mail.Send.Shared" : "") + ((req.body?.camperDrive === true || priorScopes.includes("files.readwrite")) ? " Files.ReadWrite" : "") }) });
       const body = await response.json(); if (!response.ok) throw new Error(body.error_description || "Device Code konnte nicht erstellt werden.");
       const sessionId = crypto.randomUUID(); loginSessions.set(sessionId, { deviceCode:body.device_code, interval:Number(body.interval || 5), expiresAt:Date.now() + Number(body.expires_in || 900) * 1000, status:"pending", account:"", error:"", redeeming:false });
       pollLoginInBackground(sessionId);
