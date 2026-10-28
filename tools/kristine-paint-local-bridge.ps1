@@ -50,12 +50,12 @@ function ConvertTo-SafeLabelText([object]$Value, [int]$MaxLength = 40) {
 # Nur ungefährlicher ASCII-Text, niemals ungeprüft in Zebra ZPL einsetzen.
 function ConvertTo-FreeLabelLines([object]$Raw, [string]$Field) {
   if ($Raw -isnot [array]) { throw "$Field muss aus einzelnen Textzeilen bestehen" }
-  if ($Raw.Count -lt 1 -or $Raw.Count -gt 3) { throw "$Field: maximal drei Zeilen erlaubt" }
+  if ($Raw.Count -lt 1 -or $Raw.Count -gt 3) { throw "${Field}: maximal drei Zeilen erlaubt" }
   $result = New-Object System.Collections.Generic.List[string]
   foreach ($value in $Raw) {
     $line = [string]$value
-    if ($line.Length -gt 26) { throw "$Field: maximal 26 Zeichen pro Zeile" }
-    if ($line -match '[\r\n]') { throw "$Field: unerlaubter Zeilenumbruch" }
+    if ($line.Length -gt 26) { throw "${Field}: maximal 26 Zeichen pro Zeile" }
+    if ($line -match '[\r\n]') { throw "${Field}: unerlaubter Zeilenumbruch" }
     $clean = ConvertTo-SafeLabelText $line 26
     $result.Add($clean)
   }
