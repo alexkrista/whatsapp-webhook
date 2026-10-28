@@ -11,7 +11,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $serviceName = "KRISTINEPaintBridge"
-$expectedVersion = "1.5.0"
+$expectedVersion = "1.6.0"
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -151,7 +151,7 @@ try {
     Start-Sleep -Milliseconds 500
   }
   if (-not $health -or -not $health.ok -or [string]$health.version -ne $expectedVersion) {
-    throw "Neuer Dienst liefert keine gueltige Version 1.5.0."
+    throw "Neuer Dienst liefert keine gueltige Version 1.6.0."
   }
   if ($oldHealth -and $oldHealth.printer.available -and -not $health.printer.available) {
     throw "Der Dienst sieht den Zebra-Drucker nicht; Rueckkehr zur bisherigen Benutzer-Bridge."
