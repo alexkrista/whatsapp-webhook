@@ -7,6 +7,18 @@ param(
 $ErrorActionPreference = "Stop"
 $expectedVersion = "1.5.0"
 
+# Ein bereits installierter Windows-Dienst darf nicht durch eine zweite
+# Benutzer-Bridge auf demselben Port ersetzt oder behindert werden.
+$windowsService = Get-Service -Name "KRISTINEPaintBridge" -ErrorAction SilentlyContinue
+if ($windowsService) {
+  if ($windowsService.Status -ne "Running") {
+    try { Start-Service -Name "KRISTINEPaintBridge" -ErrorAction Stop }
+    catch { throw "KRISTINE laeuft jetzt als Windows-Dienst. Bitte unter Windows-Dienste den Dienst KRISTINE Restfarben pruefen: $($_.Exception.Message)" }
+  }
+  Write-Host "KRISTINE Restfarben laeuft als Windows-Dienst. Keine zweite Bridge gestartet."
+  return
+}
+
 $installDir = Join-Path $env:LOCALAPPDATA "KRISTINE\PaintLocalBridge"
 $bridgePath = Join-Path $installDir "kristine-paint-local-bridge.ps1"
 $sourceUrl = "https://raw.githubusercontent.com/alexkrista/whatsapp-webhook/main/tools/kristine-paint-local-bridge.ps1"
