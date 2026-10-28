@@ -198,6 +198,18 @@ catch {
     }
     catch { Write-Warning "Bisherige Bridge bitte manuell starten: $_" }
   }
+  # Falls die Umstellung nach dem Entfernen des Benutzer-Autostarts
+  # gescheitert ist, den vorherigen Registry-Eintrag wiederherstellen.
+  if ($previousRunValue) {
+    try {
+      $current = (Get-ItemProperty -Path $runKey -Name "KRISTINEPaintLocalBridge" -ErrorAction SilentlyContinue).KRISTINEPaintLocalBridge
+      if (-not $current) {
+        New-Item -Path $runKey -Force | Out-Null
+        Set-ItemProperty -Path $runKey -Name "KRISTINEPaintLocalBridge" -Value $previousRunValue -ErrorAction Stop
+      }
+    }
+    catch { Write-Warning "Alten Autostart bitte pruefen: $_" }
+  }
   throw $failure
 }
 finally {
