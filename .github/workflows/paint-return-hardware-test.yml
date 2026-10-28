@@ -7,9 +7,14 @@ on:
       - 'paint-return-stock.js'
       - 'public/paint-return-stock-ui.js'
       - 'public/paint-return-local-hardware-ui.js'
+      - 'public/ui/access-status-ui.js'
+      - 'public/ui/topbar.js'
       - 'public/paint-return-enhancements-ui.js'
       - 'tools/kristine-paint-local-bridge.ps1'
       - 'tools/install-kristine-paint-local-bridge.ps1'
+      - 'tools/install-kristine-paint-windows-service.ps1'
+      - 'TEST/paint-free-multiline-zpl.test.ps1'
+      - 'TEST/paint-free-multiline-ui.test.js'
       - 'TEST/paint-return-stock.test.js'
       - 'TEST/paint-return-stock-ui.test.js'
       - 'TEST/paint-return-colour-search.test.js'
@@ -21,9 +26,14 @@ on:
       - 'paint-return-stock.js'
       - 'public/paint-return-stock-ui.js'
       - 'public/paint-return-local-hardware-ui.js'
+      - 'public/ui/access-status-ui.js'
+      - 'public/ui/topbar.js'
       - 'public/paint-return-enhancements-ui.js'
       - 'tools/kristine-paint-local-bridge.ps1'
       - 'tools/install-kristine-paint-local-bridge.ps1'
+      - 'tools/install-kristine-paint-windows-service.ps1'
+      - 'TEST/paint-free-multiline-zpl.test.ps1'
+      - 'TEST/paint-free-multiline-ui.test.js'
       - 'TEST/paint-return-stock.test.js'
       - 'TEST/paint-return-stock-ui.test.js'
       - 'TEST/paint-return-colour-search.test.js'
@@ -44,6 +54,8 @@ jobs:
           node --check paint-return-stock.js
           node --check public/paint-return-stock-ui.js
           node --check public/paint-return-local-hardware-ui.js
+          node --check public/ui/access-status-ui.js
+          node --check public/ui/topbar.js
           node --check public/paint-return-enhancements-ui.js
       - name: Return stock backend test
         run: node TEST/paint-return-stock.test.js
@@ -55,6 +67,7 @@ jobs:
         run: |
           node TEST/paint-return-stock-ui.test.js
           node TEST/paint-return-colour-search.test.js
+          node TEST/paint-free-multiline-ui.test.js
 
   powershell51:
     runs-on: windows-latest
@@ -65,7 +78,8 @@ jobs:
         run: |
           $files = @(
             'tools/kristine-paint-local-bridge.ps1',
-            'tools/install-kristine-paint-local-bridge.ps1'
+            'tools/install-kristine-paint-local-bridge.ps1',
+            'tools/install-kristine-paint-windows-service.ps1'
           )
           foreach ($file in $files) {
             $tokens = $null
@@ -76,3 +90,7 @@ jobs:
               exit 1
             }
           }
+
+      - name: Multiline ZPL generation (no physical print)
+        shell: powershell
+        run: .\TEST\paint-free-multiline-zpl.test.ps1
