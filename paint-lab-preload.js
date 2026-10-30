@@ -1,6 +1,8 @@
 "use strict";
 
-// Registriert Farben/Lager + Little-Greene-Bestellwesen direkt nach dem ersten app.use().
+// Registriert Farben/Lager + Little-Greene-Bestellwesen erst nach dem
+// globalen JSON-Parser. Die Camper-App wird zuvor als Router eingebunden;
+// durch ein zu fruehes Registrieren fehlen sonst EAN und Gewicht im POST.
 // Die komplette Farben-Seite ist absichtlich "notranslate": Produkt-, Farb- und
 // Basisnamen wie Stock, Hi White, Deep, NCS oder RAL duerfen vom Browser niemals
 // uebersetzt werden.
@@ -149,7 +151,12 @@ function wrappedExpress(...args) {
 
   app.use = function patchedUse(...useArgs) {
     const result = originalUse(...useArgs);
-    if (!registered) {
+    // Das fruehere app.use('/camper', router) ist NICHT der Zeitpunkt
+    // zur Anmeldung der Farben-Routen. Der globale express.json()-Parser
+    // muss vor den POST-Endpunkten stehen (sonst: "Barcode fehlt").
+    const globalJsonReady = useArgs.length === 1 &&
+      typeof useArgs[0] === "function" && useArgs[0].name === "jsonParser";
+    if (!registered && globalJsonReady) {
       registered = true;
       const opts = {
         dataDir: process.env.DATA_DIR || "/var/data",
