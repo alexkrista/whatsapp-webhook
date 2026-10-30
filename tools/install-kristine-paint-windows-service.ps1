@@ -11,7 +11,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $serviceName = "KRISTINEPaintBridge"
-$expectedVersion = "1.6.0"
+$expectedVersion = "1.7.0"
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -49,6 +49,8 @@ $startedNewService = $false
 try {
   foreach ($file in @(
     "kristine-paint-local-bridge.ps1",
+    "kristine-paint-sample-label.ps1",
+    "krista-sample-logo-gfa.txt",
     "kristine-paint-windows-service.cs",
     "start-kristine-paint-local-bridge.ps1"
   )) {
@@ -71,6 +73,16 @@ try {
   if ($parseErrors.Count -gt 0) {
     throw "Heruntergeladenes Bridge-Skript hat PowerShell-Syntaxfehler. Keine Umstellung."
   }
+
+  # Zusätzliche Mustergrafik und Generator vor jeder Dienst-Unterbrechung prüfen.
+  $sampleFile = Join-Path $stage "kristine-paint-sample-label.ps1"
+  $sampleTokens = $null
+  $sampleErrors = $null
+  [void][System.Management.Automation.Language.Parser]::ParseFile($sampleFile,[ref]$sampleTokens,[ref]$sampleErrors)
+  if ($sampleErrors.Count -gt 0) { throw "Musterdruck-Modul hat PowerShell-Syntaxfehler. Keine Umstellung." }
+  $logoFile = Join-Path $stage "krista-sample-logo-gfa.txt"
+  $logoLine = Get-Content -LiteralPath $logoFile | Where-Object { $_ -match '^\^GFA,' } | Select-Object -First 1
+  if (-not $logoLine -or $logoLine.Length -ne 1300) { throw "Musteretikett-Logo unvollständig. Keine Umstellung." }
 
   $compiler = New-Object Microsoft.CSharp.CSharpCodeProvider
   $settings = New-Object System.CodeDom.Compiler.CompilerParameters
@@ -134,13 +146,15 @@ try {
   }
 
   # Bestehende Dienstdateien fuer Rueckfall sichern.
-  foreach ($file in @("kristine-paint-service.exe", "kristine-paint-local-bridge.ps1", "service.args")) {
+  foreach ($file in @("kristine-paint-service.exe", "kristine-paint-local-bridge.ps1", "kristine-paint-sample-label.ps1", "krista-sample-logo-gfa.txt", "service.args")) {
     $original = Join-Path $root $file
     if (Test-Path $original) { Copy-Item -LiteralPath $original -Destination "$original.bak" -Force }
   }
 
   Copy-Item (Join-Path $stage "kristine-paint-service.exe") $serviceExe -Force
   Copy-Item (Join-Path $stage "kristine-paint-local-bridge.ps1") $bridgePath -Force
+  Copy-Item (Join-Path $stage "kristine-paint-sample-label.ps1") (Join-Path $root "kristine-paint-sample-label.ps1") -Force
+  Copy-Item (Join-Path $stage "krista-sample-logo-gfa.txt") (Join-Path $root "krista-sample-logo-gfa.txt") -Force
   Copy-Item (Join-Path $stage "start-kristine-paint-local-bridge.ps1") $launcherPath -Force
   @($ScalePort, [string]$ListenPort, $PrinterName) | Set-Content -LiteralPath $configPath -Encoding UTF8
 
@@ -167,7 +181,7 @@ try {
     Start-Sleep -Milliseconds 500
   }
   if (-not $health -or -not $health.ok -or [string]$health.version -ne $expectedVersion) {
-    throw "Neuer Dienst liefert keine gueltige Version 1.6.0."
+    throw "Neuer Dienst liefert keine gueltige Version 1.7.0."
   }
   if ($oldHealth -and $oldHealth.printer.available -and -not $health.printer.available) {
     throw "Der Dienst sieht den Zebra-Drucker nicht; Rueckkehr zur bisherigen Benutzer-Bridge."
@@ -230,7 +244,7 @@ catch {
     # Bei Aktualisierung des bestehenden Dienstes Dateien zurückstellen,
     # auch wenn der bisherige Dienst vor der Aktualisierung gestoppt war.
     try {
-      foreach ($file in @("kristine-paint-service.exe","kristine-paint-local-bridge.ps1","service.args")) {
+      foreach ($file in @("kristine-paint-service.exe","kristine-paint-local-bridge.ps1","kristine-paint-sample-label.ps1","krista-sample-logo-gfa.txt","service.args")) {
         $original = Join-Path $root $file
         if (Test-Path "$original.bak") { Copy-Item -LiteralPath "$original.bak" -Destination $original -Force }
       }
