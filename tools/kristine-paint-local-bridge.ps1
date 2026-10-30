@@ -244,6 +244,240 @@ function New-FreeReturnLabelZpl([string[]]$BigLines, [string[]]$SmallLines, [str
   return ($zpl -join "`n")
 }
 
+
+# Musteretikett: nur die grosse Etikettenflaeche wird bedruckt.
+# Das Datum entsteht ausschliesslich hier am Misch-PC und das KRISTA-Logo
+# kommt aus einer fest installierten Grafikdatei (niemals vom Browser).
+function Split-SampleLabelLines([string]$Text, [int]$LineLength, [string]$Field) {
+  if ($Text -match '[\r\n\^\~]') { throw "$Field enthaelt ungueltige Zeichen" }
+  if ($Text.Length -gt 70) { throw "$Field ist zu lang" }
+  $clean = ConvertTo-SafeLabelText $Text 70
+  if (-not $clean) { throw "$Field fehlt" }
+  $words = $clean -split '\s+'
+  $lines = New-Object System.Collections.Generic.List[string]
+  $current = ""
+  foreach ($word in $words) {
+    if ($word.Length -gt $LineLength) { throw "$($Field): ein Wort ist zu lang" }
+    $candidate = if ($current) { "$current $word" } else { $word }
+    if ($candidate.Length -le $LineLength) {
+      $current = $candidate
+    } else {
+      if ($current) { $lines.Add($current) }
+      $current = $word
+    }
+  }
+  if ($current) { $lines.Add($current) }
+  if ($lines.Count -gt 2) { throw "$($Field): maximal zwei Zeilen auf dem Musteretikett" }
+  return ,$lines.ToArray()
+}
+
+function New-SampleReturnLabelZpl([string]$Colour, [string]$Material) {
+  $colourLines = Split-SampleLabelLines $Colour 18 'Farbe'
+  $materialLines = Split-SampleLabelLines $Material 28 'Material'
+  $graphicPath = Join-Path $PSScriptRoot 'krista-sample-logo-gfa.txt'
+  if (-not (Test-Path -LiteralPath $graphicPath)) { throw "KRISTA-Logo fehlt. Bitte Hardware-Bridge aktualisieren." }
+  $graphic = Get-Content -LiteralPath $graphicPath | Where-Object { $_ -match '^\^GFA,' } | Select-Object -First 1
+  if (-not $graphic -or $graphic -cnotmatch '^\^GFA,640,640,16,[A-F0-9]{1280}
+  $printer = Get-Printer -Name $PrinterName -ErrorAction Stop
+  if ($printer.PrinterStatus -eq 'Offline') { throw "Drucker ist offline: $PrinterName" }
+
+  $bytes = [System.Text.Encoding]::ASCII.GetBytes($Zpl)
+  $hPrinter = [IntPtr]::Zero
+  if (-not [KristineRawPrinterHelper]::OpenPrinter($PrinterName, [ref]$hPrinter, [IntPtr]::Zero)) {
+    throw "OpenPrinter fehlgeschlagen. Win32: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+  }
+
+  $ptr = [IntPtr]::Zero
+  try {
+    $di = New-Object KristineRawPrinterHelper+DOCINFOA
+    $di.pDocName = "KRISTINE Restfarbe"
+    $di.pDataType = "RAW"
+    if (-not [KristineRawPrinterHelper]::StartDocPrinter($hPrinter, 1, $di)) { throw "StartDocPrinter fehlgeschlagen" }
+    try {
+      if (-not [KristineRawPrinterHelper]::StartPagePrinter($hPrinter)) { throw "StartPagePrinter fehlgeschlagen" }
+      try {
+        $ptr = [Runtime.InteropServices.Marshal]::AllocCoTaskMem($bytes.Length)
+        [Runtime.InteropServices.Marshal]::Copy($bytes, 0, $ptr, $bytes.Length)
+        $written = 0
+        if (-not [KristineRawPrinterHelper]::WritePrinter($hPrinter, $ptr, $bytes.Length, [ref]$written)) { throw "WritePrinter fehlgeschlagen" }
+        if ($written -ne $bytes.Length) { throw "Druck unvollstaendig: $written/$($bytes.Length) Bytes" }
+      }
+      finally {
+        if ($ptr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::FreeCoTaskMem($ptr); $ptr = [IntPtr]::Zero }
+        [void][KristineRawPrinterHelper]::EndPagePrinter($hPrinter)
+      }
+    }
+    finally { [void][KristineRawPrinterHelper]::EndDocPrinter($hPrinter) }
+  }
+  finally {
+    if ($hPrinter -ne [IntPtr]::Zero) { [void][KristineRawPrinterHelper]::ClosePrinter($hPrinter) }
+  }
+}
+
+function Write-HttpJson($Stream, [int]$StatusCode, $Body) {
+  $json = $Body | ConvertTo-Json -Depth 8 -Compress
+  $payload = [System.Text.Encoding]::UTF8.GetBytes($json)
+  $reason = if ($StatusCode -eq 200) { 'OK' } elseif ($StatusCode -eq 400) { 'Bad Request' } elseif ($StatusCode -eq 404) { 'Not Found' } else { 'Internal Server Error' }
+  $headers = "HTTP/1.1 $StatusCode $reason`r`n" +
+             "Content-Type: application/json; charset=utf-8`r`n" +
+             "Content-Length: $($payload.Length)`r`n" +
+             "Access-Control-Allow-Origin: *`r`n" +
+             "Access-Control-Allow-Methods: GET, POST, OPTIONS`r`n" +
+             "Access-Control-Allow-Headers: Content-Type`r`n" +
+             "Access-Control-Allow-Private-Network: true`r`n" +
+             "Cache-Control: no-store`r`n" +
+             "Connection: close`r`n`r`n"
+  $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($headers)
+  $Stream.Write($headerBytes, 0, $headerBytes.Length)
+  $Stream.Write($payload, 0, $payload.Length)
+  $Stream.Flush()
+}
+
+function Read-HttpRequest($Stream) {
+  $reader = New-Object System.IO.StreamReader($Stream, [System.Text.Encoding]::UTF8, $false, 4096, $true)
+  $line = $reader.ReadLine()
+  if (-not $line) { return $null }
+  $parts = $line.Split(' ')
+  if ($parts.Length -lt 2) { throw "Ungueltige HTTP-Anfrage" }
+  $headers = @{}
+  while ($true) {
+    $h = $reader.ReadLine()
+    if ($null -eq $h -or $h -eq '') { break }
+    $p = $h.IndexOf(':')
+    if ($p -gt 0) { $headers[$h.Substring(0,$p).Trim().ToLowerInvariant()] = $h.Substring($p + 1).Trim() }
+  }
+  $length = 0
+  if ($headers.ContainsKey('content-length')) { [void][int]::TryParse($headers['content-length'], [ref]$length) }
+  $body = ''
+  if ($length -gt 0) {
+    $buffer = New-Object char[] $length
+    $read = 0
+    while ($read -lt $length) {
+      $n = $reader.Read($buffer, $read, $length - $read)
+      if ($n -le 0) { break }
+      $read += $n
+    }
+    if ($read -gt 0) { $body = -join $buffer[0..($read-1)] }
+  }
+  return [pscustomobject]@{ Method=$parts[0].ToUpperInvariant(); Target=$parts[1]; Headers=$headers; Body=$body }
+}
+
+$listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, $ListenPort)
+$listener.Start()
+Write-Host "KRISTINE Restfarben Hardware Bridge"
+Write-Host "Nur lokal: http://127.0.0.1:$ListenPort"
+Write-Host "Waage: $ScalePort | Zebra: $PrinterName"
+Write-Host "Scanner: HID/Tastatur direkt im Browser"
+Write-Host ""
+
+try {
+  while ($true) {
+    $client = $listener.AcceptTcpClient()
+    try {
+      $client.ReceiveTimeout = 8000
+      $client.SendTimeout = 8000
+      $stream = $client.GetStream()
+      $request = Read-HttpRequest $stream
+      if (-not $request) { continue }
+
+      if ($request.Method -eq 'OPTIONS') {
+        Write-HttpJson $stream 200 ([ordered]@{ ok=$true })
+        continue
+      }
+
+      $path = ($request.Target -split '\?', 2)[0]
+      try {
+        if ($request.Method -eq 'GET' -and $path -eq '/health') {
+          $ports = [System.IO.Ports.SerialPort]::GetPortNames()
+          $printerOk = $false
+          try { $printerOk = $null -ne (Get-Printer -Name $PrinterName -ErrorAction Stop) } catch {}
+          Write-HttpJson $stream 200 ([ordered]@{
+            ok = $true
+            service = 'KRISTINE Restfarben Hardware Bridge'
+            version = '1.6.0'
+            scale = [ordered]@{ port=$ScalePort; available=($ports -contains $ScalePort) }
+            printer = [ordered]@{ name=$PrinterName; available=$printerOk }
+          })
+        }
+        elseif ($request.Method -eq 'GET' -and $path -eq '/weight') {
+          Write-HttpJson $stream 200 (Get-PmaWeight)
+        }
+        elseif ($request.Method -eq 'POST' -and $path -eq '/print') {
+          if (-not $request.Body) { throw "JSON-Body fehlt" }
+          $data = $request.Body | ConvertFrom-Json
+          $font = if ($null -ne $data.font) { [string]$data.font } else { '0' }
+          $size = if ($null -ne $data.size) { [string]$data.size } else { 'normal' }
+          if ($data.freeText -eq $true) {
+            # Expliziter Freitext-Modus; Barcode/Archivdaten sind hier unzulaessig.
+            if ($data.returnId -or $data.job) { throw "Freier Etikettendruck darf keine Archivbuchung anlegen" }
+            $bigLines = ConvertTo-FreeLabelLines $data.bigLines 'Grosses Etikett'
+            $smallLines = ConvertTo-FreeLabelLines $data.smallLines 'Kleines Etikett'
+            Send-RawZpl (New-FreeReturnLabelZpl $bigLines $smallLines $font $size)
+            Write-HttpJson $stream 200 ([ordered]@{ ok=$true; freeText=$true; linesBig=$bigLines.Count; linesSmall=$smallLines.Count; printer=$PrinterName })
+          }
+          else {
+            $big = ConvertTo-SafeLabelText $data.big 16
+            $small = ConvertTo-SafeLabelText $data.small 24
+            $job = ConvertTo-SafeLabelText $data.job 44
+            $custom = $null -ne $data.font -or $null -ne $data.size
+            $barcode = if ($null -ne $data.returnId) { [string]$data.returnId } else { '' }
+            Send-RawZpl (New-ReturnLabelZpl $big $small $job $font $size $custom $barcode)
+            Write-HttpJson $stream 200 ([ordered]@{ ok=$true; big=$big; small=$small; job=$job; printer=$PrinterName })
+          }
+        }
+        else {
+          Write-HttpJson $stream 404 ([ordered]@{ ok=$false; error='Not found' })
+        }
+      }
+      catch {
+        Write-HttpJson $stream 500 ([ordered]@{ ok=$false; error=[string]$_.Exception.Message })
+      }
+    }
+    catch {}
+    finally {
+      if ($stream) { $stream.Dispose() }
+      $client.Close()
+      $client.Dispose()
+    }
+  }
+}
+finally {
+  $listener.Stop()
+}
+) {
+    throw "KRISTA-Logo ist ungueltig. Keine Etikettenausgabe."
+  }
+  $zpl = New-Object System.Collections.Generic.List[string]
+  foreach ($line in @('^XA','^PW464','^LL352','^LT40','^LH0,0')) { $zpl.Add($line) }
+  # Farbe gross und fett mit geringem Doppeldruckversatz, darunter Material.
+  $longestColour = ($colourLines | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+  $colourH = [int][Math]::Min(60,[Math]::Floor(495 / [Math]::Max(9,$longestColour)))
+  $colourW = [int][Math]::Round($colourH * .58)
+  $colourY = if ($colourLines.Count -eq 1) { 130 } else { 91 }
+  foreach ($line in $colourLines) {
+    $zpl.Add("^FO145,$colourY^FB300,1,0,C,0^A0N,$colourH,$colourW^FD$line^FS")
+    $yBold = $colourY + 1
+    $zpl.Add("^FO146,$yBold^FB299,1,0,C,0^A0N,$colourH,$colourW^FD$line^FS")
+    $colourY += $colourH + 12
+  }
+  $longestMaterial = ($materialLines | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+  $materialH = [int][Math]::Min(26,[Math]::Floor(450 / [Math]::Max(12,$longestMaterial)))
+  $materialW = [int][Math]::Round($materialH * .57)
+  $materialY = if ($materialLines.Count -eq 1) { 229 } else { 217 }
+  foreach ($line in $materialLines) {
+    $zpl.Add("^FO145,$materialY^FB300,1,0,C,0^A0N,$materialH,$materialW^FD$line^FS")
+    $materialY += $materialH + 5
+  }
+  # Fusszeile: fixer Drucktag unten links, echtes KRISTA-Logo unten rechts.
+  $date = [DateTime]::Now.ToString('dd.MM.yyyy', [Globalization.CultureInfo]::InvariantCulture)
+  $zpl.Add("^FO147,313^A0N,19,12^FD$date^FS")
+  $zpl.Add("^FO326,296$graphic^FS")
+  # Links (kleines Etikett) bleibt leer, genau ein Druckauftrag.
+  $zpl.Add('^PQ1,0,0,N')
+  $zpl.Add('^XZ')
+  return ($zpl -join [Environment]::NewLine)
+}
+
 function Send-RawZpl([string]$Zpl) {
   $printer = Get-Printer -Name $PrinterName -ErrorAction Stop
   if ($printer.PrinterStatus -eq 'Offline') { throw "Drucker ist offline: $PrinterName" }
