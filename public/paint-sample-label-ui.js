@@ -132,6 +132,7 @@
       colour.value = String(item.colour || "");
       material.value = String(item.material || "");
       results.replaceChildren();
+      msg.textContent="";
       const note=document.createElement("p");
       note.textContent=source+" übernommen. Beide Felder können geändert werden.";
       results.appendChild(note);
