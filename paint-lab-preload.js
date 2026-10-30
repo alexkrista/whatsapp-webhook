@@ -112,6 +112,9 @@ function registerPaintHtmlHotfix(app, publicDir) {
       if (!fixed.includes("/public/paint-return-local-hardware-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-return-local-hardware-ui.js?v=20261028-multiline-1"></script>\n</body>');
       }
+      if (!fixed.includes("/public/paint-sample-label-ui.js")) {
+        fixed = fixed.replace("</body>", '<script src="/public/paint-sample-label-ui.js?v=20261030-pattern-1"></script>\n</body>');
+      }
       if (!fixed.includes("/public/paint-return-enhancements-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-return-enhancements-ui.js?v=20260910-caparol"></script>\n</body>');
       }
