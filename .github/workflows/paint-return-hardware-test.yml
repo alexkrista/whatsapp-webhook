@@ -22,6 +22,7 @@ on:
       - 'TEST/paint-service-installer-version.test.ps1'
       - 'TEST/paint-free-multiline-ui.test.js'
       - 'TEST/paint-return-stock.test.js'
+      - 'TEST/paint-camper-json-order.test.js'
       - 'TEST/paint-return-stock-ui.test.js'
       - 'TEST/paint-return-colour-search.test.js'
       - 'paint-lab.js'
@@ -47,6 +48,7 @@ on:
       - 'TEST/paint-service-installer-version.test.ps1'
       - 'TEST/paint-free-multiline-ui.test.js'
       - 'TEST/paint-return-stock.test.js'
+      - 'TEST/paint-camper-json-order.test.js'
       - 'TEST/paint-return-stock-ui.test.js'
       - 'TEST/paint-return-colour-search.test.js'
       - 'paint-lab.js'
@@ -72,6 +74,8 @@ jobs:
           node --check public/paint-return-enhancements-ui.js
       - name: Return stock backend test
         run: node TEST/paint-return-stock.test.js
+      - name: Camper JSON parser and real HTTP return-booking regression
+        run: node TEST/paint-camper-json-order.test.js
       - name: Install isolated browser test runtime
         run: |
           npm install --prefix "$RUNNER_TEMP/return-test-runtime" --ignore-scripts --no-audit --no-fund jsdom@26.1.0
