@@ -82,7 +82,7 @@ try {
   if ($sampleErrors.Count -gt 0) { throw "Musterdruck-Modul hat PowerShell-Syntaxfehler. Keine Umstellung." }
   $logoFile = Join-Path $stage "krista-sample-logo-gfa.txt"
   $logoLine = Get-Content -LiteralPath $logoFile | Where-Object { $_ -match '^\^GFA,' } | Select-Object -First 1
-  if (-not $logoLine -or $logoLine.Length -ne 1300) { throw "Musteretikett-Logo unvollständig. Keine Umstellung." }
+  if (-not $logoLine -or $logoLine.Length -ne 1296) { throw "Musteretikett-Logo unvollständig. Keine Umstellung." }
 
   $compiler = New-Object Microsoft.CSharp.CSharpCodeProvider
   $settings = New-Object System.CodeDom.Compiler.CompilerParameters
