@@ -5,6 +5,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Zusatzmodul fuer grosse Musteretiketten; Bestandsetiketten unveraendert.
+$sampleModulePath = Join-Path $PSScriptRoot 'kristine-paint-sample-label.ps1'
+if (Test-Path -LiteralPath $sampleModulePath) { . $sampleModulePath }
 
 if (-not ('KristineRawPrinterHelper' -as [type])) {
   Add-Type -TypeDefinition @'
@@ -361,7 +364,7 @@ try {
           Write-HttpJson $stream 200 ([ordered]@{
             ok = $true
             service = 'KRISTINE Restfarben Hardware Bridge'
-            version = '1.6.0'
+            version = '1.7.0'
             scale = [ordered]@{ port=$ScalePort; available=($ports -contains $ScalePort) }
             printer = [ordered]@{ name=$PrinterName; available=$printerOk }
           })
@@ -374,7 +377,17 @@ try {
           $data = $request.Body | ConvertFrom-Json
           $font = if ($null -ne $data.font) { [string]$data.font } else { '0' }
           $size = if ($null -ne $data.size) { [string]$data.size } else { 'normal' }
-          if ($data.freeText -eq $true) {
+          if ($data.sampleLabel -eq $true) {
+            if ($data.returnId -or $data.bigLines -or $data.smallLines -or $data.job -or $data.freeText) {
+              throw "Musteretikett darf keinen Archiv- oder Klein-Etikettendruck enthalten"
+            }
+            if (-not (Get-Command New-SampleReturnLabelZpl -ErrorAction SilentlyContinue)) {
+              throw "Musteretikett-Modul fehlt. Bridge 1.7 erneut installieren."
+            }
+            Send-RawZpl (New-SampleReturnLabelZpl ([string]$data.colour) ([string]$data.material))
+            Write-HttpJson $stream 200 ([ordered]@{ok=$true;sampleLabel=$true;printer=$PrinterName})
+          }
+          elseif ($data.freeText -eq $true) {
             # Expliziter Freitext-Modus; Barcode/Archivdaten sind hier unzulaessig.
             if ($data.returnId -or $data.job) { throw "Freier Etikettendruck darf keine Archivbuchung anlegen" }
             $bigLines = ConvertTo-FreeLabelLines $data.bigLines 'Grosses Etikett'

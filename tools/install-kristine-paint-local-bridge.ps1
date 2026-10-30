@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$expectedVersion = "1.6.0"
+$expectedVersion = "1.7.0"
 
 # Ein bereits installierter Windows-Dienst darf nicht durch eine zweite
 # Benutzer-Bridge auf demselben Port ersetzt oder behindert werden.
@@ -25,6 +25,9 @@ $sourceUrl = "https://raw.githubusercontent.com/alexkrista/whatsapp-webhook/main
 
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 Invoke-WebRequest -UseBasicParsing -Uri $sourceUrl -OutFile $bridgePath
+$sampleBase = "https://raw.githubusercontent.com/alexkrista/whatsapp-webhook/main/tools"
+Invoke-WebRequest -UseBasicParsing -Uri "$sampleBase/kristine-paint-sample-label.ps1" -OutFile (Join-Path $installDir "kristine-paint-sample-label.ps1")
+Invoke-WebRequest -UseBasicParsing -Uri "$sampleBase/krista-sample-logo-gfa.txt" -OutFile (Join-Path $installDir "krista-sample-logo-gfa.txt")
 
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $runName = "KRISTINEPaintLocalBridge"
