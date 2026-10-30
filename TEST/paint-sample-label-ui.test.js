@@ -77,7 +77,7 @@ const {JSDOM}=require("jsdom");
     await tick();
     // Fuer den gleichen Zahlencode gibt es einen Suchtreffer im alten LG-Archiv;
     // bei mehreren Quellen muss der Benutzer den richtigen Treffer waehlen.
-    assert(el("sampleSearchResults").textContent.includes("Slaked Lime"));
+    assert.equal(el("sampleColour").value,"Slaked Lime 105");
     assert(el("sampleMaterial").tagName==="INPUT");
     console.log("sample label UI test ok");
   }finally{w.close();}
