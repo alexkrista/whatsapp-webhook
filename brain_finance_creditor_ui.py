@@ -23,8 +23,9 @@ def install(ns):
   <h2 id="creditorTitle">Kreditoren-OP</h2><div class="sub" id="creditorMeta"></div>
   <div class="creditor-dialog-grid">
     <label>Mahnstufe<select id="creditorDunning"><option value="0">keine</option><option value="1">Mahnstufe 1</option><option value="2">Mahnstufe 2</option><option value="3">Mahnstufe 3</option><option value="4">Mahnstufe 4</option><option value="5">Mahnstufe 5</option></select></label>
-    <label>Mahnspesen €<input id="creditorFees" type="number" min="0" max="10000" step="0.01" inputmode="decimal"></label>
+    <label>Mahnspesen <span id="creditorCurrency">EUR</span><input id="creditorFees" type="number" min="0" max="10000" step="0.01" inputmode="decimal"></label>
     <label class="wide">Notiz<textarea id="creditorNote" maxlength="1000" placeholder="z. B. Mahnung vom …"></textarea></label>
+    <label class="wide">Bearbeitet von *<input id="creditorEditor" type="text" list="creditorEditors" maxlength="100" autocomplete="off" placeholder="Bearbeiterin / Bearbeiter auswählen" required><datalist id="creditorEditors"><option value="Dunja"><option value="Bettina"><option value="Alexander"></datalist></label>
   </div>
   <div class="creditor-total"><span>Wird überwiesen</span><strong id="creditorTotal">–</strong></div>
   <div class="creditor-error" id="creditorError"></div>
