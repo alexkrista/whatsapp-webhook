@@ -35,6 +35,13 @@ def payments_page():
 <details class="card" id="sepaArchiveCard"><summary>SEPA-Archiv</summary><div class="hint">Hier erscheinen nur Zahlungen, die im Bankumsatz bereits zugeordnet wurden. Die ursprüngliche XML-Datei bleibt unverändert erhalten.</div><div id="sepaArchive"><div class="empty">Wird geladen …</div></div></details>
 <section class="card unknown"><div class="section-title"><h2>Zahlungsart noch klären</h2><span class="hint">Einzug/Revolut/Bar verschwinden danach aus dem Bezahl-OP.</span></div><div id="unknown"><div class="empty">Wird geladen …</div></div></section>
 <dialog id="directPayDialog" style="width:min(900px,92vw);max-height:88vh;overflow:auto;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:16px;padding:24px"><h2>Zahlung bestätigen</h2><p id="directPayTotal"></p><p id="directPayAccount" class="hint"></p><div style="overflow:auto"><table style="width:100%;text-align:left;border-spacing:12px"><thead><tr><th>Empfänger / Rechnung</th><th>IBAN / Verwendungszweck</th><th>Betrag</th></tr></thead><tbody id="directPayRows"></tbody></table></div><div class="card"><div class="section-title"><span>Erwarteter Kontostand vorher</span><strong id="directPayBefore">–</strong></div><div class="section-title"><span>Diese Überweisung</span><strong id="directPayDeduction">–</strong></div><hr><div class="section-title"><strong>Erwarteter Kontostand danach</strong><strong id="directPayAfter">–</strong></div><p id="directPayBalanceNote" class="hint"></p></div><p id="directPayMessage" role="status" style="white-space:pre-line"></p><p class="hint">Mit der Bestätigung werden genau diese Rechnungen als Sammler an konfipay übergeben. Eine gegebenenfalls erforderliche Bankunterschrift bleibt bestehen.</p><div class="section-title"><button id="directPayCancel" type="button">Abbrechen</button><button id="directPaySend" type="button" disabled style="font-weight:800;background:var(--accent)">An konfipay schicken</button></div></dialog>
+<dialog id="foreignPayDialog" style="width:min(730px,92vw);max-height:85vh;overflow:auto;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:16px;padding:24px">
+  <h2>Schweizer / Auslandszahlung</h2>
+  <p class="note">Dies sind geprüfte Zahlungsdaten, keine ausgelöste Zahlung. CHF nicht als EUR-SEPA übergeben oder automatisch umrechnen.</p>
+  <pre id="foreignPayData" style="white-space:pre-wrap;overflow-wrap:anywhere;padding:16px;border:1px solid var(--line);border-radius:12px;background:#101a20;font:14px/1.65 system-ui"></pre>
+  <p id="foreignPayMessage" class="note" role="status">IBAN, Bankangaben, Referenz und Originalbeleg im Bankportal prüfen. Erst nach tatsächlicher Bankausführung gilt eine Zahlung als angewiesen.</p>
+  <div class="section-title"><button id="foreignPayClose" type="button">Schließen</button><button id="foreignPayCopy" type="button">Zahlungsdaten kopieren</button></div>
+</dialog>
 <div class="footer"><div><span id="fc">0</span> Rechnung(en) · <strong id="fs">0,00 €</strong></div><button id="go" disabled>Bezahlen</button></div></main><script>
 (()=>{
  const box=document.getElementById('rows'),ub=document.getElementById('unknown'),sb=document.getElementById('submitted'),ab=document.getElementById('sepaArchive'),go=document.getElementById('go'),approvalInfo=document.getElementById('approvalInfo');let rows=[];
@@ -50,12 +57,21 @@ def payments_page():
  function download(d){const blob=new Blob([d.xml],{type:'application/xml;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=d.filename||'SEPA.xml';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000)}
  async function xml(url,items){const q=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})}),d=await q.json();if(!q.ok||!d.ok)throw Error(d.error||'SEPA-Datei konnte nicht erstellt werden');download(d);return d}
  async function archivedXml(id){const q=await fetch('/incoming/payment-batches/xml?id='+encodeURIComponent(id),{cache:'no-store'}),d=await q.json();if(!q.ok||!d.ok)throw Error(d.error||'Archivdatei konnte nicht geladen werden');download(d)}
- function selected(){let invalid=false;const a=[...box.querySelectorAll('[data-s]:checked')].map(e=>{const [s,id]=e.dataset.s.split('|'),r=rows.find(r=>r.source===s&&r.id===id),input=[...box.querySelectorAll('[data-a]')].find(n=>n.dataset.a===e.dataset.s),partial=[...box.querySelectorAll('[data-p]')].find(n=>n.dataset.p===e.dataset.s);if(!r||!input)return null;const max=Number(r.paymentAmount??r.amount??0),amount=partial?.checked?Number(String(input.value).replace(',','.')):max;if(!Number.isFinite(amount)||amount<=0||amount>max+.004||(partial?.checked&&amount>=max-.004)){invalid=true;input.setCustomValidity(partial?.checked?'Teilzahlung muss zwischen 0,01 und weniger als '+max.toFixed(2)+' liegen.':'Zahlbetrag ist ungültig.')}else input.setCustomValidity('');return {...r,paymentAmount:amount}}).filter(Boolean),t=a.reduce((x,r)=>x+Number(r.paymentAmount||0),0);sel.textContent=fc.textContent=a.length;sum.textContent=fs.textContent=money(t);go.disabled=!a.length||invalid;return invalid?[]:a}
+ function selected(){let invalid=false;const a=[...box.querySelectorAll('[data-s]:checked')].map(e=>{const [s,id]=e.dataset.s.split('|'),r=rows.find(r=>r.source===s&&r.id===id),input=[...box.querySelectorAll('[data-a]')].find(n=>n.dataset.a===e.dataset.s),partial=[...box.querySelectorAll('[data-p]')].find(n=>n.dataset.p===e.dataset.s);if(!r||!input)return null;const max=Number(r.paymentAmount??r.amount??0),amount=partial?.checked?Number(String(input.value).replace(',','.')):max;if(!Number.isFinite(amount)||amount<=0||amount>max+.004||(partial?.checked&&amount>=max-.004)){invalid=true;input.setCustomValidity(partial?.checked?'Teilzahlung muss zwischen 0,01 und weniger als '+max.toFixed(2)+' liegen.':'Zahlbetrag ist ungültig.')}else input.setCustomValidity('');return {...r,paymentAmount:amount}}).filter(Boolean),t=a.reduce((x,r)=>x+Number(r.paymentAmount||0),0);
+ const currencies=[...new Set(a.map(r=>String(r.currency||'EUR').toUpperCase()))];
+ const foreign=currencies.length===1&&currencies[0]!=='EUR';
+ const mixed=currencies.length>1;
+ sel.textContent=fc.textContent=a.length;
+ sum.textContent=fs.textContent=mixed?'Währungen getrennt auswählen':money(t,currencies[0]||'EUR');
+ go.textContent=foreign?(currencies[0]==='CHF'?'Schweizer Zahlung vorbereiten':'Auslandszahlung vorbereiten'):'Bezahlen';
+ go.disabled=!a.length||invalid||mixed||(foreign&&a.length!==1);
+ go.title=mixed?'CHF/EUR können nicht in einem Zahlungslauf kombiniert werden.':foreign?'Manuelle Fremdwährungs-Zahlungsdaten, ohne Bankübergabe.':'Nur EUR-SEPA an konfipay.';
+ return invalid||mixed?[]:a}
  function partialChanged(toggle){const input=[...box.querySelectorAll('[data-a]')].find(n=>n.dataset.a===toggle.dataset.p),r=rows.find(x=>(x.source+'|'+x.id)===toggle.dataset.p),max=Number(r?.paymentAmount??r?.amount??0);if(!input)return;input.readOnly=!toggle.checked;if(!toggle.checked)input.value=max.toFixed(2);else{input.focus();input.select()}selected()}
  function render(r,u,s,d,batches){
-  rows=r;cnt.textContent=d.count;tot.textContent=money(d.total);approvals.textContent=`${Number(d.approvalPendingCount||0)} offen · ${Number(d.approvalApprovedCount||0)} frei`;
+  rows=r;cnt.textContent=d.count;tot.textContent=Object.entries(d.totalsByCurrency||{EUR:d.total}).map(([cur,amount])=>money(amount,cur)).join(' · ')||'–';approvals.textContent=`${Number(d.approvalPendingCount||0)} offen · ${Number(d.approvalApprovedCount||0)} frei`;
   approvalInfo.classList.toggle('warn',Boolean(d.approvalSyncError||d.approvalPendingCount||d.approvalBlockedCount));approvalInfo.innerHTML=d.approvalSyncError?`<strong>Freigabe-Sync nicht erreichbar.</strong> KRISTINE-Rechnungen bleiben aus Sicherheitsgründen für SEPA gesperrt. · ${esc(d.approvalSyncError)}`:`<strong>Freigaben aus Brain:</strong> ${Number(d.approvalPendingCount||0)} warten auf Entscheidung · ${Number(d.approvalApprovedCount||0)} freigegeben/gekürzt · ${Number(d.approvalBlockedCount||0)} gesperrt.`;
-  box.innerHTML=r.length?r.map(x=>{const pay=Number(x.paymentAmount??x.amount??0),displayAmount=payable(x)?pay:Number(x.amount||0),reduced=x.approvalStatus==='reduced'&&Math.abs(Number(x.openBeforePending??pay)-Number(x.amount||0))>.004,disabled=!payable(x),pending=Number(x.pendingPaymentAmount||0);return `<div class="row"><input type="checkbox" data-s="${esc(x.source)}|${esc(x.id)}" ${disabled?'disabled':''}><div>${esc(date(x.dueDate))}</div><div><strong>${esc(x.supplier)}</strong><div class="sub">${esc(x.paymentId||'')}</div></div><div>${esc(x.invoiceNumber||'–')}</div><div class="pay-amount"><span>Offener Zahlbetrag</span><input data-a="${esc(x.source)}|${esc(x.id)}" type="number" min="0.01" max="${pay.toFixed(2)}" step="0.01" value="${displayAmount.toFixed(2)}" readonly ${disabled?'disabled':''}><label class="partial-choice"><input data-p="${esc(x.source)}|${esc(x.id)}" type="checkbox" ${disabled||pay<=.01?'disabled':''}> Teilzahlung</label>${pending>0?`<span class="partial-pending">Bereits übergeben: ${esc(money(pending,x.currency))}</span>`:''}${reduced?`<span class="gross">Rechnung ${esc(money(x.amount,x.currency))}</span>`:''}</div><div>${approvalLabel(x)}</div><div>${pdf(x)}</div></div>`}).join(''):'<div class="empty">Keine offenen Überweisungen.</div>';
+  box.innerHTML=r.length?r.map(x=>{const pay=Number(x.paymentAmount??x.amount??0),displayAmount=payable(x)?pay:Number(x.amount||0),reduced=x.approvalStatus==='reduced'&&Math.abs(Number(x.openBeforePending??pay)-Number(x.amount||0))>.004,disabled=!payable(x),pending=Number(x.pendingPaymentAmount||0);return `<div class="row"><input type="checkbox" data-s="${esc(x.source)}|${esc(x.id)}" ${disabled?'disabled':''}><div>${esc(date(x.dueDate))}</div><div><strong>${esc(x.supplier)}</strong><div class="sub">${esc(x.paymentId||'')}</div></div><div>${esc(x.invoiceNumber||'–')}</div><div class="pay-amount"><span>Offener Zahlbetrag · ${esc(x.currency||'EUR')}</span><input data-a="${esc(x.source)}|${esc(x.id)}" type="number" min="0.01" max="${pay.toFixed(2)}" step="0.01" value="${displayAmount.toFixed(2)}" readonly ${disabled?'disabled':''}><label class="partial-choice"><input data-p="${esc(x.source)}|${esc(x.id)}" type="checkbox" ${disabled||pay<=.01?'disabled':''}> Teilzahlung</label>${pending>0?`<span class="partial-pending">Bereits übergeben: ${esc(money(pending,x.currency))}</span>`:''}${reduced?`<span class="gross">Rechnung ${esc(money(x.amount,x.currency))}</span>`:''}</div><div>${approvalLabel(x)}</div><div>${pdf(x)}</div></div>`}).join(''):'<div class="empty">Keine offenen Überweisungen.</div>';
   sb.innerHTML=s.length?s.map(x=>`<div class="row submitted-row"><div class="submitted-date">${esc(date(x.dueDate))}</div><div class="submitted-supplier"><strong>${esc(x.supplier)}</strong><div class="sub">${esc(x.paymentId||'')}</div></div><div>${esc(x.invoiceNumber||'–')}</div><div class="amount">${esc(money(Number(x.pendingPaymentAmount||0)>0?x.pendingPaymentAmount:(x.paymentAmount??x.amount),x.currency))}</div><div><span class="status sepa_submitted">SEPA übergeben · wartet auf CAMT</span></div><button class="sepa-download submitted-action" data-regen="${esc(x.source)}|${esc(x.id)}">XML neu erstellen</button><div>${pdf(x)}</div></div>`).join(''):'<div class="empty">Derzeit nichts an SEPA übergeben.</div>';
   ab.innerHTML=batches.length?batches.map(x=>`<div class="row archive-row"><div>${esc(dateTime(x.createdAt))}</div><div><strong>${esc(x.filename)}</strong><div class="sub">${Number(x.count||0)} Überweisung(en)</div></div><div>${esc(batchSummary(x))}</div><div class="amount">${esc(money(x.total,x.currency))}</div><button class="sepa-download" data-archive="${esc(x.id)}">XML erneut laden</button></div>`).join(''):'<div class="empty">Noch keine SEPA-Datei archiviert.</div>';
   ub.innerHTML=u.length?u.map(x=>`<div class="row"><div>${esc(date(x.dueDate))}</div><div><strong>${esc(x.supplier)}</strong><div class="sub">${x.source==='KRISTINE'?approvalLabel(x):''}</div></div><div>${esc(x.invoiceNumber||'–')}</div><div class="amount">${esc(money(x.amount,x.currency))}</div><select data-m="${esc(x.source)}|${esc(x.id)}">${opts(x.paymentMethod)}</select></div>`).join(''):'<div class="empty">Keine ungeklärten Zahlungsarten.</div>';
@@ -63,9 +79,57 @@ def payments_page():
  }
  async function load(){const [oq,aq]=await Promise.all([fetch('/incoming/payment-open-items',{cache:'no-store'}),fetch('/incoming/payment-batches',{cache:'no-store'})]),[d,a]=await Promise.all([oq.json(),aq.json()]);if(!oq.ok||!d.ok)throw Error(d.error||'Bezahl-OP konnte nicht geladen werden');if(!aq.ok||!a.ok)throw Error(a.error||'SEPA-Archiv konnte nicht geladen werden');render(d.items||[],d.unclassified||[],d.submitted||[],d,a.batches||[])}
  const dp=id=>document.getElementById(id),dialog=dp('directPayDialog');let directToken=null,directCsrf='',directBusy=false,directSent=false;
+ const foreignDialog=dp('foreignPayDialog');
+ let foreignTransferText='';
+ dp('foreignPayClose').onclick=()=>foreignDialog.close();
+ dp('foreignPayCopy').onclick=async()=>{
+  const content=foreignTransferText;
+  try{
+   if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(content);
+   else throw Error('Clipboard unavailable');
+   dp('foreignPayMessage').textContent='Zahlungsdaten kopiert. Im Bankportal kontrollieren und manuell in CHF erfassen.';
+  }catch(e){
+   const box=dp('foreignPayData');const range=document.createRange();range.selectNodeContents(box);
+   const sel=window.getSelection();sel.removeAllRanges();sel.addRange(range);
+   dp('foreignPayMessage').textContent='Kopieren nicht automatisch möglich. Die Zahlungsdaten sind markiert: Strg+C drücken.';
+  }
+ };
+ function showForeignPayment(item){
+   const warning=item.bic?'':'BIC/SWIFT: Nicht hinterlegt – auf dem Originalbeleg oder bei der Bank klären.\\n';
+   foreignTransferText=[
+      'Art: Schweizer / Auslandsüberweisung (KEIN EUR-SEPA)',
+      'Empfänger: '+item.recipient,
+      'IBAN: '+item.iban,
+      'BIC/SWIFT: '+(item.bic||'nicht hinterlegt'),
+      'Betrag: '+money(item.amount,item.currency),
+      'Rechnung: '+item.invoiceNumber,
+      'Verwendungszweck: '+item.purpose,
+      'Status: Nur vorbereitet – nicht an die Bank übergeben',
+      item.bankReferenceNotice||'Zahlungsreferenz mit dem Originalbeleg abgleichen.'
+   ].join('\\n');
+   dp('foreignPayData').textContent=foreignTransferText;
+   dp('foreignPayMessage').textContent=(item.bic?'':'Bank-BIC/SWIFT fehlt. Bitte je nach Bankanforderung im Originalbeleg prüfen. ')+'Die Zahlung ist noch offen und wurde nicht ausgelöst.';
+   foreignDialog.showModal();
+ }
+
  async function directRequest(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Brain-Konfipay':directCsrf},body:JSON.stringify(body),cache:'no-store'});const data=await r.json();if(!r.ok||!data.ok)throw Error(data.error||'Bankverbindung fehlgeschlagen.');return data;}
  go.onclick=async()=>{
   if(directBusy)return;const chosen=selected();if(!chosen.length)return;
+  const hasForeign=chosen.some(x=>String(x.currency||'EUR').toUpperCase()!=='EUR');
+  if(hasForeign){
+   if(chosen.length!==1){alert('Bitte jeweils nur eine CHF-/Fremdwährungsrechnung auswählen.');return;}
+   try{
+     const req=await fetch('/incoming/payment-foreign/preview',{
+       method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({items:chosen.map(x=>({source:x.source,id:x.id,paymentAmount:x.paymentAmount}))}),
+       cache:'no-store'
+     });
+     const data=await req.json();
+     if(!req.ok||!data.ok)throw Error(data.error||'Auslandszahlungsdaten nicht verfügbar.');
+     showForeignPayment(data.item);
+   }catch(error){alert(error.message);}
+   return;
+  }
   directBusy=true;directSent=false;directToken=null;dp('directPaySend').disabled=true;dp('directPayCancel').disabled=true;dp('directPayCancel').textContent='Abbrechen';dp('directPayRows').replaceChildren();dp('directPayTotal').textContent='Auswahl wird geprüft …';dp('directPayMessage').textContent='';dp('directPayAccount').textContent='';dp('directPayBalanceNote').textContent='';for(const id of ['directPayBefore','directPayAfter','directPayDeduction'])dp(id).textContent='–';dialog.showModal();
   try{const response=await fetch('/konfipay/api/context',{cache:'no-store'}),context=await response.json();if(!response.ok||!context.ok||!context.configured)throw Error('Bitte zuerst die Bankverbindung einrichten.');directCsrf=context.csrf;
    const d=await directRequest('/incoming/pay-direct/preview',{items:chosen.map(x=>({source:x.source,id:x.id,paymentAmount:x.paymentAmount}))});directToken=d.draft;
