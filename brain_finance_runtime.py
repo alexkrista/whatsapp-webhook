@@ -259,15 +259,16 @@ def install(ns):
 
     def remittance_for(item):
         inv=str(item.get("invoiceNumber") or item.get("docId") or "Rechnung").strip()
+        currency=str(item.get("currency") or "EUR").upper()
         base=inv
         if item.get("approvalStatus")=="reduced":
             deduction=float(item.get("approvalDeduction") or 0); reason=" ".join(str(item.get("approvalReason") or "").split())
-            base+=f" - Abzug {deduction:.2f} EUR"
+            base+=f" - Abzug {deduction:.2f} {currency}"
             if reason:base+=f": {reason}"
         if item.get("partialPayment"):
-            base+=f" - Teilzahlung {float(item.get('paymentAmount') or 0):.2f} EUR"
+            base+=f" - Teilzahlung {float(item.get('paymentAmount') or 0):.2f} {currency}"
         fees=max(0.0,float(item.get("feesAmount") or 0))
-        if fees:base+=f" + Mahnspesen {fees:.2f} EUR"
+        if fees:base+=f" + Mahnspesen {fees:.2f} {currency}"
         return base[:140]
 
     def sepa_payload(items):
@@ -366,7 +367,16 @@ def install(ns):
                 local=[x for x in all_items if str(x.get("source") or "")=="KRISTINE" and norm_status(x.get("paymentStatus"))!="paid"]
                 pending=[x for x in local if x.get("approvalStatus")=="pending"]; blocked=[x for x in local if x.get("approvalStatus")=="blocked"]; approved=[x for x in local if x.get("approvalStatus") in FINAL_APPROVALS]
                 payable=[x for x in transfer if x.get("approvalStatus") in FINAL_APPROVALS or x.get("approvalStatus")=="not_required"]
-                return jsonify(ok=True,count=len(transfer),total=round(sum(float(x.get("paymentAmount") if x.get("paymentAmount") is not None else x.get("amount") or 0) for x in payable),2),submittedCount=len(submitted),unclassifiedCount=len(unknown),approvalPendingCount=len(pending),approvalBlockedCount=len(blocked),approvalApprovedCount=len(approved),approvalSyncError=sync_error,items=transfer,submitted=submitted,unclassified=unknown)
+                totals_by_currency={}
+                for x in payable:
+                    currency=str(x.get("currency") or "EUR").upper()
+                    value=float(x.get("paymentAmount") if x.get("paymentAmount") is not None else x.get("amount") or 0)
+                    totals_by_currency[currency]=round(totals_by_currency.get(currency,0.0)+value,2)
+                return jsonify(ok=True,count=len(transfer),total=round(sum(totals_by_currency.values()),2),
+                               totalsByCurrency=totals_by_currency,submittedCount=len(submitted),
+                               unclassifiedCount=len(unknown),approvalPendingCount=len(pending),
+                               approvalBlockedCount=len(blocked),approvalApprovedCount=len(approved),
+                               approvalSyncError=sync_error,items=transfer,submitted=submitted,unclassified=unknown)
             except Exception as e:return jsonify(ok=False,error=str(e)),500
         @app.get("/incoming/payment-batches")
         def brain_incoming_payment_batches():
