@@ -425,6 +425,21 @@ def install(ns):
 </script>
 '''
     script = script.replace("__CURRENCIES__", json.dumps(list(COMMON_CURRENCIES), ensure_ascii=False))
+    # The input is part of the initial HTML, immediately below "IBAN auf
+    # dieser Rechnung". It must be visible even if no change event fires.
+    bank_warning = '<div id="captureBankWarning" class="full"></div>'
+    bic_markup = '''
+            <div class="full capture-bic-wrap" id="captureBicWrap">
+              <label for="captureBic">BIC / SWIFT (bei CHF Pflichtfeld *)</label>
+              <input id="captureBic" name="swift" type="text" maxlength="20"
+                     autocomplete="off" spellcheck="false" placeholder="8 oder 11 Zeichen">
+              <div class="sub">Bei CHF unbedingt BIC der Empfängerbank laut Rechnung eintragen.</div>
+            </div>
+    '''
+    if bank_warning in page and 'id="captureBic"' not in page:
+        page = page.replace(bank_warning, bic_markup + bank_warning, 1)
+    elif 'id="captureInvoiceIban"' in page and 'id="captureBic"' not in page:
+        raise RuntimeError("BIC-Eingabefeld konnte nicht neben der IBAN platziert werden.")
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
