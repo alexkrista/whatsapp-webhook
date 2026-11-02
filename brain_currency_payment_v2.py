@@ -366,6 +366,11 @@ def install(ns):
 
     css = r'''
 .capture-payment-method-wrap select{width:100%}
+.capture-bic-wrap{grid-column:1/-1;display:grid;gap:6px;padding:12px;border:1px solid #4c6175;border-radius:10px;background:#15212a}
+.capture-bic-wrap[hidden]{display:none!important}
+.capture-bic-wrap label{font-size:13px;font-weight:800;color:#eaf2ff}
+.capture-bic-wrap input{max-width:360px;text-transform:uppercase;letter-spacing:.05em}
+.capture-bic-wrap .sub{font-size:12px;color:#c3d3e8}
 .capture-fx-panel{grid-column:1/-1;border:1px solid #3e4d5f;border-radius:12px;background:#111820;padding:11px 12px;display:grid;grid-template-columns:minmax(150px,.8fr) minmax(150px,.8fr) minmax(120px,.6fr) auto;gap:9px;align-items:end}
 .capture-fx-panel[hidden]{display:none!important}.capture-fx-panel label{font-size:11px;color:var(--muted)}.capture-fx-panel input{margin-top:4px}
 .capture-fx-rate-line{font-size:12px;color:#c7d2df}.capture-fx-estimate{font-weight:900;font-size:17px}.capture-fx-hint{grid-column:1/-1;color:var(--muted);font-size:11px}
