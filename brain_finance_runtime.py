@@ -342,7 +342,7 @@ def install(ns):
                 if not item:raise ValueError("Rechnung wurde nicht gefunden.")
                 if norm_status(item.get("paymentStatus")) in {"paid","sepa_submitted"}:
                     raise ValueError("Bezahlte oder bereits an SEPA übergebene Rechnungen können nicht mehr geändert werden.")
-                saved=store.set_creditor_details(source,sid,b.get("dunningLevel") or 0,b.get("feesAmount") or 0,b.get("note") or "",b.get("updatedBy") or "Dunja")
+                saved=store.set_creditor_details(source,sid,b.get("dunningLevel") or 0,b.get("feesAmount") if b.get("feesAmount") is not None else 0,b.get("note") or "",b.get("updatedBy"))
                 return jsonify(ok=True,source=source,id=sid,**saved)
             except (ValueError,TypeError) as e:return jsonify(ok=False,error=str(e)),400
             except Exception as e:return jsonify(ok=False,error=str(e)),500

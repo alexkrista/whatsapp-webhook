@@ -1,0 +1,56 @@
+name: KRISTINE invoice book dunning and actor
+on:
+  pull_request:
+    paths:
+      - 'brain_invoice_book.py'
+      - 'brain_finance_source.py'
+      - 'brain_finance_runtime.py'
+      - 'brain_finance_creditor_ui.py'
+      - 'public/invoice-book.html'
+      - 'TEST/test_invoice_book_dunning.py'
+      - '.github/workflows/invoice-book-dunning.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'brain_invoice_book.py'
+      - 'brain_finance_source.py'
+      - 'brain_finance_runtime.py'
+      - 'brain_finance_creditor_ui.py'
+      - 'public/invoice-book.html'
+      - 'TEST/test_invoice_book_dunning.py'
+      - '.github/workflows/invoice-book-dunning.yml'
+permissions:
+  contents: read
+jobs:
+  dunning:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Flask for isolated HTTP tests
+        run: pip install Flask
+      - name: Test dunning origin guard and current invoices
+        run: |
+          python -m unittest discover -s TEST -p test_invoice_book_dunning.py -v
+          python -m unittest discover -s TEST -p test_brain_invoice_book_status.py -v
+      - name: Validate Python and inline JavaScript
+        run: |
+          python -m py_compile brain_invoice_book.py brain_finance_source.py brain_finance_runtime.py brain_finance_creditor_ui.py
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          for source, target in [
+              ('public/invoice-book.html', '/tmp/book-dunning.js'),
+              ('brain_finance_creditor_ui.py', '/tmp/payment-creditor.js'),
+          ]:
+              contents = Path(source).read_text(encoding='utf-8')
+              if source.endswith('.py'):
+                  contents = contents.split('script = r',1)[1]
+              found = re.search(r'<script(?: [^>]*)?>(.*?)</script>', contents, re.S)
+              assert found, source
+              Path(target).write_text(found.group(1), encoding='utf-8')
+          PY
+          node --check /tmp/book-dunning.js
+          node --check /tmp/payment-creditor.js

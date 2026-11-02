@@ -55,7 +55,12 @@ class FinanceStore:
         level=int(dunning_level or 0);fees=round(float(fees_amount or 0),2)
         if level<0 or level>9:raise ValueError("Mahnstufe muss zwischen 0 und 9 liegen.")
         if fees<0 or fees>10000:raise ValueError("Spesen müssen zwischen 0,00 und 10.000,00 EUR liegen.")
-        saved={"dunningLevel":level,"feesAmount":fees,"creditorNote":str(note or "").strip()[:1000],"creditorUpdatedBy":str(updated_by or "Dunja").strip()[:100] or "Dunja","creditorUpdatedAt":datetime.now().isoformat(timespec="seconds")}
+        actor=str(updated_by or "").strip()
+        if not actor or actor.casefold() in {"unbekannt","unknown","system"}:
+            raise ValueError("Bitte die tatsächliche Bearbeiterin oder den Bearbeiter angeben.")
+        if len(actor)>100:
+            raise ValueError("Bearbeitername ist zu lang.")
+        saved={"dunningLevel":level,"feesAmount":fees,"creditorNote":str(note or "").strip()[:1000],"creditorUpdatedBy":actor,"creditorUpdatedAt":datetime.now().isoformat(timespec="seconds")}
         c=self.con()
         try:
             c.execute("INSERT INTO brain_creditor_details(source,source_id,dunning_level,fees_amount,note,updated_by,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET dunning_level=excluded.dunning_level,fees_amount=excluded.fees_amount,note=excluded.note,updated_by=excluded.updated_by,updated_at=excluded.updated_at",(source,source_id,level,fees,saved["creditorNote"],saved["creditorUpdatedBy"],saved["creditorUpdatedAt"]))

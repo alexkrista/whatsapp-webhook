@@ -232,6 +232,20 @@ class InvoiceBook:
             row["amount"] = originals[key]
         return rows
 
+    def _with_creditor_details(self, rows):
+        """Reuse the same saved dunning details as the creditor payment list."""
+        if not rows:
+            return rows
+        details = self.store.creditor_details()
+        empty = {
+            "dunningLevel": 0, "feesAmount": 0.0, "creditorNote": "",
+            "creditorUpdatedBy": "", "creditorUpdatedAt": "",
+        }
+        for row in rows:
+            key = (str(row.get("source") or ""), str(row.get("id") or ""))
+            row.update(details.get(key, empty))
+        return rows
+
     def ensure_numbers(self):
         with BOOK_LOCK:
             con = self.db()
@@ -273,7 +287,7 @@ class InvoiceBook:
         rows = self._ww(query, year) + self._local(query, year)
         local_docs = {x["docId"] for x in rows if x["source"] == "KRISTINE" and x.get("docId")}
         rows = [x for x in rows if x["source"] == "KRISTINE" or not x.get("docId") or x["docId"] not in local_docs]
-        rows = self._with_bank_status(rows)
+        rows = self._with_creditor_details(self._with_bank_status(rows))
         rows.sort(key=lambda x: (str(x.get("invoiceDate") or ""), str(x.get("supplier") or "").lower()), reverse=True)
         return self.add_numbers(rows[:10000])
 
@@ -349,7 +363,7 @@ class InvoiceBook:
             raise ValueError("Ungültige Rechnung.")
         if not rows:
             raise ValueError("Rechnung wurde nicht gefunden.")
-        return self._with_bank_status(rows)[0]
+        return self._with_creditor_details(self._with_bank_status(rows))[0]
 
     def history(self, source, source_id):
         con = self.db()
@@ -406,14 +420,14 @@ def install(ns):
     book = InvoiceBook(ns)
     ns["invoice_book"] = book
     token = secrets.token_urlsafe(32)
-    paths = {"/incoming/invoice-book", "/incoming/invoice-book/items", "/incoming/invoice-book/status", "/incoming/invoice-book/history"}
+    paths = {"/incoming/invoice-book", "/incoming/invoice-book/items", "/incoming/invoice-book/status", "/incoming/invoice-book/history", "/incoming/invoice-book/dunning"}
     ns["MOBILE_ALLOWED_PATHS"].update(paths)
 
     from flask import Response, jsonify, request
 
     @app.before_request
     def invoice_book_guard():
-        if request.path == "/incoming/invoice-book/status":
+        if request.path in {"/incoming/invoice-book/status", "/incoming/invoice-book/dunning"}:
             if urlsplit(request.headers.get("Origin", "")).netloc != request.host or not secrets.compare_digest(request.headers.get("X-Invoice-Book", ""), token):
                 return jsonify(ok=False, error="Bitte Rechnungsbuch neu laden."), 403
             if not request.content_length or request.content_length > 8000:
@@ -459,6 +473,32 @@ def install(ns):
             message = "Rechnung ist wieder im Zahlungslauf." if action == "repay" else "Rechnung wurde wieder geöffnet." if action == "open" else "Rechnung wurde als bezahlt markiert."
             return jsonify(ok=True, invoice=row, message=message)
         except ValueError as exc:
+            return jsonify(ok=False, error=str(exc)), 400
+        except Exception as exc:
+            return jsonify(ok=False, error=str(exc)), 500
+
+    @app.post("/incoming/invoice-book/dunning")
+    def invoice_book_dunning():
+        """Update only dunning metadata, never bank payment or invoice amounts."""
+        try:
+            body = request.get_json(silent=True) or {}
+            source = str(body.get("source") or "")
+            source_id = str(body.get("id") or "")
+            actor = str(body.get("updatedBy") or "").strip()
+            if not actor or actor.lower() in {"unbekannt", "unknown", "system"}:
+                raise ValueError("Bitte die tatsächliche Bearbeiterin oder den Bearbeiter auswählen.")
+            if len(actor) > 100:
+                raise ValueError("Bearbeitername ist zu lang.")
+            row = book.one(source, source_id)
+            if norm_status(row.get("paymentStatus")) in {"paid", "sepa_submitted"}:
+                raise ValueError("Bezahlte oder bereits an SEPA übergebene Rechnungen können nicht geändert werden.")
+            saved = book.store.set_creditor_details(
+                source, source_id, body.get("dunningLevel") or 0,
+                body.get("feesAmount") if body.get("feesAmount") is not None else 0,
+                body.get("note") or "", actor,
+            )
+            return jsonify(ok=True, details=saved, invoice=book.one(source, source_id))
+        except (ValueError, TypeError, OverflowError) as exc:
             return jsonify(ok=False, error=str(exc)), 400
         except Exception as exc:
             return jsonify(ok=False, error=str(exc)), 500
