@@ -30,8 +30,26 @@ class CaptureChfBicHTTP(unittest.TestCase):
             @app.put("/incoming/capture/<int:invoice_id>/edit")
             def brain_capture_edit_save(invoice_id):
                 return jsonify(ok=True,invoice={"id":invoice_id})
-            install({"app":app,"MOBILE_PAGE":"<html><style></style><body></body></html>",
-                     "_capture_area":lambda x:x,"_capture_area_connection":connect})
+            params = {
+                "app": app,
+                "MOBILE_PAGE": (
+                    '<html><style></style><body>'
+                    '<div class="full"><input id="captureInvoiceIban"></div>'
+                    '<div id="captureBankWarning" class="full"></div></body></html>'
+                ),
+                "_capture_area": lambda x: x,
+                "_capture_area_connection": connect,
+            }
+            install(params)
+            html = params["MOBILE_PAGE"]
+            self.assertIn('id="captureBic"', html)
+            self.assertIn('id="captureBicWrap"', html)
+            self.assertLess(html.index('id="captureInvoiceIban"'),
+                            html.index('id="captureBic"'))
+            self.assertLess(html.index('id="captureBic"'),
+                            html.index('id="captureBankWarning"'))
+            self.assertNotIn('id="captureBicWrap" hidden', html)
+            self.assertNotIn('bicWrap.hidden=', html)
             cl=app.test_client()
             def save(p):
                 return cl.post("/incoming/capture/save",data={"payload":json.dumps(p)})
