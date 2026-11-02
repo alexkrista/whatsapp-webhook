@@ -143,7 +143,15 @@ function installRoutes(app){
   });
   app.post("/kristine/api/access-heartbeat",async(req,res)=>{
     if(!requireAdmin(req,res,{allowBrowserSession:false}))return;
-    try{await writeJson(STATUS_FILE,{...(req.body||{}),receivedAt:new Date().toISOString()});res.json({ok:true});}
+    try{
+      const payload=req.body;
+      if(!payload||typeof payload!=="object"||Array.isArray(payload)||
+         !payload.gantner||typeof payload.gantner!=="object"||
+         !payload.services||typeof payload.services!=="object")
+        return res.status(400).json({ok:false,error:"Heartbeat-Daten fehlen (JSON). Kein Status gespeichert."});
+      await writeJson(STATUS_FILE,{...payload,receivedAt:new Date().toISOString()});
+      res.json({ok:true});
+    }
     catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
   });
   app.get("/kristine/api/access-status",async(req,res)=>{
@@ -156,7 +164,18 @@ function installRoutes(app){
 const expressPath=require.resolve("express"),originalExpress=require(expressPath);
 function wrappedExpress(...args){
   const app=originalExpress(...args),originalUse=app.use.bind(app);let inserted=false;
-  app.use=function(...useArgs){const result=originalUse(...useArgs);if(!inserted){inserted=true;installRoutes(app)}return result};return app;
+  app.use=function(...useArgs){
+    const result=originalUse(...useArgs);
+    // Camper registered with app.use('/camper', router) before express.json().
+    // Installing POST /access-heartbeat there accepted HTTP 200 but silently
+    // discarded the entire JSON payload (req.body was undefined).
+    // Register after the global parser, never before it.
+    const jsonReady=useArgs.length===1 &&
+      typeof useArgs[0]==="function" && useArgs[0].name==="jsonParser";
+    if(!inserted && jsonReady){inserted=true;installRoutes(app)}
+    return result;
+  };
+  return app;
 }
 Object.assign(wrappedExpress,originalExpress);wrappedExpress.application=originalExpress.application;wrappedExpress.request=originalExpress.request;wrappedExpress.response=originalExpress.response;
 require.cache[expressPath].exports=wrappedExpress;
