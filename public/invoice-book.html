@@ -7,6 +7,10 @@
 <style>
 :root{color-scheme:dark;--bg:#101316;--card:#171b20;--line:#343c46;--text:#eef2f4;--muted:#9da8b3;--green:#438b5c;--blue:#315d91;--gold:#7c641d;--red:#82443e}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}.shell{max-width:1600px;margin:auto;padding:20px}.head,.actions,.filters,.row-head{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.head h1{margin:0}.sub,.small{color:var(--muted);font-size:13px}.button,button{border:1px solid #4a5662;border-radius:10px;padding:10px 14px;background:#252c34;color:var(--text);font:inherit;font-weight:800;text-decoration:none;cursor:pointer}.button.primary,button.primary{background:var(--green);border-color:var(--green)}button.pay{background:var(--blue);border-color:var(--blue)}button.done{background:var(--gold);border-color:var(--gold)}.filters,.card{border:1px solid var(--line);border-radius:14px;background:var(--card);padding:14px;margin-top:16px}.filters{justify-content:flex-start}.filters input,.filters select{background:#0f1215;color:var(--text);border:1px solid #4a5662;border-radius:10px;padding:12px;font:inherit}.filters input{min-width:min(360px,100%);flex:1}.summary{margin:16px 2px}.months{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:14px 0}.month{border:1px solid var(--line);border-radius:12px;background:#14191e;padding:12px}.month strong{font-size:17px}.month-line{display:flex;justify-content:space-between;gap:10px;margin-top:6px}.invoice{border-top:1px solid var(--line);padding:15px 4px}.invoice:first-child{border-top:0}.grid{display:grid;grid-template-columns:125px minmax(210px,1.5fr) minmax(120px,.8fr) 130px 165px minmax(290px,auto);gap:12px;align-items:center}.supplier{font-weight:850;font-size:16px}.book-number{display:inline-block;margin-top:4px;padding:3px 7px;border:1px solid #52606d;border-radius:999px;font-size:11px;font-weight:850}.amount{text-align:right;font-weight:850;font-size:16px}.badge{display:inline-block;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:850}.badge.open{background:#263f57;color:#bbdcff}.badge.paid{background:#23442f;color:#b9efc8}.badge.sepa_submitted{background:#54451d;color:#ffe7a0}.source-note{margin-top:6px;color:#f3c786;font-size:11px}.history{margin:12px 0 0;padding:12px;border:1px solid var(--line);border-radius:10px;background:#11151a}.history-row{padding:7px 0;border-top:1px solid #2a3038}.history-row:first-child{border-top:0}.empty{padding:30px;text-align:center;color:var(--muted)}@media(max-width:1050px){.grid{grid-template-columns:1fr 1fr}.amount{text-align:left}}@media(max-width:620px){.grid{grid-template-columns:1fr}.filters input{min-width:100%}.actions{justify-content:flex-start}}
 @media print{body{background:white;color:black}.filters,.head .actions,.invoice .actions{display:none}.card,.month{background:white;border-color:#aaa}.shell{padding:0}.invoice{break-inside:avoid}}
+.dunning-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.dunning-pill{display:inline-flex;gap:4px;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:800;background:#42351b;border:1px solid #836b34;color:#ffda8a}.dunning-pill.note{background:#233040;border-color:#49617d;color:#d5e5f7}
+.dunning-dialog{max-width:min(620px,94vw);width:100%;max-height:88vh;overflow:auto;padding:24px;color:var(--text);background:#171c22;border:1px solid #485361;border-radius:18px;box-shadow:0 26px 90px #0008}
+.dunning-dialog::backdrop{background:#000a}.dunning-dialog h2{margin:0 0 5px}.dunning-form{display:grid;gap:14px;margin-top:18px}.dunning-form label{display:grid;gap:6px;font-size:13px;font-weight:750;color:#d3dce5}.dunning-form :is(input,select,textarea){width:100%;background:#10151b;color:var(--text);border:1px solid #4b5866;border-radius:9px;padding:10px 12px;font:inherit}.dunning-form textarea{min-height:90px;resize:vertical}.dunning-form .fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}.dunning-dialog .actions{justify-content:flex-end}.dunning-dialog [role=alert]{min-height:22px;color:#ffb5aa}.dunning-dialog .error-note{font-size:12px;color:#efc17a}.dunning-dialog input:disabled,.dunning-dialog textarea:disabled,.dunning-dialog select:disabled{opacity:.6}
+@media(max-width:620px){.dunning-form .fields{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -29,6 +33,34 @@
   <section class="months" id="months"></section>
   <section class="card" id="rows"><div class="empty">Das Rechnungsbuch wartet auf deine Suche.</div></section>
 </main>
+<dialog id="dunningDialog" class="dunning-dialog" aria-labelledby="dunningTitle">
+  <h2 id="dunningTitle">Mahnstatus bearbeiten</h2>
+  <div class="small" id="dunningMeta"></div>
+  <form id="dunningForm" class="dunning-form" novalidate>
+    <div class="fields">
+      <label>Mahnstufe
+        <select id="dunningLevel"><option value="0">Keine</option><option value="1">1. Mahnung</option><option value="2">2. Mahnung</option><option value="3">3. Mahnung</option><option value="4">4. Mahnung</option><option value="5">5. Mahnung</option></select>
+      </label>
+      <label>Mahnspesen (<span id="dunningCurrency">EUR</span>)
+        <input id="dunningFees" type="number" step="0.01" min="0" max="10000" value="0" inputmode="decimal">
+      </label>
+    </div>
+    <label>Notiz
+      <textarea id="dunningNote" maxlength="1000" placeholder="z. B. Mahnung vom …"></textarea>
+    </label>
+    <label>Bearbeitet von *
+      <input id="dunningEditor" type="text" list="dunningEditors" maxlength="100" autocomplete="off" placeholder="Namen auswählen oder eingeben" required>
+      <datalist id="dunningEditors"><option value="Dunja"><option value="Bettina"><option value="Alexander"></datalist>
+    </label>
+    <div class="small" id="dunningLast"></div>
+    <div class="error-note" id="dunningLocked" hidden>Bereits bezahlte oder an SEPA übergebene Rechnungen sind nicht mehr änderbar.</div>
+    <div id="dunningError" role="alert"></div>
+    <div class="actions">
+      <button type="button" id="dunningCancel">Schließen</button>
+      <button type="submit" id="dunningSave" class="primary">Mahnstatus speichern</button>
+    </div>
+  </form>
+</dialog>
 <script>
 (()=>{
 // BEGIN operational invoice balances
