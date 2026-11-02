@@ -127,6 +127,7 @@ def install(ns):
     def save_fx(area, invoice_id, payload):
         area = capture_area(area)
         currency = _currency(payload.get("currency"))
+        swift = validate_invoice_bic(payload)
         method = _payment_method(payload.get("paymentMethod"))
         gross = max(0.0, _float(payload.get("grossAmount"), 0.0) or 0.0)
         rate = _float(payload.get("fxRateToEur"))
@@ -146,11 +147,12 @@ def install(ns):
             con.execute("""
                 UPDATE incoming_invoices SET
                     currency=?, payment_method=?, fx_rate_to_eur=?, fx_rate_date=?, fx_rate_source=?,
-                    fx_estimated_eur=?, fx_tolerance_percent=?, fx_tolerance_eur=?, updated_at=?
+                    fx_estimated_eur=?, fx_tolerance_percent=?, fx_tolerance_eur=?,
+                    swift=COALESCE(NULLIF(?, ''),swift), updated_at=?
                 WHERE id=?
             """, (
                 currency, method, rate, rate_date, source, estimated, tol_percent, tol_eur,
-                datetime.now().isoformat(timespec="seconds"), int(invoice_id),
+                swift, datetime.now().isoformat(timespec="seconds"), int(invoice_id),
             ))
             if area == "live":
                 con.execute("""
