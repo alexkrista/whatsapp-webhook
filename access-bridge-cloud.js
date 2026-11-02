@@ -156,7 +156,18 @@ function installRoutes(app){
 const expressPath=require.resolve("express"),originalExpress=require(expressPath);
 function wrappedExpress(...args){
   const app=originalExpress(...args),originalUse=app.use.bind(app);let inserted=false;
-  app.use=function(...useArgs){const result=originalUse(...useArgs);if(!inserted){inserted=true;installRoutes(app)}return result};return app;
+  app.use=function(...useArgs){
+    const result=originalUse(...useArgs);
+    // Camper registered with app.use('/camper', router) before express.json().
+    // Installing POST /access-heartbeat there accepted HTTP 200 but silently
+    // discarded the entire JSON payload (req.body was undefined).
+    // Register after the global parser, never before it.
+    const jsonReady=useArgs.length===1 &&
+      typeof useArgs[0]==="function" && useArgs[0].name==="jsonParser";
+    if(!inserted && jsonReady){inserted=true;installRoutes(app)}
+    return result;
+  };
+  return app;
 }
 Object.assign(wrappedExpress,originalExpress);wrappedExpress.application=originalExpress.application;wrappedExpress.request=originalExpress.request;wrappedExpress.response=originalExpress.response;
 require.cache[expressPath].exports=wrappedExpress;
