@@ -4,13 +4,13 @@ import hashlib
 import json
 from datetime import datetime
 
-METHODS={"unknown","transfer","direct_debit","revolut_business","revolut","cash"}
+METHODS={"unknown","transfer","direct_debit","revolut_business","revolut","revolut_any","cash"}
 STATUSES={"open","sepa_submitted","paid"}
 OPEN_ITEMS_CUTOFF="2025-11-26"
 
 def norm_method(v):
     r=str(v or "").strip().lower().replace("-","_").replace(" ","_")
-    return {"":"unknown","zahlung":"transfer","ueberweisung":"transfer","überweisung":"transfer","sepa":"transfer","bank":"transfer","einzug":"direct_debit","lastschrift":"direct_debit","abbucher":"direct_debit","revolut_business":"revolut_business","revolut_business_api":"revolut_business","business":"revolut_business","kreditkarte":"revolut","karte":"revolut","barzahlung":"cash","bar":"cash","kassa":"cash"}.get(r,r if r in METHODS else "unknown")
+    return {"":"unknown","zahlung":"transfer","ueberweisung":"transfer","überweisung":"transfer","sepa":"transfer","bank":"transfer","einzug":"direct_debit","lastschrift":"direct_debit","abbucher":"direct_debit","revolut_any":"revolut_any","revolut_beide":"revolut_any","revolut_business":"revolut_business","revolut_business_api":"revolut_business","business":"revolut_business","kreditkarte":"revolut","karte":"revolut","barzahlung":"cash","bar":"cash","kassa":"cash"}.get(r,r if r in METHODS else "unknown")
 
 def winworker_method(explicit, source_label):
     """Keep an explicit Brain choice; otherwise recognize WinWorker direct-debit labels."""
@@ -225,7 +225,8 @@ class FinanceStore:
         try:
             exists=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='brain_statement_allocations'").fetchone()
             has_skonto=exists and 'skonto_amount' in {x['name'] for x in c.execute('PRAGMA table_info(brain_statement_allocations)')}
-            sum_expr='ABS(amount)+skonto_amount' if has_skonto else 'ABS(amount)'
+            has_fx=exists and 'invoice_currency_amount' in {x['name'] for x in c.execute('PRAGMA table_info(brain_statement_allocations)')}
+            sum_expr=('COALESCE(invoice_currency_amount,ABS(amount)+skonto_amount)' if has_fx else 'ABS(amount)+skonto_amount') if has_skonto else 'ABS(amount)'
             totals={} if not exists else {(str(x['target_source']),str(x['target_id'])):round(float(x['allocated'] or 0),2) for x in c.execute("SELECT target_source,target_id,SUM("+sum_expr+") AS allocated FROM brain_statement_allocations WHERE category IN ('supplier_payment','direct_debit') GROUP BY target_source,target_id")}
         finally:c.close()
         for row in rows:
