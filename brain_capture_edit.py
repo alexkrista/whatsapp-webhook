@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import json
 from datetime import datetime
+from brain_currency_payment_v2 import validate_invoice_bic
 
 
 def _norm_invoice_number(value):
@@ -150,13 +151,18 @@ def install(ns):
                     if accepted and not ns["_iban_valid"](invoice_iban):
                         raise ValueError("Die neue IBAN ist leer oder formal ungültig.")
                     effective_iban = invoice_iban if accepted else master_iban
+                    # Persist BIC in the SAME transaction as invoice editing,
+                    # not afterwards in a silent best-effort FX wrapper.
+                    swift = validate_invoice_bic(body)
+                    if not swift:
+                        swift = str(row["swift"] or "")
                     con.execute("""
                         UPDATE incoming_invoices SET workflow_status='zu_pruefen',
                             document_type=?, supplier_address_id=?, supplier_name=?, supplier_address=?,
                             supplier_number=?, our_customer_number=?, supplier_invoice_number=?,
                             supplier_invoice_number_norm=?, invoice_date=?, due_date=?, net_due_date=?,
                             skonto_enabled=?, skonto_percent=?, skonto_due_date=?, payment_terms=?,
-                            net_amount=?, vat_amount=?, gross_amount=?, currency=?, iban=?, invoice_iban=?,
+                            net_amount=?, vat_amount=?, gross_amount=?, currency=?, iban=?, invoice_iban=?, swift=?,
                             master_iban=?, bank_change_accepted=?, customer_number_external=?,
                             booking_text=?, note=?, created_by=?, updated_at=?
                         WHERE id=?
@@ -170,7 +176,7 @@ def install(ns):
                         _money(body.get("skontoPercent")) if body.get("skontoEnabled") else None,
                         str(body.get("skontoDueDate") or ""), str(body.get("paymentTerms") or ""),
                         net, _money(body.get("vatAmount")), _money(body.get("grossAmount")),
-                        str(body.get("currency") or "EUR").upper()[:3], effective_iban, invoice_iban,
+                        str(body.get("currency") or "EUR").upper()[:3], effective_iban, invoice_iban, swift,
                         master_iban, 1 if accepted else 0, str(body.get("customerNumberExternal") or ""),
                         str(body.get("bookingText") or "")[:1000], str(body.get("note") or "")[:2000],
                         str(body.get("createdBy") or row["created_by"] or "Dunja")[:100], now, invoice_id,
@@ -282,6 +288,13 @@ def install(ns):
       const payload=capturePayload();payload.confirmReopen=editingReopened;
       const r=await fetch('/incoming/capture/'+encodeURIComponent(editingId)+'/edit',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),d=await r.json();
       if(!r.ok||!d.ok)throw new Error(d.error||'Änderungen konnten nicht gespeichert werden');
+      // A successful HTTP response is insufficient: verify the durable BIC
+      // before closing the edit dialog (the old FX wrapper swallowed errors).
+      const expectedBic=String(payload.swift||'').replace(/\s+/g,'').toUpperCase();
+      const storedBic=String(d.invoice?.swift||'').replace(/\s+/g,'').toUpperCase();
+      if(String(payload.currency||'').toUpperCase()==='CHF'&&(!expectedBic||storedBic!==expectedBic)){
+        throw new Error('BIC konnte nicht als gespeichert bestätigt werden. Bitte Rechnung prüfen und nicht erneut einbuchen.');
+      }
       const doc=d.invoice?.docId||editingDoc;stopEdit(true);setCaptureMessage('✓ '+doc+' geändert · weiterhin Zu prüfen','success');await Promise.all([loadCaptureDashboard(),loadCaptureRecent()]);
     }catch(e){setCaptureMessage(e.message||String(e),'error')}finally{captureSave.disabled=false}
   }
