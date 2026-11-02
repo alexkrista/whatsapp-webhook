@@ -27,9 +27,9 @@ class CaptureChfBicHTTP(unittest.TestCase):
                     r=c.execute("INSERT INTO incoming_invoices(currency,swift) VALUES(?,?)",(d["currency"],""))
                     id=r.lastrowid
                 return jsonify(ok=True,invoice={"id":id})
-            @app.put("/incoming/capture/<int:id>/edit")
-            def brain_capture_edit_save(id):
-                return jsonify(ok=True,invoice={"id":id})
+            @app.put("/incoming/capture/<int:invoice_id>/edit")
+            def brain_capture_edit_save(invoice_id):
+                return jsonify(ok=True,invoice={"id":invoice_id})
             install({"app":app,"MOBILE_PAGE":"<html><style></style><body></body></html>",
                      "_capture_area":lambda x:x,"_capture_area_connection":connect})
             cl=app.test_client()
