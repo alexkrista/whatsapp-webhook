@@ -37,6 +37,22 @@ jobs:
         run: |
           python -m unittest discover -s TEST -p test_capture_chf_bic.py -v
           python -m unittest discover -s TEST -p test_capture_chf_bic_http.py -v
+      - name: Validate capture BIC UI JavaScript
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          src=Path('brain_currency_payment_v2.py').read_text(encoding='utf-8')
+          source=re.search(r"script = r'''(.*?)'''",src,re.S)
+          assert source is not None
+          js=re.search(r"<script[^>]*>(.*?)</script>",source.group(1),re.S)
+          assert js is not None
+          code=js.group(1).replace('__CURRENCIES__','["EUR","CHF"]')
+          assert "captureBic" in code and "bic.required" in code
+          assert "bicWrap.hidden=" not in code
+          Path('/tmp/krista-capture-bic-ui.js').write_text(code,encoding='utf-8')
+          PY
+          node --check /tmp/krista-capture-bic-ui.js
       - name: Validate embedded finance UI JavaScript
         run: |
           python - <<'PY'
