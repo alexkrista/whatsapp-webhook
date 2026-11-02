@@ -10,6 +10,7 @@ on:
       - 'TEST/test_capture_chf_bic.py'
       - 'TEST/test_capture_chf_bic_http.py'
       - 'brain_finance_ui.py'
+      - 'TEST/finance-foreign-payment-newlines.test.js'
       - 'TEST/test_finance_chf_and_deleted_invoice.py'
       - '.github/workflows/finance-chf-deleted-invoices.yml'
   push:
@@ -23,6 +24,7 @@ on:
       - 'TEST/test_capture_chf_bic.py'
       - 'TEST/test_capture_chf_bic_http.py'
       - 'brain_finance_ui.py'
+      - 'TEST/finance-foreign-payment-newlines.test.js'
       - 'TEST/test_finance_chf_and_deleted_invoice.py'
       - '.github/workflows/finance-chf-deleted-invoices.yml'
 permissions:
@@ -63,6 +65,8 @@ jobs:
           Path('/tmp/krista-capture-bic-ui.js').write_text(code,encoding='utf-8')
           PY
           node --check /tmp/krista-capture-bic-ui.js
+      - name: Swiss payment text formatting
+        run: node TEST/finance-foreign-payment-newlines.test.js
       - name: Validate embedded finance UI JavaScript
         run: |
           python - <<'PY'

@@ -95,7 +95,6 @@ def payments_page():
   }
  };
  function showForeignPayment(item){
-   const warning=item.bic?'':'BIC/SWIFT: Nicht hinterlegt – auf dem Originalbeleg oder bei der Bank klären.\\n';
    foreignTransferText=[
       'Art: Schweizer / Auslandsüberweisung (KEIN EUR-SEPA)',
       'Empfänger: '+item.recipient,
@@ -106,7 +105,7 @@ def payments_page():
       'Verwendungszweck: '+item.purpose,
       'Status: Nur vorbereitet – nicht an die Bank übergeben',
       item.bankReferenceNotice||'Zahlungsreferenz mit dem Originalbeleg abgleichen.'
-   ].join('\\n');
+   ].join(String.fromCharCode(10));
    dp('foreignPayData').textContent=foreignTransferText;
    dp('foreignPayMessage').textContent=(item.bic?'':'Bank-BIC/SWIFT fehlt. Bitte je nach Bankanforderung im Originalbeleg prüfen. ')+'Die Zahlung ist noch offen und wurde nicht ausgelöst.';
    foreignDialog.showModal();
