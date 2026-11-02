@@ -147,6 +147,11 @@ def _foreign_payment_preview(rows):
     supplier = str(row.get("accountHolder") or row.get("supplier") or "").strip()
     if not supplier:
         raise ValueError("Empfängername fehlt.")
+    bic = re.sub(r"\\s+", "", str(row.get("bic") or "")).upper()
+    if currency == "CHF" and not bic:
+        raise ValueError("BIC/SWIFT fehlt bei der CHF-Rechnung. Bitte die Rechnung im Eingang bearbeiten und den Bank-BIC ergänzen.")
+    if bic and not re.fullmatch(r"[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?", bic):
+        raise ValueError("BIC/SWIFT ist ungültig. Bitte Bankdaten im Rechnungseingang korrigieren.")
     invoice = str(row.get("invoiceNumber") or row.get("docId") or "").strip()
     purpose = str(row.get("remittanceText") or invoice)[:140]
     return dict(
@@ -155,7 +160,7 @@ def _foreign_payment_preview(rows):
         item=dict(source=row.get("source"), id=row.get("id"),
                   supplier=str(row.get("supplier") or ""), recipient=supplier,
                   invoiceNumber=invoice, currency=currency, amount=round(amount, 2),
-                  iban=iban, bic=str(row.get("bic") or "").strip().upper(),
+                  iban=iban, bic=bic,
                   purpose=purpose, paymentStatus=str(row.get("paymentStatus") or "open"),
                   bankReferenceNotice="Bei Schweizer QR-Rechnungen die QR-Referenz im Originalbeleg verwenden."),
     )
