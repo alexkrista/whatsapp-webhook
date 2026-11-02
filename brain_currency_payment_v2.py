@@ -223,6 +223,22 @@ def install(ns):
             except Exception as exc:
                 return jsonify({"ok": False, "error": f"Online-Kurs nicht verfügbar: {exc}"}), 502
 
+    # Reject missing CHF BIC before the underlying save/edit writes invoice files.
+    from flask import request, jsonify
+
+    @app.before_request
+    def require_chf_bic_on_capture():
+        creating = request.method == "POST" and request.path == "/incoming/capture/save"
+        editing = request.method == "PUT" and re.fullmatch(
+            r"/incoming/capture/\d+/edit", str(request.path or "")) is not None
+        if not (creating or editing):
+            return
+        try:
+            payload = json.loads(request.form.get("payload") or "{}") if creating else (request.get_json(silent=True) or {})
+            validate_invoice_bic(payload)
+        except (ValueError, TypeError) as exc:
+            return jsonify(ok=False, error=str(exc)), 400
+
     original_analyze = app.view_functions.get("incoming_capture_analyze")
     if original_analyze and not getattr(original_analyze, "_krista_currency_v2", False):
         def wrapped_analyze():
