@@ -7,7 +7,7 @@ from datetime import datetime
 from urllib.parse import quote, unquote
 from brain_finance_source import FinanceStore,norm_method,norm_status,METHODS,STATUSES,payment_id
 from brain_finance_ui import payments_page,revolut_page
-from brain_finance_sepa import build_sepa_xml
+from brain_finance_sepa import build_sepa_xml, iban_valid
 from brain_outgoing_store import DEFAULT_SETTINGS
 
 FINANCE_MARKER="[FINANCE_APPROVAL]"
@@ -142,8 +142,8 @@ def _foreign_payment_preview(rows):
     iban = re.sub(r"\s+", "", str(row.get("iban") or "")).upper()
     if currency == "CHF" and not iban.startswith("CH"):
         raise ValueError("Bei dieser CHF-Zahlung bitte die Schweizer CH-IBAN prüfen.")
-    if not re.fullmatch(r"[A-Z]{2}[0-9A-Z]{13,32}", iban):
-        raise ValueError("Empfänger-IBAN fehlt oder ist ungültig.")
+    if not iban_valid(iban):
+        raise ValueError("Empfänger-IBAN fehlt oder die Prüfziffer ist ungültig.")
     supplier = str(row.get("accountHolder") or row.get("supplier") or "").strip()
     if not supplier:
         raise ValueError("Empfängername fehlt.")
