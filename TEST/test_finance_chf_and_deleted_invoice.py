@@ -39,7 +39,7 @@ class FinanceForeignAndDeletionTests(unittest.TestCase):
             "invoiceNumber": "26.1034", "currency": "CHF",
             "paymentStatus": "open", "approvalStatus": "approved",
             "paymentAmount": 164.75, "iban": "CH9300762011623852957",
-            "bic": "", "remittanceText": "26.1034",
+            "bic": "TESTCHZZXXX", "remittanceText": "26.1034",
         }
         preview = _foreign_payment_preview([item])
         self.assertEqual(preview["item"]["amount"], 164.75)
@@ -52,7 +52,7 @@ class FinanceForeignAndDeletionTests(unittest.TestCase):
 
     def test_foreign_transfer_rejects_incomplete_or_unsafe_inputs(self):
         good = {"supplier": "CH Supplier", "currency": "CHF", "paymentAmount": 2.50,
-                "iban": "CH9300762011623852957", "invoiceNumber": "CH-2"}
+                "iban": "CH9300762011623852957", "invoiceNumber": "CH-2", "bic": "TESTCHZZXXX"}
         for rows in ([], [good, good],
                      [{**good, "currency": "EUR"}],
                      [{**good, "iban": "AT611904300234573201"}],

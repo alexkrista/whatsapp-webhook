@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - 'brain_finance_runtime.py'
+      - 'brain_currency_payment_v2.py'
+      - 'TEST/test_capture_chf_bic.py'
+      - 'TEST/test_capture_chf_bic_http.py'
       - 'brain_finance_ui.py'
       - 'TEST/test_finance_chf_and_deleted_invoice.py'
       - '.github/workflows/finance-chf-deleted-invoices.yml'
@@ -10,6 +13,9 @@ on:
     branches: [main]
     paths:
       - 'brain_finance_runtime.py'
+      - 'brain_currency_payment_v2.py'
+      - 'TEST/test_capture_chf_bic.py'
+      - 'TEST/test_capture_chf_bic_http.py'
       - 'brain_finance_ui.py'
       - 'TEST/test_finance_chf_and_deleted_invoice.py'
       - '.github/workflows/finance-chf-deleted-invoices.yml'
@@ -25,6 +31,12 @@ jobs:
           node-version: '22'
       - name: Isolated pure finance tests
         run: python -m unittest discover -s TEST -p test_finance_chf_and_deleted_invoice.py -v
+      - name: Set up Python test dependency
+        run: pip install Flask
+      - name: CHF BIC field required before invoice persistence
+        run: |
+          python -m unittest discover -s TEST -p test_capture_chf_bic.py -v
+          python -m unittest discover -s TEST -p test_capture_chf_bic_http.py -v
       - name: Validate embedded finance UI JavaScript
         run: |
           python - <<'PY'

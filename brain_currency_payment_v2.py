@@ -58,6 +58,20 @@ def _detect_currency(text):
     return "EUR"
 
 
+
+def validate_invoice_bic(payload):
+    """Format-check BIC/SWIFT, required for CHF invoices."""
+    if not isinstance(payload, dict):
+        raise ValueError("Formulardaten fehlen.")
+    currency = _currency(payload.get("currency"))
+    bic = re.sub(r"\s+", "", str(payload.get("swift") or payload.get("bic") or "")).upper()
+    if currency == "CHF" and not bic:
+        raise ValueError("Bei CHF-Rechnungen ist BIC/SWIFT Pflicht. Bitte laut Rechnung eintragen.")
+    if bic and not re.fullmatch(r"[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?", bic):
+        raise ValueError("BIC/SWIFT ist ungültig: 8 oder 11 Zeichen erforderlich.")
+    return bic
+
+
 def install(ns):
     app = ns.get("app")
     page = str(ns.get("MOBILE_PAGE") or "")
@@ -99,6 +113,7 @@ def install(ns):
         d = dict(row or {})
         return {
             "paymentMethod": _payment_method(d.get("payment_method")),
+            "swift": str(d.get("swift") or ""),
             "fxRateToEur": _float(d.get("fx_rate_to_eur")),
             "fxRateDate": str(d.get("fx_rate_date") or ""),
             "fxRateSource": str(d.get("fx_rate_source") or ""),
@@ -113,6 +128,7 @@ def install(ns):
     def save_fx(area, invoice_id, payload):
         area = capture_area(area)
         currency = _currency(payload.get("currency"))
+        swift = validate_invoice_bic(payload)
         method = _payment_method(payload.get("paymentMethod"))
         gross = max(0.0, _float(payload.get("grossAmount"), 0.0) or 0.0)
         rate = _float(payload.get("fxRateToEur"))
@@ -132,11 +148,12 @@ def install(ns):
             con.execute("""
                 UPDATE incoming_invoices SET
                     currency=?, payment_method=?, fx_rate_to_eur=?, fx_rate_date=?, fx_rate_source=?,
-                    fx_estimated_eur=?, fx_tolerance_percent=?, fx_tolerance_eur=?, updated_at=?
+                    fx_estimated_eur=?, fx_tolerance_percent=?, fx_tolerance_eur=?,
+                    swift=COALESCE(NULLIF(?, ''),swift), updated_at=?
                 WHERE id=?
             """, (
                 currency, method, rate, rate_date, source, estimated, tol_percent, tol_eur,
-                datetime.now().isoformat(timespec="seconds"), int(invoice_id),
+                swift, datetime.now().isoformat(timespec="seconds"), int(invoice_id),
             ))
             if area == "live":
                 con.execute("""
@@ -208,6 +225,22 @@ def install(ns):
                 })
             except Exception as exc:
                 return jsonify({"ok": False, "error": f"Online-Kurs nicht verfügbar: {exc}"}), 502
+
+    # Reject missing CHF BIC before the underlying save/edit writes invoice files.
+    from flask import request, jsonify
+
+    @app.before_request
+    def require_chf_bic_on_capture():
+        creating = request.method == "POST" and request.path == "/incoming/capture/save"
+        editing = request.method == "PUT" and re.fullmatch(
+            r"/incoming/capture/\d+/edit", str(request.path or "")) is not None
+        if not (creating or editing):
+            return
+        try:
+            payload = json.loads(request.form.get("payload") or "{}") if creating else (request.get_json(silent=True) or {})
+            validate_invoice_bic(payload)
+        except (ValueError, TypeError) as exc:
+            return jsonify(ok=False, error=str(exc)), 400
 
     original_analyze = app.view_functions.get("incoming_capture_analyze")
     if original_analyze and not getattr(original_analyze, "_krista_currency_v2", False):
@@ -333,6 +366,11 @@ def install(ns):
 
     css = r'''
 .capture-payment-method-wrap select{width:100%}
+.capture-bic-wrap{grid-column:1/-1;display:grid;gap:6px;padding:12px;border:1px solid #4c6175;border-radius:10px;background:#15212a}
+.capture-bic-wrap[hidden]{display:none!important}
+.capture-bic-wrap label{font-size:13px;font-weight:800;color:#eaf2ff}
+.capture-bic-wrap input{max-width:360px;text-transform:uppercase;letter-spacing:.05em}
+.capture-bic-wrap .sub{font-size:12px;color:#c3d3e8}
 .capture-fx-panel{grid-column:1/-1;border:1px solid #3e4d5f;border-radius:12px;background:#111820;padding:11px 12px;display:grid;grid-template-columns:minmax(150px,.8fr) minmax(150px,.8fr) minmax(120px,.6fr) auto;gap:9px;align-items:end}
 .capture-fx-panel[hidden]{display:none!important}.capture-fx-panel label{font-size:11px;color:var(--muted)}.capture-fx-panel input{margin-top:4px}
 .capture-fx-rate-line{font-size:12px;color:#c7d2df}.capture-fx-estimate{font-weight:900;font-size:17px}.capture-fx-hint{grid-column:1/-1;color:var(--muted);font-size:11px}
@@ -350,6 +388,11 @@ def install(ns):
   const paymentWrap=document.createElement('div');paymentWrap.className='capture-payment-method-wrap';
   paymentWrap.innerHTML='<div class="formlabel">Zahlungsweg</div><select id="capturePaymentMethod"><option value="unknown">Noch offen</option><option value="transfer">Überweisung / SEPA</option><option value="revolut_business">Revolut Business</option><option value="revolut">Revolut privat / Kreditkarte</option><option value="direct_debit">Einzug / Lastschrift</option><option value="cash">Bar / Kassa</option></select>';
   currencyWrap.insertAdjacentElement('afterend',paymentWrap);
+  const bicWrap=document.createElement('div');bicWrap.id='captureBicWrap';bicWrap.className='capture-bic-wrap';bicWrap.hidden=true;
+  bicWrap.innerHTML='<label for="captureBic">BIC / SWIFT · bei CHF Pflichtfeld *</label><input id="captureBic" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="8 oder 11 Zeichen"><div class="sub">BIC laut Originalrechnung eintragen; keine automatische Schätzung.</div>';
+  paymentWrap.insertAdjacentElement('afterend',bicWrap);
+  const bic=document.getElementById('captureBic');
+  bic.addEventListener('blur',()=>{bic.value=bic.value.replace(/\\s+/g,'').toUpperCase()});
   const fx=document.createElement('div');fx.id='captureFxPanel';fx.className='capture-fx-panel';fx.hidden=true;
   fx.innerHTML='<label>Umrechnungsfaktor<div class="capture-fx-rate-line" id="captureFxRateLabel">1 USD = EUR</div><input id="captureFxRate" type="number" step="0.000001" min="0"></label><label>Kurs-Stichtag<input id="captureFxDate" type="date"></label><div><div class="formlabel">EUR-Vergleich</div><div id="captureFxEstimate" class="capture-fx-estimate">–</div><div id="captureFxSource" class="sub"></div></div><button id="captureFxOnline" type="button" class="capture-fx-online">↻ Kurs online</button><label>Abgleich ± Prozent<input id="captureFxTolPercent" type="number" min="0" max="25" step="0.1" value="3"></label><label>oder mindestens ± EUR<input id="captureFxTolEur" type="number" min="0" max="100" step="0.01" value="1.00"></label><div class="capture-fx-hint">Der Rechnungskurs wird fix gespeichert. Beim späteren Bank/Revolut-Abgleich darf der tatsächliche Karten-/Bankkurs abweichen; die Toleranz gilt nur zusammen mit Lieferant/Referenz/Datum.</div>';
   paymentWrap.insertAdjacentElement('afterend',fx);
@@ -357,13 +400,25 @@ def install(ns):
   let rateSource='';
   const money=(v,c='EUR')=>{try{return new Intl.NumberFormat('de-AT',{style:'currency',currency:c}).format(Number(v||0))}catch{return Number(v||0).toFixed(2)+' '+c}};
   const isoToday=()=>new Date().toISOString().slice(0,10);
-  function updateFx(){const code=String(captureCurrency.value||'EUR').toUpperCase(),foreign=code!=='EUR';fx.hidden=!foreign;if(!foreign){rate.value='1';rateDate.value=captureInvoiceDate?.value||isoToday();rateSource='EUR';source.textContent='';estimate.textContent=money(Number(captureGross.value||0),'EUR');return}rateLabel.textContent='1 '+code+' = EUR';if(!rateDate.value)rateDate.value=captureInvoiceDate?.value||isoToday();const r=Number(rate.value||0),gross=Number(captureGross.value||0);estimate.textContent=r>0?('≈ '+money(gross*r,'EUR')):'–';source.textContent=rateSource||'Kurs noch nicht gespeichert'}
+  function updateFx(){const code=String(captureCurrency.value||'EUR').toUpperCase(),foreign=code!=='EUR';fx.hidden=!foreign;bicWrap.hidden=!foreign;bic.required=code==='CHF';bic.setAttribute('aria-required',code==='CHF'?'true':'false');if(!foreign){rate.value='1';rateDate.value=captureInvoiceDate?.value||isoToday();rateSource='EUR';source.textContent='';estimate.textContent=money(Number(captureGross.value||0),'EUR');return}rateLabel.textContent='1 '+code+' = EUR';if(!rateDate.value)rateDate.value=captureInvoiceDate?.value||isoToday();const r=Number(rate.value||0),gross=Number(captureGross.value||0);estimate.textContent=r>0?('≈ '+money(gross*r,'EUR')):'–';source.textContent=rateSource||'Kurs noch nicht gespeichert'}
   async function fetchRate(){const code=String(captureCurrency.value||'EUR').toUpperCase();if(code==='EUR')return updateFx();online.disabled=true;const old=online.textContent;online.textContent='Lade …';try{const day=rateDate.value||captureInvoiceDate?.value||isoToday(),r=await fetch('/incoming/capture/fx-rate?currency='+encodeURIComponent(code)+'&date='+encodeURIComponent(day),{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Kurs nicht verfügbar');rate.value=Number(d.rateToEur||0).toFixed(6);rateDate.value=d.date||day;rateSource=d.source||'Online';updateFx()}catch(e){source.textContent=e.message||String(e)}finally{online.disabled=false;online.textContent=old}}
   function detectFromAnalysis(){let a={};try{a=captureAnalysis||{}}catch(_){}const code=String(a.currency||'').toUpperCase();if(code&&currencyCodes.includes(code)){captureCurrency.value=code;rate.value=code==='EUR'?'1':'';rateDate.value=captureInvoiceDate?.value||isoToday();rateSource=code==='EUR'?'EUR':'';updateFx();if(code!=='EUR')fetchRate()}}
   captureCurrency.addEventListener('change',()=>{const code=String(captureCurrency.value||'EUR').toUpperCase();rate.value=code==='EUR'?'1':'';rateSource=code==='EUR'?'EUR':'';rateDate.value=captureInvoiceDate?.value||isoToday();updateFx()});captureGross.addEventListener('input',updateFx);rate.addEventListener('input',()=>{rateSource='manuell';updateFx()});rateDate.addEventListener('change',()=>{rateSource='';updateFx()});online.addEventListener('click',fetchRate);if(typeof captureInvoiceDate!=='undefined')captureInvoiceDate.addEventListener('change',()=>{if(!rateDate.value||rateSource==='')rateDate.value=captureInvoiceDate.value;updateFx()});
   if(typeof analyzeCaptureFile==='function'){const originalAnalyze=analyzeCaptureFile;analyzeCaptureFile=async function(){const result=await originalAnalyze.apply(this,arguments);detectFromAnalysis();return result};if(typeof captureFile!=='undefined')captureFile.onchange=analyzeCaptureFile}
-  const originalPayload=typeof capturePayload==='function'?capturePayload:null;if(originalPayload){capturePayload=function(){const p=originalPayload.apply(this,arguments),code=String(captureCurrency.value||'EUR').toUpperCase(),r=code==='EUR'?1:Number(rate.value||0);p.paymentMethod=payment.value;p.fxRateToEur=r>0?r:null;p.fxRateDate=rateDate.value||captureInvoiceDate?.value||'';p.fxRateSource=code==='EUR'?'EUR':rateSource;p.fxTolerancePercent=Number(tolP.value||0);p.fxToleranceEur=Number(tolE.value||0);return p}}
-  document.addEventListener('click',event=>{const btn=event.target.closest?.('[data-edit-invoice]');if(!btn)return;const id=btn.dataset.editInvoice;setTimeout(async()=>{try{const r=await fetch('/incoming/capture/'+encodeURIComponent(id)+'/edit-data?area='+encodeURIComponent(captureArea),{cache:'no-store'}),d=await r.json();const x=d.invoice||{};if(!r.ok||!d.ok)return;payment.value=x.paymentMethod||'unknown';if(x.currency)captureCurrency.value=x.currency;rate.value=x.fxRateToEur??(x.currency==='EUR'?1:'');rateDate.value=x.fxRateDate||x.invoiceDate||'';rateSource=x.fxRateSource||'';tolP.value=x.fxTolerancePercent??3;tolE.value=x.fxToleranceEur??1;updateFx()}catch(_){ }},250)},true);
+  document.addEventListener('click',event=>{
+    if(!event.target.closest?.('#captureSave')||String(captureCurrency.value||'').toUpperCase()!=='CHF')return;
+    bic.value=bic.value.replace(/\s+/g,'').toUpperCase();
+    if(/^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?$/.test(bic.value))return;
+    event.preventDefault();event.stopImmediatePropagation();
+    setCaptureMessage('CHF-Rechnung: Bitte den BIC/SWIFT (8 oder 11 Zeichen) aus der Rechnung eintragen.','error');
+    bic.focus();
+  },true);
+  if(typeof resetCaptureForm==='function'){
+    const previousReset=resetCaptureForm;
+    resetCaptureForm=function(){const result=previousReset.apply(this,arguments);bic.value='';updateFx();return result;};
+  }
+  const originalPayload=typeof capturePayload==='function'?capturePayload:null;if(originalPayload){capturePayload=function(){const p=originalPayload.apply(this,arguments),code=String(captureCurrency.value||'EUR').toUpperCase(),r=code==='EUR'?1:Number(rate.value||0);p.paymentMethod=payment.value;p.swift=bic.value.replace(/\\s+/g,'').toUpperCase();p.fxRateToEur=r>0?r:null;p.fxRateDate=rateDate.value||captureInvoiceDate?.value||'';p.fxRateSource=code==='EUR'?'EUR':rateSource;p.fxTolerancePercent=Number(tolP.value||0);p.fxToleranceEur=Number(tolE.value||0);return p}}
+  document.addEventListener('click',event=>{const btn=event.target.closest?.('[data-edit-invoice]');if(!btn)return;const id=btn.dataset.editInvoice;setTimeout(async()=>{try{const r=await fetch('/incoming/capture/'+encodeURIComponent(id)+'/edit-data?area='+encodeURIComponent(captureArea),{cache:'no-store'}),d=await r.json();const x=d.invoice||{};if(!r.ok||!d.ok)return;payment.value=x.paymentMethod||'unknown';if(x.currency)captureCurrency.value=x.currency;bic.value=String(x.swift||x.bic||'').toUpperCase();rate.value=x.fxRateToEur??(x.currency==='EUR'?1:'');rateDate.value=x.fxRateDate||x.invoiceDate||'';rateSource=x.fxRateSource||'';tolP.value=x.fxTolerancePercent??3;tolE.value=x.fxToleranceEur??1;updateFx()}catch(_){ }},250)},true);
   if(typeof renderCaptureRecent==='function'){const originalRecent=renderCaptureRecent;renderCaptureRecent=function(rows){const result=originalRecent.apply(this,arguments),cards=[...captureRecent.querySelectorAll(':scope > .card')];(rows||[]).forEach((x,i)=>{const amount=cards[i]?.querySelector('.invoice-amount');if(!amount)return;amount.textContent=money(x.grossAmount,x.currency||'EUR');if(x.currency&&x.currency!=='EUR'&&x.fxEstimatedEur)amount.textContent+=' · ≈ '+money(x.fxEstimatedEur,'EUR')});return result}}
   updateFx();setTimeout(detectFromAnalysis,0);
 })();
