@@ -113,6 +113,7 @@ def install(ns):
         d = dict(row or {})
         return {
             "paymentMethod": _payment_method(d.get("payment_method")),
+            "swift": str(d.get("swift") or ""),
             "fxRateToEur": _float(d.get("fx_rate_to_eur")),
             "fxRateDate": str(d.get("fx_rate_date") or ""),
             "fxRateSource": str(d.get("fx_rate_source") or ""),
