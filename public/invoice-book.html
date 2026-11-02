@@ -103,6 +103,54 @@ function render(){if($('from').value&&$('to').value&&$('from').value>$('to').val
 async function load(){const q=$('q').value.trim(),year=$('year').value;if(q.length===1){$('summary').textContent='Bitte mindestens zwei Zeichen suchen.';return}$('summary').textContent='Rechnungsbuch wird durchsucht …';$('months').innerHTML='';items=[];monthTotals=[];$('rows').innerHTML='<div class="empty">Wird geladen …</div>';try{const r=await fetch('/incoming/invoice-book/items?'+new URLSearchParams({q,year}),{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Abruf fehlgeschlagen');const pr=await fetch('/incoming/payment-open-items',{cache:'no-store'}),pd=await pr.json();if(!pr.ok)throw Error('Kreditoren und Einzüge nicht erreichbar');const reconciled=reconcileBookBalances(d.items||[],pd);items=reconciled.items;monthTotals=reconciled.months;render()}catch(e){$('summary').textContent=e.message;$('rows').innerHTML='<div class="empty">Abruf fehlgeschlagen.</div>'}}
 async function change(x,action){if(!x)return;const verb=action==='repay'?'NOCHMALS ÜBER DEN ZAHLUNGSLAUF bezahlen':action==='open'?'wieder als OFFEN führen':'als BEZAHLT markieren';if(!confirm(`${x.supplier}\n${x.invoiceNumber||x.docId} · ${money(x.amount,x.currency)}\n\nDiese Rechnung wirklich ${verb}?`))return;const defaults={repay:'In WinWorker fälschlich als bezahlt markiert',open:'Buchungsstatus korrigiert',paid:'Zahlung kontrolliert'};const reason=prompt('Grund für die Statusänderung:',defaults[action]);if(reason===null)return;if(reason.trim().length<3){alert('Bitte einen Grund angeben.');return}try{const r=await fetch('/incoming/invoice-book/status',{method:'POST',headers:{'Content-Type':'application/json','X-Invoice-Book':token},body:JSON.stringify({source:x.source,id:x.id,action,reason,changedBy:'Alex'})}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Änderung fehlgeschlagen');alert(d.message);await load()}catch(e){alert(e.message)}}
 async function history(x,key){if(!x)return;const box=[...document.querySelectorAll('[data-history-box]')].find(node=>node.dataset.historyBox===key);if(!box)return;if(!box.hidden){box.hidden=true;return}box.hidden=false;box.innerHTML='Historie wird geladen …';try{const r=await fetch('/incoming/invoice-book/history?'+new URLSearchParams({source:x.source,id:x.id}),{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Historie nicht erreichbar');box.innerHTML=(d.items||[]).length?(d.items||[]).map(h=>`<div class="history-row"><strong>${esc(status(h.old_status))} → ${esc(status(h.new_status))}</strong> · ${esc(date(h.changed_at))}<div class="small">${esc(h.reason)} · ${esc(h.changed_by)}</div></div>`).join(''):'<div class="small">Noch keine manuelle Statusänderung.</div>'}catch(e){box.textContent=e.message}}
+let dunningCurrent=null;
+function openDunning(x){
+ if(!x)return;
+ dunningCurrent=x;
+ $('dunningTitle').textContent='Mahnstatus · '+(x.supplier||'Lieferant');
+ $('dunningMeta').textContent='Rechnung '+(x.invoiceNumber||x.docId||'–')+' · '+money(x.amount,x.currency);
+ $('dunningLevel').value=String(Math.max(0,Math.min(5,Number(x.dunningLevel||0))));
+ $('dunningFees').value=Number(x.feesAmount||0).toFixed(2);
+ $('dunningCurrency').textContent=String(x.currency||'EUR');
+ $('dunningNote').value=x.creditorNote||'';
+ // Shared office PCs must never attribute the next edit to the previous user.
+ $('dunningEditor').value='';
+ $('dunningLast').textContent=x.creditorUpdatedBy?'Zuletzt geändert von '+x.creditorUpdatedBy+(x.creditorUpdatedAt?' am '+date(x.creditorUpdatedAt):''):'Noch kein Mahnstatus hinterlegt.';
+ $('dunningError').textContent='';
+ const locked=['paid','sepa_submitted'].includes(String(x.paymentStatus||''))||['paid','sepa_submitted'].includes(String(x.bookStatus||''));
+ for(const id of ['dunningLevel','dunningFees','dunningNote','dunningEditor'])$(id).disabled=locked;
+ $('dunningSave').disabled=locked;
+ $('dunningLocked').hidden=!locked;
+ $('dunningDialog').showModal();
+ if(!locked)$('dunningEditor').focus();
+}
+function closeDunning(){
+ $('dunningDialog').close();
+ dunningCurrent=null;
+}
+$('dunningCancel').onclick=closeDunning;
+$('dunningDialog').addEventListener('close',()=>{dunningCurrent=null});
+$('dunningForm').onsubmit=async e=>{
+ e.preventDefault();
+ if(!dunningCurrent)return;
+ const actor=$('dunningEditor').value.trim();
+ if(!actor){$('dunningError').textContent='Bitte Bearbeiterin oder Bearbeiter auswählen.';$('dunningEditor').focus();return}
+ const fees=Number(String($('dunningFees').value||0).replace(',','.'));
+ if(!Number.isFinite(fees)||fees<0||fees>10000){$('dunningError').textContent='Bitte gültige Mahnspesen eingeben.';return}
+ const level=Number($('dunningLevel').value);
+ if(!Number.isInteger(level)||level<0||level>5){$('dunningError').textContent='Ungültige Mahnstufe.';return}
+ const save=$('dunningSave');
+ save.disabled=true;$('dunningError').textContent='';
+ try{
+  const x=dunningCurrent;
+  const response=await fetch('/incoming/invoice-book/dunning',{method:'POST',headers:{'Content-Type':'application/json','X-Invoice-Book':token},body:JSON.stringify({source:x.source,id:x.id,dunningLevel:level,feesAmount:fees,note:$('dunningNote').value,updatedBy:actor})});
+  const data=await response.json();
+  if(!response.ok||!data.ok)throw Error(data.error||'Mahnstatus konnte nicht gespeichert werden.');
+  closeDunning();
+  await load();
+ }catch(error){$('dunningError').textContent=error.message||String(error)}
+ finally{if($('dunningDialog').open)save.disabled=false}
+};
 $('search').onclick=load;$('q').onkeydown=e=>{if(e.key==='Enter')load()};$('sort').onchange=render;$('state').onchange=render;$('year').onchange=load;for(const id of ['month','from','to','paymentChannel'])$(id).onchange=render;load();
 })();
 </script>
