@@ -1,0 +1,32 @@
+name: KRISTINE access heartbeat JSON parsing
+
+on:
+  pull_request:
+    paths:
+      - 'access-bridge-cloud.js'
+      - 'TEST/access-heartbeat-json-order.test.js'
+      - '.github/workflows/access-heartbeat-json-order.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'access-bridge-cloud.js'
+      - 'TEST/access-heartbeat-json-order.test.js'
+      - '.github/workflows/access-heartbeat-json-order.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  access-heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated test dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Syntax check
+        run: node --check access-bridge-cloud.js && node --check TEST/access-heartbeat-json-order.test.js
+      - name: Camper-first heartbeat JSON regression (local-only)
+        run: node TEST/access-heartbeat-json-order.test.js
