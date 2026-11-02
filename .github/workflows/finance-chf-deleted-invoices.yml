@@ -1,0 +1,42 @@
+name: Finance CHF instructions and invoice approval cleanup
+on:
+  pull_request:
+    paths:
+      - 'brain_finance_runtime.py'
+      - 'brain_finance_ui.py'
+      - 'TEST/test_finance_chf_and_deleted_invoice.py'
+      - '.github/workflows/finance-chf-deleted-invoices.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'brain_finance_runtime.py'
+      - 'brain_finance_ui.py'
+      - 'TEST/test_finance_chf_and_deleted_invoice.py'
+      - '.github/workflows/finance-chf-deleted-invoices.yml'
+permissions:
+  contents: read
+jobs:
+  finance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Isolated pure finance tests
+        run: python -m unittest discover -s TEST -p test_finance_chf_and_deleted_invoice.py -v
+      - name: Validate embedded finance UI JavaScript
+        run: |
+          python - <<'PY'
+          from brain_finance_ui import payments_page
+          from pathlib import Path
+          import re
+          html=payments_page()
+          matches=re.findall(r'<script>(.*?)</script>',html,re.S)
+          assert len(matches)==1, len(matches)
+          assert "foreignPayDialog" in html and "payment-foreign/preview" in html
+          assert 'directPaySend' in html and 'CH-IBAN' not in html
+          Path('/tmp/brain-payment-chf-embedded.js').write_text(matches[0],encoding='utf-8')
+          print("Foreign manual payment UI exported")
+          PY
+          node --check /tmp/brain-payment-chf-embedded.js
