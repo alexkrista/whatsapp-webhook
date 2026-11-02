@@ -39,7 +39,7 @@ class FinanceForeignAndDeletionTests(unittest.TestCase):
             "invoiceNumber": "26.1034", "currency": "CHF",
             "paymentStatus": "open", "approvalStatus": "approved",
             "paymentAmount": 164.75, "iban": "CH9300762011623852957",
-            "bic": "", "remittanceText": "26.1034",
+            "bic": "TESTCHZZXXX", "remittanceText": "26.1034",
         }
         preview = _foreign_payment_preview([item])
         self.assertEqual(preview["item"]["amount"], 164.75)
