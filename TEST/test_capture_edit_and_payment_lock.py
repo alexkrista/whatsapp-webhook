@@ -31,4 +31,17 @@ class EditAndLockTests(unittest.TestCase):
   con.close()
   self.assertEqual(bic,'TESTCHZZXXX')
 
+ def test_chf_edit_refuses_empty_bic(self):
+  client=self.setup_edit()
+  payload=self.payload()
+  payload['currency']='CHF'
+  payload['swift']=''
+  response=client.put('/incoming/capture/49/edit',json=payload)
+  self.assertEqual(response.status_code,400,response.json)
+  self.assertIn('BIC/SWIFT',response.json['error'])
+  con=self.connect()
+  row=con.execute('SELECT swift FROM incoming_invoices WHERE id=49').fetchone()
+  con.close()
+  self.assertIsNone(row[0])
+
 if __name__=='__main__':unittest.main()
