@@ -18,4 +18,30 @@ class EditAndLockTests(unittest.TestCase):
   client=self.setup_edit();r=client.put('/incoming/capture/49/edit',json=self.payload());self.assertEqual(r.status_code,200,r.json);self.assertEqual(r.json['invoice']['grossAmount'],39.8);c=self.connect();old=json.loads(c.execute('SELECT invoice_json FROM incoming_capture_edit_history').fetchone()[0]);self.assertEqual(old['gross_amount'],'39.75');c.close()
  def test_reviewed_capture_requires_confirmation_and_returns_to_review(self):
   client=self.setup_edit(True);self.assertEqual(client.put('/incoming/capture/49/edit',json=self.payload()).status_code,409);payload=self.payload();payload['confirmReopen']=True;r=client.put('/incoming/capture/49/edit',json=payload);self.assertEqual(r.status_code,200,r.json);self.assertEqual(r.json['invoice']['workflowStatus'],'zu_pruefen')
+ def test_chf_edit_persists_swift(self):
+  client=self.setup_edit()
+  payload=self.payload()
+  payload['currency']='CHF'
+  payload['swift']='TESTCHZZXXX'
+  response=client.put('/incoming/capture/49/edit',json=payload)
+  self.assertEqual(response.status_code,200,response.json)
+  self.assertEqual(response.json['invoice']['swift'],'TESTCHZZXXX')
+  con=self.connect()
+  bic=con.execute('SELECT swift FROM incoming_invoices WHERE id=49').fetchone()[0]
+  con.close()
+  self.assertEqual(bic,'TESTCHZZXXX')
+
+ def test_chf_edit_refuses_empty_bic(self):
+  client=self.setup_edit()
+  payload=self.payload()
+  payload['currency']='CHF'
+  payload['swift']=''
+  response=client.put('/incoming/capture/49/edit',json=payload)
+  self.assertEqual(response.status_code,400,response.json)
+  self.assertIn('BIC/SWIFT',response.json['error'])
+  con=self.connect()
+  row=con.execute('SELECT swift FROM incoming_invoices WHERE id=49').fetchone()
+  con.close()
+  self.assertIsNone(row[0])
+
 if __name__=='__main__':unittest.main()

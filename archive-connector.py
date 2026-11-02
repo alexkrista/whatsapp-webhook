@@ -8932,7 +8932,7 @@ def incoming_capture_save():
                     invoice_iban,
                     master_iban,
                     1 if accept_new_iban else 0,
-                    "",
+                    "".join(str(payload.get("swift") or "").split()).upper(),
                     str(payload.get("accountHolder") or "").strip(),
                     str(supplier.get("ourCustomerNumber") or payload.get("customerNumberExternal") or analysis.get("customerNumberExternal") or "").strip(),
                     workflow,
