@@ -388,9 +388,9 @@ def install(ns):
   const paymentWrap=document.createElement('div');paymentWrap.className='capture-payment-method-wrap';
   paymentWrap.innerHTML='<div class="formlabel">Zahlungsweg</div><select id="capturePaymentMethod"><option value="unknown">Noch offen</option><option value="transfer">Überweisung / SEPA</option><option value="revolut_business">Revolut Business</option><option value="revolut">Revolut privat / Kreditkarte</option><option value="direct_debit">Einzug / Lastschrift</option><option value="cash">Bar / Kassa</option></select>';
   currencyWrap.insertAdjacentElement('afterend',paymentWrap);
-  const bicWrap=document.createElement('div');bicWrap.id='captureBicWrap';bicWrap.className='capture-bic-wrap';bicWrap.hidden=true;
-  bicWrap.innerHTML='<label for="captureBic">BIC / SWIFT · bei CHF Pflichtfeld *</label><input id="captureBic" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="8 oder 11 Zeichen"><div class="sub">BIC laut Originalrechnung eintragen; keine automatische Schätzung.</div>';
-  paymentWrap.insertAdjacentElement('afterend',bicWrap);
+  // BIC is rendered in the server-side form directly after invoice IBAN.
+  // It must remain visible even before currency/edit JavaScript runs.
+  const bicWrap=document.getElementById('captureBicWrap');
   const bic=document.getElementById('captureBic');
   bic.addEventListener('blur',()=>{bic.value=bic.value.replace(/\\s+/g,'').toUpperCase()});
   const fx=document.createElement('div');fx.id='captureFxPanel';fx.className='capture-fx-panel';fx.hidden=true;
