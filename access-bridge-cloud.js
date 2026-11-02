@@ -143,7 +143,15 @@ function installRoutes(app){
   });
   app.post("/kristine/api/access-heartbeat",async(req,res)=>{
     if(!requireAdmin(req,res,{allowBrowserSession:false}))return;
-    try{await writeJson(STATUS_FILE,{...(req.body||{}),receivedAt:new Date().toISOString()});res.json({ok:true});}
+    try{
+      const payload=req.body;
+      if(!payload||typeof payload!=="object"||Array.isArray(payload)||
+         !payload.gantner||typeof payload.gantner!=="object"||
+         !payload.services||typeof payload.services!=="object")
+        return res.status(400).json({ok:false,error:"Heartbeat-Daten fehlen (JSON). Kein Status gespeichert."});
+      await writeJson(STATUS_FILE,{...payload,receivedAt:new Date().toISOString()});
+      res.json({ok:true});
+    }
     catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
   });
   app.get("/kristine/api/access-status",async(req,res)=>{
