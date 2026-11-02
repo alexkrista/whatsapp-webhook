@@ -58,6 +58,20 @@ def _detect_currency(text):
     return "EUR"
 
 
+
+def validate_invoice_bic(payload):
+    """Format-check BIC/SWIFT, required for CHF invoices."""
+    if not isinstance(payload, dict):
+        raise ValueError("Formulardaten fehlen.")
+    currency = _currency(payload.get("currency"))
+    bic = re.sub(r"\s+", "", str(payload.get("swift") or payload.get("bic") or "")).upper()
+    if currency == "CHF" and not bic:
+        raise ValueError("Bei CHF-Rechnungen ist BIC/SWIFT Pflicht. Bitte laut Rechnung eintragen.")
+    if bic and not re.fullmatch(r"[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?", bic):
+        raise ValueError("BIC/SWIFT ist ungültig: 8 oder 11 Zeichen erforderlich.")
+    return bic
+
+
 def install(ns):
     app = ns.get("app")
     page = str(ns.get("MOBILE_PAGE") or "")
