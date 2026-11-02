@@ -59,6 +59,12 @@ const path=require("node:path");
     assert.equal(status.body.gatePosition?.position,"CLOSED");
     assert.equal(status.body.services?.gantner?.state,"ok");
     assert.equal(status.body.services?.cloud?.state,"ok");
+    const missing=await request("POST","/kristine/api/access-heartbeat",{});
+    assert.equal(missing.status,400,"Malformed/empty heartbeats must never get false HTTP 200");
+    assert.match(missing.body.error,/Heartbeat-Daten fehlen/);
+    const retained=await request("GET","/kristine/api/access-status");
+    assert.equal(retained.body.gantner.doors["1"].mode,"OPEN",
+      "Invalid heartbeat must not replace known door status");
 
     const stored=JSON.parse(await fs.readFile(
       path.join(temp,"_kristine","access-local-status.json"),"utf8"));
