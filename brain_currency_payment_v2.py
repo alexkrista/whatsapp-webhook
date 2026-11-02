@@ -388,9 +388,9 @@ def install(ns):
   const paymentWrap=document.createElement('div');paymentWrap.className='capture-payment-method-wrap';
   paymentWrap.innerHTML='<div class="formlabel">Zahlungsweg</div><select id="capturePaymentMethod"><option value="unknown">Noch offen</option><option value="transfer">Überweisung / SEPA</option><option value="revolut_business">Revolut Business</option><option value="revolut">Revolut privat / Kreditkarte</option><option value="direct_debit">Einzug / Lastschrift</option><option value="cash">Bar / Kassa</option></select>';
   currencyWrap.insertAdjacentElement('afterend',paymentWrap);
-  const bicWrap=document.createElement('div');bicWrap.id='captureBicWrap';bicWrap.className='capture-bic-wrap';bicWrap.hidden=true;
-  bicWrap.innerHTML='<label for="captureBic">BIC / SWIFT · bei CHF Pflichtfeld *</label><input id="captureBic" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="8 oder 11 Zeichen"><div class="sub">BIC laut Originalrechnung eintragen; keine automatische Schätzung.</div>';
-  paymentWrap.insertAdjacentElement('afterend',bicWrap);
+  // BIC is rendered in the server-side form directly after invoice IBAN.
+  // It must remain visible even before currency/edit JavaScript runs.
+  const bicWrap=document.getElementById('captureBicWrap');
   const bic=document.getElementById('captureBic');
   bic.addEventListener('blur',()=>{bic.value=bic.value.replace(/\\s+/g,'').toUpperCase()});
   const fx=document.createElement('div');fx.id='captureFxPanel';fx.className='capture-fx-panel';fx.hidden=true;
@@ -400,7 +400,7 @@ def install(ns):
   let rateSource='';
   const money=(v,c='EUR')=>{try{return new Intl.NumberFormat('de-AT',{style:'currency',currency:c}).format(Number(v||0))}catch{return Number(v||0).toFixed(2)+' '+c}};
   const isoToday=()=>new Date().toISOString().slice(0,10);
-  function updateFx(){const code=String(captureCurrency.value||'EUR').toUpperCase(),foreign=code!=='EUR';fx.hidden=!foreign;bicWrap.hidden=!foreign;bic.required=code==='CHF';bic.setAttribute('aria-required',code==='CHF'?'true':'false');if(!foreign){rate.value='1';rateDate.value=captureInvoiceDate?.value||isoToday();rateSource='EUR';source.textContent='';estimate.textContent=money(Number(captureGross.value||0),'EUR');return}rateLabel.textContent='1 '+code+' = EUR';if(!rateDate.value)rateDate.value=captureInvoiceDate?.value||isoToday();const r=Number(rate.value||0),gross=Number(captureGross.value||0);estimate.textContent=r>0?('≈ '+money(gross*r,'EUR')):'–';source.textContent=rateSource||'Kurs noch nicht gespeichert'}
+  function updateFx(){const code=String(captureCurrency.value||'EUR').toUpperCase(),foreign=code!=='EUR';fx.hidden=!foreign;bic.required=code==='CHF';bic.setAttribute('aria-required',code==='CHF'?'true':'false');if(!foreign){rate.value='1';rateDate.value=captureInvoiceDate?.value||isoToday();rateSource='EUR';source.textContent='';estimate.textContent=money(Number(captureGross.value||0),'EUR');return}rateLabel.textContent='1 '+code+' = EUR';if(!rateDate.value)rateDate.value=captureInvoiceDate?.value||isoToday();const r=Number(rate.value||0),gross=Number(captureGross.value||0);estimate.textContent=r>0?('≈ '+money(gross*r,'EUR')):'–';source.textContent=rateSource||'Kurs noch nicht gespeichert'}
   async function fetchRate(){const code=String(captureCurrency.value||'EUR').toUpperCase();if(code==='EUR')return updateFx();online.disabled=true;const old=online.textContent;online.textContent='Lade …';try{const day=rateDate.value||captureInvoiceDate?.value||isoToday(),r=await fetch('/incoming/capture/fx-rate?currency='+encodeURIComponent(code)+'&date='+encodeURIComponent(day),{cache:'no-store'}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Kurs nicht verfügbar');rate.value=Number(d.rateToEur||0).toFixed(6);rateDate.value=d.date||day;rateSource=d.source||'Online';updateFx()}catch(e){source.textContent=e.message||String(e)}finally{online.disabled=false;online.textContent=old}}
   function detectFromAnalysis(){let a={};try{a=captureAnalysis||{}}catch(_){}const code=String(a.currency||'').toUpperCase();if(code&&currencyCodes.includes(code)){captureCurrency.value=code;rate.value=code==='EUR'?'1':'';rateDate.value=captureInvoiceDate?.value||isoToday();rateSource=code==='EUR'?'EUR':'';updateFx();if(code!=='EUR')fetchRate()}}
   captureCurrency.addEventListener('change',()=>{const code=String(captureCurrency.value||'EUR').toUpperCase();rate.value=code==='EUR'?'1':'';rateSource=code==='EUR'?'EUR':'';rateDate.value=captureInvoiceDate?.value||isoToday();updateFx()});captureGross.addEventListener('input',updateFx);rate.addEventListener('input',()=>{rateSource='manuell';updateFx()});rateDate.addEventListener('change',()=>{rateSource='';updateFx()});online.addEventListener('click',fetchRate);if(typeof captureInvoiceDate!=='undefined')captureInvoiceDate.addEventListener('change',()=>{if(!rateDate.value||rateSource==='')rateDate.value=captureInvoiceDate.value;updateFx()});
@@ -425,6 +425,21 @@ def install(ns):
 </script>
 '''
     script = script.replace("__CURRENCIES__", json.dumps(list(COMMON_CURRENCIES), ensure_ascii=False))
+    # The input is part of the initial HTML, immediately below "IBAN auf
+    # dieser Rechnung". It must be visible even if no change event fires.
+    bank_warning = '<div id="captureBankWarning" class="full"></div>'
+    bic_markup = '''
+            <div class="full capture-bic-wrap" id="captureBicWrap">
+              <label for="captureBic">BIC / SWIFT (bei CHF Pflichtfeld *)</label>
+              <input id="captureBic" name="swift" type="text" maxlength="20"
+                     autocomplete="off" spellcheck="false" placeholder="8 oder 11 Zeichen">
+              <div class="sub">Bei CHF unbedingt BIC der Empfängerbank laut Rechnung eintragen.</div>
+            </div>
+    '''
+    if bank_warning in page and 'id="captureBic"' not in page:
+        page = page.replace(bank_warning, bic_markup + bank_warning, 1)
+    elif 'id="captureInvoiceIban"' in page and 'id="captureBic"' not in page:
+        raise RuntimeError("BIC-Eingabefeld konnte nicht neben der IBAN platziert werden.")
     page = page.replace("</style>", css + "\n</style>", 1)
     page = page.replace("</body>", script + "\n</body>", 1)
     ns["MOBILE_PAGE"] = page
