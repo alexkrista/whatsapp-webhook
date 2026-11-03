@@ -170,6 +170,8 @@ function buildCompareWorkbook(payload, date = new Date()) {
   ]);
   noteSheet["!cols"]=[{wch:27},{wch:120}];
   XLSX.utils.book_append_sheet(book,noteSheet,"Hinweise");
+  // Der Vergleich soll beim Oeffnen der Datei als erstes Tabellenblatt erscheinen.
+  book.SheetNames=["Rezeptvergleich","Rezeptdaten","Hinweise"];
   book.Workbook=book.Workbook || {};
   book.Workbook.CalcPr={calcMode:"auto",fullCalcOnLoad:true,forceFullCalc:true};
   return {workbook:book,buffer:XLSX.write(book,{bookType:"xlsx",type:"buffer"}),colourCount:colours.length,recipeCount:recipes.length-1,inconsistent};
