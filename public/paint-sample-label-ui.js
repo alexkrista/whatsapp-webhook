@@ -65,6 +65,15 @@
       '</div>',
       '<p id="sampleMessage" class="sample-message" role="status" aria-live="polite"></p>',
       '<div class="sample-actions"><button id="sampleCancel" class="btn" type="button">Schließen</button><button id="samplePrint" class="btn primary" type="button">Musteretikett drucken</button></div>',
+      '<section class="sample-history" aria-labelledby="sampleHistoryTitle">',
+      '<div class="sample-history-head"><h3 id="sampleHistoryTitle">Letzte Musteretiketten</h3><button id="sampleHistoryReload" class="btn" type="button">Aktualisieren</button></div>',
+      '<p class="sample-help">Die letzten übergebenen Beschriftungen von allen KRISTINE-Arbeitsplätzen. Ein erneuter Druck erhält das heutige Datum.</p>',
+      '<label for="sampleHistorySearch">In Musteretiketten suchen</label>',
+      '<input id="sampleHistorySearch" class="field" type="search" autocomplete="off" placeholder="Farbe, Material oder Nummer …">',
+      '<div id="sampleHistoryList" class="sample-history-list" aria-live="polite">Historie wird geladen …</div>',
+      '<div class="sample-history-bottom"><span id="sampleHistoryCount" class="sample-history-count"></span><button id="sampleHistoryMore" class="btn" type="button" hidden>Weitere anzeigen</button></div>',
+      '<button id="sampleHistoryRetry" class="btn" type="button" hidden>Fehlende Historieneinträge speichern</button>',
+      '</section>',
     ].join("");
     document.body.appendChild(dlg);
     return dlg;
@@ -91,6 +100,22 @@
       '.sample-logo-clip img{position:absolute;right:0;bottom:0;height:36px;width:auto;max-width:none}',
       '.sample-message{min-height:17px;font-size:12px;font-weight:700}',
       '.sample-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}',
+      '#returnSampleLabelHistoryOpen{margin-left:7px}',
+      '.sample-history{border-top:1px solid #e2e8e0;margin-top:19px;padding-top:13px}',
+      '.sample-history-head{display:flex;justify-content:space-between;align-items:center;gap:8px}',
+      '.sample-history-head h3{font-size:17px;margin:0}',
+      '.sample-history-list{display:grid;gap:8px;margin-top:10px;max-height:360px;overflow:auto}',
+      '.sample-history-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid #dfe7dd;border-radius:10px;background:#f8faf8}',
+      '.sample-history-row strong{font-size:14px;display:block;overflow-wrap:anywhere}',
+      '.sample-history-row .sample-history-material{font-size:12px;color:#586458;overflow-wrap:anywhere}',
+      '.sample-history-row small{display:block;color:#677166;font-size:11px;margin-top:3px}',
+      '.sample-history-buttons{display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}',
+      '.sample-history-buttons button{font-size:12px;padding:7px 8px;min-height:34px}',
+      '.sample-history-empty{padding:12px;background:#f5f8f5;border-radius:9px;color:#526053;font-size:13px}',
+      '.sample-history-bottom{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:9px 0}',
+      '.sample-history-count{font-size:12px;color:#5f6d5f}',
+      '#sampleHistoryRetry{margin:7px 0 0;color:#914d12}',
+      '@media(max-width:520px){.sample-history-row{align-items:flex-start;flex-direction:column}.sample-history-buttons{justify-content:flex-start}}',
       '@media(max-width:520px){.sample-lookup{grid-template-columns:1fr}.sample-lookup button{width:100%}}',
     ].join("\n");
     document.head.appendChild(sheet);
@@ -106,6 +131,12 @@
     open.type = "button";
     open.textContent = "Musteretikett";
     free.insertAdjacentElement("afterend",open);
+    const historyOpen = document.createElement("button");
+    historyOpen.id = "returnSampleLabelHistoryOpen";
+    historyOpen.className = "btn";
+    historyOpen.type = "button";
+    historyOpen.textContent = "Etiketten-Historie";
+    open.insertAdjacentElement("afterend",historyOpen);
 
     const dlg = sampleLabelDialog();
     const number = el("sampleNumber");
