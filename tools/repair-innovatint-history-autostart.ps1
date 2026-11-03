@@ -117,6 +117,25 @@ try {
     Write-Warning ("Alten Run-Autostart nicht entfernt: " + $_.Exception.Message)
 }
 
+# Fruehere Watch-Dauerprozesse mit demselben Mutex wuerden die neuen
+# minuetlichen Einmallaeufe blockieren. Nur exakt den eigenen alten Worker
+# beenden, niemals Innovatint, Zebra, Waage oder fremde PowerShell-Fenster.
+try {
+    $watchers = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $commandLine = [string]$_.CommandLine
+            $_.ProcessId -ne $PID -and
+            $commandLine.IndexOf($worker,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+            $commandLine -match "(?i)\-Mode\s+Watch"
+        })
+    foreach ($watch in $watchers) {
+        Stop-Process -Id $watch.ProcessId -Force -ErrorAction Stop
+        Write-Host "Alten HistorySync-Dauerlauf ersetzt (PID $($watch.ProcessId))."
+    }
+} catch {
+    Write-Warning ("Alter Watch-Prozess konnte nicht beendet werden: " + $_.Exception.Message)
+}
+
 # Nach der Planung genau EINEN realen Nachhol-Check ausfuehren.
 # Der Worker sendet nur neue, eindeutige Misch-History-Eintraege.
 # Alle Lager-Abgaenge erfolgen erst nach manueller Zuordnung in KRISTINE.
