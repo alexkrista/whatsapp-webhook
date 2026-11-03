@@ -28,7 +28,8 @@
     style.id = "paintMixHistoryStyle";
     style.textContent = `
       [data-tab="mixes"]{position:relative}.mixhist-open-badge{position:absolute;top:-10px;right:-10px;display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 5px;border-radius:50%;background:#c52d36;color:#fff;font-size:14px;font-weight:900;line-height:1;border:2px solid #fff;box-shadow:0 2px 5px #0002}.mixhist-open-badge[hidden]{display:none!important}
-      .mixhist-card{border:1px solid #d9dfd9;background:#fbfcfa;margin-top:14px}.mixhist-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.mixhist-head h2{margin:0}.mixhist-status{font-size:12px;color:#667068;margin-top:4px}.mixhist-list{display:grid;gap:10px;margin-top:12px}.mixhist-row{border:1px solid #e0e4df;border-radius:12px;background:white;padding:11px}.mixhist-title{font-weight:950;font-size:15px}.mixhist-meta{font-size:12px;color:#667068;margin-top:3px}.mixhist-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.mixhist-project{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:7px;margin-top:8px}.mixhist-project[hidden]{display:none!important}.mixhist-empty{padding:12px;border-radius:10px;background:#f1f5f1;color:#536056}.mixhist-stats{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.mixhist-kpi{border:1px solid #dde2dd;border-radius:10px;padding:8px 10px;background:white;font-size:12px}.mixhist-kpi b{display:block;font-size:18px}.mixhist-note{font-size:11px;color:#788078;margin-top:8px}
+.mixhist-sync-warning{border:2px solid #b65d24;background:#fff5e8;color:#78370b;border-radius:12px;padding:12px 14px;margin:12px 0;font-size:14px;line-height:1.45}.mixhist-sync-warning strong{display:block;font-size:15px;margin-bottom:4px}.mixhist-sync-warning[hidden]{display:none!important}
+            .mixhist-card{border:1px solid #d9dfd9;background:#fbfcfa;margin-top:14px}.mixhist-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.mixhist-head h2{margin:0}.mixhist-status{font-size:12px;color:#667068;margin-top:4px}.mixhist-list{display:grid;gap:10px;margin-top:12px}.mixhist-row{border:1px solid #e0e4df;border-radius:12px;background:white;padding:11px}.mixhist-title{font-weight:950;font-size:15px}.mixhist-meta{font-size:12px;color:#667068;margin-top:3px}.mixhist-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.mixhist-project{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:7px;margin-top:8px}.mixhist-project[hidden]{display:none!important}.mixhist-empty{padding:12px;border-radius:10px;background:#f1f5f1;color:#536056}.mixhist-stats{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.mixhist-kpi{border:1px solid #dde2dd;border-radius:10px;padding:8px 10px;background:white;font-size:12px}.mixhist-kpi b{display:block;font-size:18px}.mixhist-note{font-size:11px;color:#788078;margin-top:8px}
       @media(max-width:750px){.mixhist-actions .btn{flex:1 1 45%;min-height:48px}.mixhist-project{grid-template-columns:1fr}.mixhist-project .btn{min-height:48px}}
     `;
     document.head.appendChild(style);
@@ -52,6 +53,7 @@
         <div><h2>Mischungen · Verkauf oder Baustelle?</h2><div id="mixHistoryStatus" class="mixhist-status">Wird geladen …</div></div>
         <select id="mixHistoryView" class="field" aria-label="Mischungen anzeigen"><option value="open">Offen</option><option value="resolved">Zugeordnet</option><option value="all">Alle</option></select><button id="mixHistoryReload" class="btn" type="button">Neu laden</button>
       </div>
+      <div id="mixHistorySyncWarning" class="mixhist-sync-warning" role="alert" hidden></div>
       <div id="mixHistoryStats" class="mixhist-stats"></div>
       <div id="mixHistoryList" class="mixhist-list"></div>
       <div class="mixhist-note">Neue Mischungen erzeugen eine KRISTINE-Aufgabe. Erst mit Verkauf/Baustelle/Lager/Fehlmischung wird der Lagerabgang gebucht.</div>`;
@@ -117,7 +119,7 @@
     if (!list) return;
     list.innerHTML = "";
     if (!items.length) {
-      list.innerHTML = '<div class="mixhist-empty">Keine offene Mischung zum Zuordnen.</div>';
+      list.innerHTML = '<div class="mixhist-empty">Keine der bereits empfangenen Mischungen ist offen. Ob neue Mischungen vorliegen, hängt vom Synchronisierungsstatus ab.</div>';
       return;
     }
     for (const item of items) {
@@ -182,6 +184,17 @@
         api("/admin/api/paint/mix-history?status=" + (document.getElementById("mixHistoryView")?.value || "open")), api("/admin/api/paint/mix-history/status"), api("/admin/api/paint/sales-stats"),
       ]);
       renderRows(history.items || []); renderStats(stats);
+      const warning = document.getElementById("mixHistorySyncWarning");
+      if (warning) {
+        warning.hidden = sync.stale !== true;
+        if (sync.stale) {
+          const lastUpdate = sync.lastSyncAt ? fmtDate(sync.lastSyncAt) : "noch nie";
+          warning.textContent = "Mischhistorie NICHT aktuell! Letzte erfolgreiche Übertragung: " +
+            lastUpdate + ". Neue Mischungen fehlen möglicherweise. Bitte auf dem Misch-PC den " +
+            "KRISTINE Innovatint HistorySync reparieren und danach hier „Neu laden“ klicken. " +
+            "Keine manuellen Lagerabgänge als Ersatz buchen.";
+        } else warning.textContent = "";
+      }
       const notice = document.getElementById("mixHistoryNotice"); if (notice) { notice.hidden = !sync.open; notice.textContent = sync.open + " neue/offene Mischung(en): Verkauf oder Baustelle?"; }
       const mixButton = document.querySelector('[data-tab="mixes"]');
       if (mixButton) {
@@ -192,7 +205,9 @@
         mixButton.setAttribute('aria-label',open ? 'Mischungen · '+open+' offen' : 'Mischungen · keine offenen');
       }
       const last = sync.state?.lastSyncAt ? fmtDate(sync.state.lastSyncAt) : "Noch keine Verbindung zur Mischmaschine";
-      if (status) status.textContent = `${sync.open || 0} offen · letzte History-Prüfung ${last} · ${sync.schedule || ""}`;
+      if (status) status.textContent = sync.stale
+        ? "Synchronisierung unterbrochen · " + (sync.open || 0) + " bekannte offene · letzte Prüfung " + last
+        : (sync.open || 0) + " offen · letzte History-Prüfung " + last + " · " + (sync.schedule || "");
     } catch (error) { if (status) status.textContent = String(error?.message || error); }
   }
 
