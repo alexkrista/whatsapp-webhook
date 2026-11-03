@@ -34,6 +34,9 @@ on:
       - 'public/paint-material-docs-de.js'
       - 'public/paint-unmixed-scan-fix.js'
       - 'tools/innovatint-kristine-bridge.ps1'
+      - 'tools/repair-innovatint-history-autostart.ps1'
+      - 'TEST/paint-history-autostart.test.ps1'
+      - 'TEST/paint-mix-history-sync-status.test.js'
       - 'tools/innovatint-history-sync.ps1'
       - 'tools/find-innovatint-history.ps1'
       - 'tools/find-innovatint-db-config.ps1'
@@ -58,6 +61,7 @@ jobs:
         run: |
           node --check paint-live-bridge.js
           node --check paint-mix-history.js
+          node TEST/paint-mix-history-sync-status.test.js
           node --check paint-catalog-sync.js
           node --check paint-color-stock-overlay.js
           node --check paint-outflow.js
@@ -86,6 +90,7 @@ jobs:
         run: |
           $files = @(
             "tools/innovatint-kristine-bridge.ps1",
+            "tools/repair-innovatint-history-autostart.ps1",
             "tools/innovatint-history-sync.ps1",
             "tools/find-innovatint-history.ps1",
             "tools/find-innovatint-db-config.ps1",
@@ -95,6 +100,7 @@ jobs:
             "tools/find-innovatint-sqlite-native-v2.ps1",
             "tools/extract-innovatint-tint-history.ps1",
             "tools/watch-innovatint-mix-files.ps1",
+            "tools/repair-innovatint-history-autostart.ps1",
             "tools/test-zebra-zpl.ps1",
             "tools/test-sartorius-pma-weight.ps1"
           )
@@ -125,6 +131,7 @@ jobs:
             "tools/find-innovatint-sqlite-native-v2.ps1",
             "tools/extract-innovatint-tint-history.ps1",
             "tools/watch-innovatint-mix-files.ps1",
+            "tools/repair-innovatint-history-autostart.ps1",
             "tools/test-zebra-zpl.ps1",
             "tools/test-sartorius-pma-weight.ps1"
           )
@@ -138,3 +145,7 @@ jobs:
               exit 1
             }
           }
+
+      - name: Windows Task Scheduler daily/history repair test (no install)
+        shell: powershell
+        run: .\TEST\paint-history-autostart.test.ps1
