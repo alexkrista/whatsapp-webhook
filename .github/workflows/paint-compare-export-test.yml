@@ -1,0 +1,41 @@
+name: KRISTINE Farbenvergleich Excel Export
+
+on:
+  push:
+    paths:
+      - 'paint-compare-excel.js'
+      - 'paint-lab-preload.js'
+      - 'public/paint-compare-ui.js'
+      - 'public/paint-lab.html'
+      - 'TEST/paint-compare-excel.test.js'
+      - 'TEST/paint-compare-export-ui.test.js'
+      - '.github/workflows/paint-compare-export-test.yml'
+  pull_request:
+    paths:
+      - 'paint-compare-excel.js'
+      - 'paint-lab-preload.js'
+      - 'public/paint-compare-ui.js'
+      - 'public/paint-lab.html'
+      - 'TEST/paint-compare-excel.test.js'
+      - 'TEST/paint-compare-export-ui.test.js'
+      - '.github/workflows/paint-compare-export-test.yml'
+
+jobs:
+  excel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install test dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Syntax check
+        run: |
+          node --check paint-compare-excel.js
+          node --check public/paint-compare-ui.js
+          node --check paint-lab-preload.js
+      - name: Validate complete six-colour XLSX workbook and authenticated route
+        run: node TEST/paint-compare-excel.test.js
+      - name: Verify browser UI captures all colours including off-screen cards
+        run: node TEST/paint-compare-export-ui.test.js
