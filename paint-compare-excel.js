@@ -135,7 +135,7 @@ function buildCompareWorkbook(payload, date = new Date()) {
         const out=makeCol(first+x)+row;
         const source=x===0?"J":"K";
         matrixSheet[out]={
-          t:"n", f:"SUMIFS('Rezeptdaten'!$"+source+"$2:$"+source+"$"+dataLast+
+          t:"n", v:0, f:"SUMIFS('Rezeptdaten'!$"+source+"$2:$"+source+"$"+dataLast+
             ",'Rezeptdaten'!$A$2:$A$"+dataLast+","+colorColumn+
             ",'Rezeptdaten'!$H$2:$H$"+dataLast+",$A"+row+")",
           z:x===0?"0.00":"0.000",
@@ -145,7 +145,7 @@ function buildCompareWorkbook(payload, date = new Date()) {
     for(let x=0;x<2;x++){
       const col=makeCol(first+x);
       matrixSheet[col+sumRow]={
-        t:"n", f:"SUM("+col+"15:"+col+(sumRow-1)+")",
+        t:"n", v:0, f:"SUM("+col+"15:"+col+(sumRow-1)+")",
         z:x===0?"0.00":"0.000",
       };
     }
