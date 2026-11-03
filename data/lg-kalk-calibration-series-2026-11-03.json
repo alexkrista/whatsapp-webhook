@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-03",
+  "reference": "Little Greene Absolute Matt",
+  "target": "Kalkkind (nur eine Kalkbasis)",
+  "rule": "Automatische Korrektur ausschliesslich nach Little-Greene-Ausgangsbasis, NICHT nach Farbnummer. Farbnummern sind nur Kalibrierbelege.",
+  "bases": {
+    "Medium": {
+      "factor_percent": 50,
+      "additional_white_pct": 0,
+      "evidence": "296 passt",
+      "status": "bestaetigter Referenzwert"
+    },
+    "Deep": {
+      "factor_percent": 50,
+      "additional_white_pct": 0,
+      "evidence": "304 mit 45% zu hell, +5 Prozentpunkte",
+      "status": "neuer Startfaktor, noch testen"
+    },
+    "Hi White": {
+      "factor_percent": 60,
+      "additional_white_pct": 5,
+      "evidence": "269 passt",
+      "status": "bestaetigter Referenzwert"
+    },
+    "Transparent": {
+      "factor_percent": 70,
+      "additional_white_pct": 0,
+      "remove_original_white": true,
+      "evidence": "123 mit 60% zu hell, +10 Prozentpunkte",
+      "status": "neuer Startfaktor, noch testen"
+    }
+  },
+  "warning": "Faktoren als Ausgangsvorschlag, einzelner Farbton kann abweichen. Terra Lilia getrennt kalibrieren."
+}
