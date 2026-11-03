@@ -28,7 +28,7 @@ function fixtures(){
  assert.equal(JSON.stringify(items),before);
  assert(Buffer.isBuffer(report.buffer) && report.buffer.length>5000);
  const book=XLSX.read(report.buffer,{type:"buffer",cellFormula:true});
- assert.deepEqual(book.SheetNames,["Rezeptdaten","Rezeptvergleich","Hinweise"]);
+ assert.deepEqual(book.SheetNames,["Rezeptvergleich","Rezeptdaten","Hinweise"]);
  const matrix=book.Sheets.Rezeptvergleich;
  const columns=["C","E","G","I","K","M"];
  columns.forEach((col,i)=>{
