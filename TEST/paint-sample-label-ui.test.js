@@ -11,6 +11,9 @@ const {JSDOM}=require("jsdom");
   });
   const w=dom.window;
   const requests=[];
+  const savedHistory=[];
+  let failLocalPrint=false;
+  let failHistorySave=false;
   const respond=(data,status=200)=>({
     ok:status<400,status,json:async()=>data,clone:()=>respond(data,status),
   });
@@ -19,7 +22,22 @@ const {JSDOM}=require("jsdom");
     const body=options.body?JSON.parse(options.body):null;
     requests.push({path:u.pathname,query:u.searchParams,body,method:options.method||"GET"});
     if(u.pathname==="/health")return respond({ok:true,version:"1.7.0",printer:{available:true},scale:{available:true}});
-    if(u.pathname==="/print")return respond({ok:true,sampleLabel:true});
+    if(u.pathname==="/print")
+      return failLocalPrint ? respond({ok:false,error:"Zebra offline"},503) : respond({ok:true,sampleLabel:true});
+    if(u.pathname==="/admin/api/paint/sample-label-history"){
+      if((options.method||"GET")==="POST"){
+        if(failHistorySave)return respond({ok:false,error:"Historie aktuell nicht erreichbar"},503);
+        const existing=savedHistory.find(item=>item.id===body.id);
+        if(existing)return respond({ok:true,item:existing,existing:true});
+        const item={...body,kind:"sample",printedAt:new Date().toISOString()};
+        savedHistory.unshift(item);
+        return respond({ok:true,item,existing:false});
+      }
+      const q=(u.searchParams.get("q")||"").toLowerCase();
+      const results=savedHistory.filter(row=>[row.colour,row.material,row.reference].some(v=>String(v||"").toLowerCase().includes(q)));
+      const offset=Number(u.searchParams.get("offset")||0),limit=Number(u.searchParams.get("limit")||20);
+      return respond({ok:true,items:results.slice(offset,offset+limit),count:results.length,total:savedHistory.length});
+    }
     if(u.pathname==="/admin/api/paint/returns/barcode"){
       const code=u.searchParams.get("code");
       if(code==="LG-65")return respond({ok:true,item:{returnLabel:"LG-65",colour:"Slaked Lime 105",material:"Intelligent Matt"}});
@@ -41,6 +59,7 @@ const {JSDOM}=require("jsdom");
     await tick();
     const el=id=>w.document.getElementById(id);
     assert(el("returnSampleLabelOpen"),"Neuer Musteretikett-Button fehlt");
+    assert(el("returnSampleLabelHistoryOpen"),"Musteretikett-Historie ist separat erreichbar");
     assert(el("returnFreeLabelOpen"),"Bisheriger Freietikett-Button muss bleiben");
     el("returnSampleLabelOpen").click();
     assert.equal(el("returnSampleLabelDialog").open,true);
@@ -67,11 +86,38 @@ const {JSDOM}=require("jsdom");
     assert.equal(sent[0].body.date,undefined);
     assert.equal(sent[0].body.logo,undefined);
     assert.equal(sent[0].body.smallLines,undefined);
+    // Nur ein echter, bestaetigter Zebra-Druck erzeugt einen Historieneintrag.
+    assert.equal(savedHistory.length,1);
+    assert.equal(savedHistory[0].colour,"Eigener Farbton");
+    assert.equal(savedHistory[0].material,"Fremdfabrikat");
+    assert.equal(w.document.querySelectorAll("[data-sample-reuse]").length,1);
+    const priorPrintCount=()=>requests.filter(x=>x.path==="/print").length;
+    const countBeforeReuse=priorPrintCount();
+    w.document.querySelector("[data-sample-reuse]").click();
+    assert.equal(el("sampleColour").value,"Eigener Farbton");
+    assert.equal(el("sampleMaterial").value,"Fremdfabrikat");
+    assert.equal(priorPrintCount(),countBeforeReuse,"Uebernehmen darf NICHT automatisch drucken");
+    // Beim Reprint wird ein weiterer echter Druck protokolliert,
+    // aber kein alter Eintrag geloescht oder geaendert.
+    w.document.querySelector("[data-sample-reprint]").click();
+    await tick();
+    assert.equal(priorPrintCount(),countBeforeReuse+1);
+    assert.equal(savedHistory.length,2);
+    assert.equal(savedHistory[0].colour,savedHistory[1].colour);
+    assert.equal(el("sampleDatePreview").textContent.length,10);
+    // Stichwortsuche funktioniert auch mit Material.
+    el("sampleHistorySearch").value="Fremdfabrikat";
+    el("sampleHistorySearch").dispatchEvent(new w.Event("input",{bubbles:true}));
+    await new Promise(done=>setTimeout(done,300));
+    assert.equal(w.document.querySelectorAll("[data-sample-reuse]").length,2);
+    el("sampleHistorySearch").value="";
+    el("sampleHistoryReload").click();
+    await tick();
 
     el("sampleColour").value="";
     el("samplePrint").click();
     await tick();
-    assert.equal(requests.filter(x=>x.path==="/print").length,1);
+    assert.equal(requests.filter(x=>x.path==="/print").length,2);
     el("sampleNumber").value="105";
     el("sampleLookup").click();
     await tick();
@@ -79,6 +125,36 @@ const {JSDOM}=require("jsdom");
     // bei mehreren Quellen muss der Benutzer den richtigen Treffer waehlen.
     assert.equal(el("sampleColour").value,"Slaked Lime 105");
     assert(el("sampleMaterial").tagName==="INPUT");
+    // Ein Zebra-Fehler DARF niemals als gedrucktes Muster protokolliert werden.
+    el("sampleColour").value="Noch ein Muster";
+    el("sampleMaterial").value="Probenmaterial";
+    el("sampleNumber").value="";
+    const beforeFailure=priorPrintCount();
+    const beforeHistory=savedHistory.length;
+    failLocalPrint=true;
+    el("samplePrint").click();
+    await tick();
+    assert.equal(priorPrintCount(),beforeFailure+1);
+    assert.equal(savedHistory.length,beforeHistory);
+    assert.match(el("sampleMessage").textContent,/Druck fehlgeschlagen/);
+    failLocalPrint=false;
+
+    // Druck erfolgreich, Server-Historie fehlerhaft: Kein erneuter Druck
+    // noetig, der Eintrag kann per eigener Schaltflaeche nachgetragen werden.
+    failHistorySave=true;
+    el("samplePrint").click();
+    await tick();
+    assert.equal(savedHistory.length,beforeHistory);
+    assert.equal(el("sampleHistoryRetry").hidden,false);
+    assert.match(el("sampleMessage").textContent,/an Zebra übergeben/);
+    const beforeRetry=priorPrintCount();
+    failHistorySave=false;
+    el("sampleHistoryRetry").click();
+    await tick();
+    assert.equal(savedHistory.length,beforeHistory+1);
+    assert.equal(priorPrintCount(),beforeRetry,"Nachtrag darf NICHT drucken");
+    assert.equal(el("sampleHistoryRetry").hidden,true);
+    assert.match(el("sampleMessage").textContent,/kein zweiter Druck/);
     console.log("sample label UI test ok");
   }finally{w.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
