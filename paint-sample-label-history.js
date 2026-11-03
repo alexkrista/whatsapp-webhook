@@ -85,10 +85,11 @@ function registerPaintSampleLabelHistory(app, options = {}) {
       }
       const colour=printText(input.colour,"Farbe",18);
       const material=printText(input.material,"Material",28);
-      const reference=String(input.reference || "").trim().replace(/\s+/g," ").slice(0,50);
-      if (/[\r\n\^~]/.test(reference)) {
+      const referenceRaw=String(input.reference || "").trim();
+      if (/[\r\n\^~]/.test(referenceRaw)) {
         return res.status(400).json({ok:false,error:"Referenznummer ungueltig"});
       }
+      const reference=referenceRaw.replace(/\s+/g," ").slice(0,50);
       const {item,existing}=await serial(async () => {
         const rows=await read();
         const previous=rows.find(row=>row.id===id);
