@@ -438,7 +438,24 @@ function registerPaintMixHistory(app, options = {}) {
     try {
       const [state, rows] = await Promise.all([readJson(syncStateFile, {}), readJson(historyFile, [])]);
       const list = Array.isArray(rows) ? rows : [];
-      res.json({ ok: true, connectorVersion: 2, state, open: list.filter(row => row.status === "open").length, total: list.length, schedule: "Täglich 06:15–18:30 · jede Minute" });
+      const last = Date.parse(String(state.lastSyncAt || ""));
+      const ageMinutes = Number.isFinite(last) ? Math.max(0, Math.floor((Date.now() - last) / 60000)) : null;
+      const timeParts = new Intl.DateTimeFormat("en-GB", {
+        timeZone:"Europe/Vienna", hour:"2-digit", minute:"2-digit", hourCycle:"h23",
+      }).formatToParts(new Date());
+      const time = Object.fromEntries(timeParts.map(part => [part.type,part.value]));
+      const minuteOfDay = Number(time.hour) * 60 + Number(time.minute);
+      // Fuenf Minuten Anlaufzeit; danach gilt die Historie nur als aktuell,
+      // wenn in den vergangenen 10 Minuten eine erfolgreiche Abfrage ankam.
+      const expected = minuteOfDay >= 6*60+20 && minuteOfDay <= 18*60+30;
+      const stale = expected && (ageMinutes === null || ageMinutes > 10);
+      res.set("Cache-Control","no-store");
+      res.json({
+        ok:true, connectorVersion:2, state,
+        open:list.filter(row => row.status === "open").length, total:list.length,
+        schedule:"Täglich 06:15–18:30 · jede Minute",
+        stale, expected, ageMinutes, lastSyncAt:state.lastSyncAt || null,
+      });
     } catch (error) { res.status(500).json({ ok: false, error: String(error?.message || error) }); }
   });
 
