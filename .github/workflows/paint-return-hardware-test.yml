@@ -5,6 +5,7 @@ on:
     paths:
       - 'paint-lab-preload.js'
       - 'paint-return-stock.js'
+      - 'paint-sample-label-history.js'
       - 'public/paint-return-stock-ui.js'
       - 'public/paint-return-local-hardware-ui.js'
       - 'public/ui/access-status-ui.js'
@@ -18,6 +19,7 @@ on:
       - 'public/paint-sample-label-ui.js'
       - 'TEST/paint-sample-label-zpl.test.ps1'
       - 'TEST/paint-sample-label-ui.test.js'
+      - 'TEST/paint-sample-label-history.test.js'
       - 'TEST/paint-free-multiline-zpl.test.ps1'
       - 'TEST/paint-service-installer-version.test.ps1'
       - 'TEST/paint-free-multiline-ui.test.js'
@@ -31,6 +33,7 @@ on:
     paths:
       - 'paint-lab-preload.js'
       - 'paint-return-stock.js'
+      - 'paint-sample-label-history.js'
       - 'public/paint-return-stock-ui.js'
       - 'public/paint-return-local-hardware-ui.js'
       - 'public/ui/access-status-ui.js'
@@ -44,6 +47,7 @@ on:
       - 'public/paint-sample-label-ui.js'
       - 'TEST/paint-sample-label-zpl.test.ps1'
       - 'TEST/paint-sample-label-ui.test.js'
+      - 'TEST/paint-sample-label-history.test.js'
       - 'TEST/paint-free-multiline-zpl.test.ps1'
       - 'TEST/paint-service-installer-version.test.ps1'
       - 'TEST/paint-free-multiline-ui.test.js'
@@ -68,6 +72,7 @@ jobs:
         run: |
           node --check paint-lab-preload.js
           node --check paint-return-stock.js
+          node --check paint-sample-label-history.js
           node --check public/paint-return-stock-ui.js
           node --check public/paint-return-local-hardware-ui.js
           node --check public/paint-sample-label-ui.js
@@ -76,6 +81,8 @@ jobs:
           node --check public/paint-return-enhancements-ui.js
       - name: Return stock backend test
         run: node TEST/paint-return-stock.test.js
+      - name: Persistent sample label print history tests
+        run: node TEST/paint-sample-label-history.test.js
       - name: Camper JSON parser and real HTTP return-booking regression
         run: node TEST/paint-camper-json-order.test.js
       - name: Install isolated browser test runtime
