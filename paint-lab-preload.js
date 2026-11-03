@@ -23,6 +23,7 @@ const { registerPaintCommercial } = require("./paint-commercial");
 const { registerPaintInventory } = require("./paint-inventory");
 const { registerPaintOutflow } = require("./paint-outflow");
 const { registerPaintReturnStock } = require("./paint-return-stock");
+const { registerPaintSampleLabelHistory } = require("./paint-sample-label-history");
 const { registerPaintInventoryInsights } = require("./paint-inventory-insights");
 const { registerPaintInventoryCounter } = require("./paint-inventory-counter");
 const { registerPaintLiveBridge } = require("./paint-live-bridge");
@@ -115,7 +116,7 @@ function registerPaintHtmlHotfix(app, publicDir) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-return-local-hardware-ui.js?v=20261028-multiline-1"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-sample-label-ui.js")) {
-        fixed = fixed.replace("</body>", '<script src="/public/paint-sample-label-ui.js?v=20261030-pattern-1"></script>\n</body>');
+        fixed = fixed.replace("</body>", '<script src="/public/paint-sample-label-ui.js?v=20261103-history-1"></script>\n</body>');
       }
       if (!fixed.includes("/public/paint-return-enhancements-ui.js")) {
         fixed = fixed.replace("</body>", '<script src="/public/paint-return-enhancements-ui.js?v=20260910-caparol"></script>\n</body>');
@@ -179,6 +180,7 @@ function wrappedExpress(...args) {
         registerPaintInventory(app, opts);
         registerPaintOutflow(app, opts);
         registerPaintReturnStock(app, opts);
+        registerPaintSampleLabelHistory(app, opts);
         registerPaintInventoryInsights(app, opts);
         registerPaintInventoryCounter(app, opts);
         registerPaintStockLedgerApi(app, opts);
