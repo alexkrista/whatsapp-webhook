@@ -65,6 +65,15 @@
       '</div>',
       '<p id="sampleMessage" class="sample-message" role="status" aria-live="polite"></p>',
       '<div class="sample-actions"><button id="sampleCancel" class="btn" type="button">Schließen</button><button id="samplePrint" class="btn primary" type="button">Musteretikett drucken</button></div>',
+      '<section class="sample-history" aria-labelledby="sampleHistoryTitle">',
+      '<div class="sample-history-head"><h3 id="sampleHistoryTitle">Letzte Musteretiketten</h3><button id="sampleHistoryReload" class="btn" type="button">Aktualisieren</button></div>',
+      '<p class="sample-help">Die letzten übergebenen Beschriftungen von allen KRISTINE-Arbeitsplätzen. Ein erneuter Druck erhält das heutige Datum.</p>',
+      '<label for="sampleHistorySearch">In Musteretiketten suchen</label>',
+      '<input id="sampleHistorySearch" class="field" type="search" autocomplete="off" placeholder="Farbe, Material oder Nummer …">',
+      '<div id="sampleHistoryList" class="sample-history-list" aria-live="polite">Historie wird geladen …</div>',
+      '<div class="sample-history-bottom"><span id="sampleHistoryCount" class="sample-history-count"></span><button id="sampleHistoryMore" class="btn" type="button" hidden>Weitere anzeigen</button></div>',
+      '<button id="sampleHistoryRetry" class="btn" type="button" hidden>Fehlende Historieneinträge speichern</button>',
+      '</section>',
     ].join("");
     document.body.appendChild(dlg);
     return dlg;
@@ -91,6 +100,22 @@
       '.sample-logo-clip img{position:absolute;right:0;bottom:0;height:36px;width:auto;max-width:none}',
       '.sample-message{min-height:17px;font-size:12px;font-weight:700}',
       '.sample-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}',
+      '#returnSampleLabelHistoryOpen{margin-left:7px}',
+      '.sample-history{border-top:1px solid #e2e8e0;margin-top:19px;padding-top:13px}',
+      '.sample-history-head{display:flex;justify-content:space-between;align-items:center;gap:8px}',
+      '.sample-history-head h3{font-size:17px;margin:0}',
+      '.sample-history-list{display:grid;gap:8px;margin-top:10px;max-height:360px;overflow:auto}',
+      '.sample-history-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid #dfe7dd;border-radius:10px;background:#f8faf8}',
+      '.sample-history-row strong{font-size:14px;display:block;overflow-wrap:anywhere}',
+      '.sample-history-row .sample-history-material{font-size:12px;color:#586458;overflow-wrap:anywhere}',
+      '.sample-history-row small{display:block;color:#677166;font-size:11px;margin-top:3px}',
+      '.sample-history-buttons{display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}',
+      '.sample-history-buttons button{font-size:12px;padding:7px 8px;min-height:34px}',
+      '.sample-history-empty{padding:12px;background:#f5f8f5;border-radius:9px;color:#526053;font-size:13px}',
+      '.sample-history-bottom{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:9px 0}',
+      '.sample-history-count{font-size:12px;color:#5f6d5f}',
+      '#sampleHistoryRetry{margin:7px 0 0;color:#914d12}',
+      '@media(max-width:520px){.sample-history-row{align-items:flex-start;flex-direction:column}.sample-history-buttons{justify-content:flex-start}}',
       '@media(max-width:520px){.sample-lookup{grid-template-columns:1fr}.sample-lookup button{width:100%}}',
     ].join("\n");
     document.head.appendChild(sheet);
@@ -106,6 +131,12 @@
     open.type = "button";
     open.textContent = "Musteretikett";
     free.insertAdjacentElement("afterend",open);
+    const historyOpen = document.createElement("button");
+    historyOpen.id = "returnSampleLabelHistoryOpen";
+    historyOpen.className = "btn";
+    historyOpen.type = "button";
+    historyOpen.textContent = "Etiketten-Historie";
+    open.insertAdjacentElement("afterend",historyOpen);
 
     const dlg = sampleLabelDialog();
     const number = el("sampleNumber");
@@ -194,33 +225,198 @@
     }
     el("sampleLookup").addEventListener("click",()=>{lookup().catch(e=>{results.textContent=e.message;el("sampleLookup").disabled=false;});});
     number.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();el("sampleLookup").click();}});
-    open.addEventListener("click",()=>{
+    const historyList = el("sampleHistoryList");
+    const historySearch = el("sampleHistorySearch");
+    const historyMore = el("sampleHistoryMore");
+    const historyCount = el("sampleHistoryCount");
+    const historyRetry = el("sampleHistoryRetry");
+    let historySequence = 0;
+    let historyOffset = 0;
+    let historySearchTimer = null;
+    let unsaved = [];
+
+    function timeText(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "";
+      return new Intl.DateTimeFormat("de-AT",{
+        dateStyle:"short",timeStyle:"short",timeZone:"Europe/Vienna",
+      }).format(date);
+    }
+
+    function reuseFromHistory(item) {
+      number.value = String(item.reference || "");
+      colour.value = String(item.colour || "");
+      material.value = String(item.material || "");
       results.replaceChildren();
-      msg.textContent="";
       updatePreview();
-      dlg.showModal();
-      number.focus();
-    });
-    el("sampleCancel").addEventListener("click",()=>dlg.close());
-    print.addEventListener("click",async()=>{
-      try { wrapText(colour.value,18,"Farbe");wrapText(material.value,28,"Material"); }
-      catch(error){msg.textContent=error.message;return;}
-      print.disabled=true;
-      msg.textContent="Druckauftrag wird übergeben …";
-      try{
-        const health=await api(localUrl+"/health");
-        const parts=String(health.version||"").split(".").map(Number);
-        if(!(parts[0]>1 || parts[0]===1 && parts[1]>=7))
+      msg.textContent = "Beschriftung übernommen. Zum Drucken auf „Musteretikett drucken“ klicken.";
+      el("samplePreview").scrollIntoView?.({block:"nearest"});
+    }
+
+    function createHistoryRow(item) {
+      const row = document.createElement("div");
+      row.className = "sample-history-row";
+      const details = document.createElement("div");
+      const name = document.createElement("strong");
+      name.textContent = String(item.colour || "");
+      const substance = document.createElement("div");
+      substance.className = "sample-history-material";
+      substance.textContent = String(item.material || "");
+      const when = document.createElement("small");
+      when.textContent = [timeText(item.printedAt),
+        item.reference ? "Nr. " + item.reference : "",
+        item.printedBy ? "von " + item.printedBy : ""].filter(Boolean).join(" · ");
+      details.append(name,substance,when);
+      const actions = document.createElement("div");
+      actions.className = "sample-history-buttons";
+      const use = document.createElement("button");
+      use.type = "button"; use.className = "btn";
+      use.dataset.sampleReuse = item.id;
+      use.textContent = "Übernehmen";
+      use.addEventListener("click",()=>reuseFromHistory(item));
+      const again = document.createElement("button");
+      again.type = "button"; again.className = "btn";
+      again.dataset.sampleReprint = item.id;
+      again.textContent = "Nochmal drucken";
+      again.addEventListener("click",()=>{
+        if (print.disabled) return;
+        reuseFromHistory(item);
+        submitPrint();
+      });
+      actions.append(use,again);
+      row.append(details,actions);
+      return row;
+    }
+
+    async function loadHistory(reset = true) {
+      const run = ++historySequence;
+      if (reset) {
+        historyOffset = 0;
+        historyList.textContent = "Musteretiketten werden geladen …";
+      }
+      const offset = historyOffset;
+      historyMore.disabled = true;
+      try {
+        const search = historySearch.value.trim();
+        const data = await api("/admin/api/paint/sample-label-history?limit=20&offset=" +
+          offset + "&q=" + encodeURIComponent(search));
+        if (run !== historySequence) return;
+        const rows = Array.isArray(data.items) ? data.items : [];
+        if (reset) historyList.replaceChildren();
+        rows.forEach(item => historyList.appendChild(createHistoryRow(item)));
+        historyOffset += rows.length;
+        const total = Number(data.count || 0);
+        if (!rows.length && reset) {
+          const empty = document.createElement("div");
+          empty.className = "sample-history-empty";
+          empty.textContent = search
+            ? "Keine Musteretiketten mit diesem Suchbegriff gefunden."
+            : "Noch keine Musteretiketten protokolliert. Neue Drucke erscheinen nach erfolgreicher Zebra-Übergabe.";
+          historyList.appendChild(empty);
+        }
+        historyMore.hidden = historyOffset >= total;
+        historyCount.textContent = total ? historyOffset + " von " + total + " Einträgen" : "0 Einträge";
+      } catch (error) {
+        if (run !== historySequence) return;
+        if (reset) {
+          historyList.replaceChildren();
+          const notice = document.createElement("div");
+          notice.className = "sample-history-empty";
+          notice.textContent = "Historie nicht erreichbar: " + error.message + " · Drucken ist weiterhin möglich.";
+          historyList.appendChild(notice);
+        }
+        historyMore.hidden = true;
+      } finally {
+        if (run === historySequence) historyMore.disabled = false;
+      }
+    }
+
+    async function submitPrint() {
+      if (print.disabled) return;
+      try { wrapText(colour.value,18,"Farbe"); wrapText(material.value,28,"Material"); }
+      catch(error) { msg.textContent = error.message; return; }
+      print.disabled = true;
+      const content = {
+        colour:colour.value.trim(),material:material.value.trim(),reference:number.value.trim(),
+      };
+      msg.textContent = "Druckauftrag wird übergeben …";
+      try {
+        const health = await api(localUrl+"/health");
+        const parts = String(health.version || "").split(".").map(Number);
+        if (!(parts[0]>1 || parts[0]===1 && parts[1]>=7))
           throw Error("Musteretiketten benötigen die lokale Zebra-Bridge 1.7. Bitte am Misch-PC aktualisieren.");
-        if(!health.printer?.available)throw Error("Zebra-Drucker nicht verfügbar.");
-        const response=await api(localUrl+"/print",{
+        if (!health.printer?.available) throw Error("Zebra-Drucker nicht verfügbar.");
+        const response = await api(localUrl+"/print",{
           method:"POST",
-          body:JSON.stringify({sampleLabel:true,colour:colour.value.trim(),material:material.value.trim()}),
+          body:JSON.stringify({sampleLabel:true,colour:content.colour,material:content.material}),
         });
-        if(!response.sampleLabel)throw Error("Musteretikett-Druck nicht bestätigt.");
-        msg.textContent="Musteretikett (nur groß) an Zebra übergeben ✓";
-      }catch(error){msg.textContent="Druck fehlgeschlagen: "+error.message;}
-      finally{print.disabled=false;}
+        if (!response.sampleLabel) throw Error("Musteretikett-Druck nicht bestätigt.");
+        msg.textContent = "Musteretikett an Zebra übergeben ✓";
+        // Erst NACH erfolgreicher Bridge-Antwort protokollieren; niemals
+        // einen gescheiterten Druck als gedruckt in die Historie aufnehmen.
+        const printRecord = {
+          id:"sample_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,14),
+          ...content,
+        };
+        try {
+          await api("/admin/api/paint/sample-label-history",{
+            method:"POST",body:JSON.stringify(printRecord),
+          });
+          msg.textContent = "Musteretikett an Zebra übergeben ✓ · in Historie gespeichert ✓";
+          await loadHistory(true);
+        } catch(error) {
+          unsaved.push(printRecord);
+          historyRetry.hidden = false;
+          msg.textContent = "Musteretikett an Zebra übergeben ✓ · Historie nicht gespeichert: " +
+            error.message + ". Nicht nochmals drucken – unten „Fehlende Historieneinträge speichern“ wählen.";
+        }
+      } catch(error) {
+        msg.textContent = "Druck fehlgeschlagen: " + error.message;
+      } finally {
+        print.disabled = false;
+      }
+    }
+
+    async function retryUnsaved() {
+      if (!unsaved.length) { historyRetry.hidden = true; return; }
+      historyRetry.disabled = true;
+      const failed = [];
+      for (const record of unsaved) {
+        try {
+          await api("/admin/api/paint/sample-label-history",{
+            method:"POST",body:JSON.stringify(record),
+          });
+        } catch { failed.push(record); }
+      }
+      const saved = unsaved.length - failed.length;
+      unsaved = failed;
+      historyRetry.hidden = !failed.length;
+      historyRetry.disabled = false;
+      msg.textContent = failed.length
+        ? saved + " Historieneinträge nachgetragen, " + failed.length + " noch offen."
+        : "Alle fehlenden Historieneinträge gespeichert ✓ · kein zweiter Druck.";
+      await loadHistory(true);
+    }
+
+    function showDialog(onlyHistory = false) {
+      results.replaceChildren();
+      msg.textContent = unsaved.length ? unsaved.length + " Druckeinträge noch nicht gespeichert." : "";
+      updatePreview();
+      if (!dlg.open) dlg.showModal();
+      loadHistory(true);
+      if (onlyHistory) historySearch.focus();
+      else number.focus();
+    }
+    open.addEventListener("click",()=>showDialog(false));
+    historyOpen.addEventListener("click",()=>showDialog(true));
+    el("sampleCancel").addEventListener("click",()=>dlg.close());
+    print.addEventListener("click",submitPrint);
+    el("sampleHistoryReload").addEventListener("click",()=>loadHistory(true));
+    historyMore.addEventListener("click",()=>{if(!historyMore.disabled)loadHistory(false);});
+    historyRetry.addEventListener("click",retryUnsaved);
+    historySearch.addEventListener("input",()=>{
+      clearTimeout(historySearchTimer);
+      historySearchTimer = setTimeout(()=>loadHistory(true),220);
     });
     return true;
   }
