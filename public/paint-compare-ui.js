@@ -44,6 +44,7 @@
     '.paintCompareChip{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:999px;padding:5px 8px 5px 5px;background:#f7f8f5;white-space:nowrap;font-size:12px}.paintCompareDot{width:24px;height:24px;border-radius:50%;border:1px solid #0002;flex:0 0 auto}.paintCompareChip button{border:0;background:transparent;cursor:pointer;font-size:16px;line-height:1;color:#666}.paintCompareActions{display:flex;gap:7px;flex:0 0 auto}.compareAddBtn.inCompare{background:var(--accent);color:#fff}' +
     '.paintCompareModal{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;padding:18px;z-index:40}.paintCompareModal.show{display:flex}.paintCompareModalCard{background:#fff;border-radius:18px;width:min(1280px,100%);max-height:92vh;overflow:auto;padding:18px}.paintCompareModalHead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;position:sticky;top:-18px;background:#fff;padding:18px 0 12px;z-index:2;border-bottom:1px solid var(--line)}' +
     '.paintCompareWarning{background:#fff4d8;border:1px solid #e7b84d;border-radius:10px;padding:9px 11px;margin:12px 0;font-size:13px}.paintCompareGrid{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(280px,1fr);gap:12px;overflow-x:auto;padding:4px 2px 10px}.paintCompareCard{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fff;min-width:280px}.paintCompareSwatch{height:130px;border-bottom:1px solid var(--line)}.paintCompareBody{padding:12px}.paintCompareName{font-size:20px;font-weight:850}.paintCompareMeta{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.45}.paintCompareRecipe{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}.paintCompareRecipe th,.paintCompareRecipe td{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line)}.paintCompareRecipe th:nth-child(n+2),.paintCompareRecipe td:nth-child(n+2){text-align:right}.paintCompareCalibration{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4}.paintCompareRemove{margin-top:10px;width:100%}' +
+    '.paintCompareModalActions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}.paintCompareExportStatus{font-size:13px;min-height:16px;color:#516b57;margin-top:10px}.paintCompareExportStatus.error{color:#a62b2b}.paintCompareModalActions .btn{white-space:nowrap}' +
     '@media(max-width:750px){.paintCompareBar{top:4px;align-items:flex-start;flex-direction:column}.paintCompareActions{width:100%}.paintCompareActions .btn{flex:1}.paintCompareTitle{font-size:13px}.paintCompareGrid{grid-auto-columns:minmax(245px,82vw)}}';
   document.head.appendChild(style);
 
@@ -54,7 +55,7 @@
 
   var modal = document.createElement('div');
   modal.className = 'paintCompareModal';
-  modal.innerHTML = '<div class="paintCompareModalCard"><div class="paintCompareModalHead"><div><h2 style="margin:0">Farben vergleichen</h2><div class="muted">Farbwirkung oben · Rezept direkt darunter</div></div><button class="btn" id="paintCompareClose">Schließen</button></div><div id="paintCompareWarning"></div><div class="paintCompareGrid" id="paintCompareGrid"></div></div>';
+  modal.innerHTML = '<div class="paintCompareModalCard"><div class="paintCompareModalHead"><div><h2 style="margin:0">Farben vergleichen</h2><div class="muted">Farbwirkung oben · Rezept direkt darunter</div></div><div class="paintCompareModalActions"><button class="btn primary" type="button" id="paintCompareExcelExport">Als Excel exportieren</button><button class="btn" id="paintCompareClose">Schließen</button></div></div><div id="paintCompareExportStatus" class="paintCompareExportStatus" role="status" aria-live="polite"></div><div id="paintCompareWarning"></div><div class="paintCompareGrid" id="paintCompareGrid"></div></div>';
   document.body.appendChild(modal);
 
   var countEl = document.getElementById('paintCompareCount');
@@ -64,11 +65,14 @@
   var closeBtn = document.getElementById('paintCompareClose');
   var gridEl = document.getElementById('paintCompareGrid');
   var warningEl = document.getElementById('paintCompareWarning');
+  var exportBtn = document.getElementById('paintCompareExcelExport');
+  var exportStatus = document.getElementById('paintCompareExportStatus');
 
   function renderBar() {
     countEl.textContent = '(' + items.length + ')';
     clearBtn.disabled = !items.length;
     openBtn.disabled = !items.length;
+    exportBtn.disabled = !items.length;
     if (!items.length) {
       chipsEl.innerHTML = '<span class="muted">Noch keine Farbe gewählt</span>';
     } else {
@@ -126,6 +130,77 @@
       return '<article class="paintCompareCard"><div class="paintCompareSwatch" style="' + swatch(item) + '"></div><div class="paintCompareBody"><div class="paintCompareName">' + e(item.color.name || item.color.code || 'Farbe') + '</div><div class="paintCompareMeta">' + e(item.color.system || '') + (item.color.code ? ' · ' + e(item.color.code) : '') + '<br><b>' + e(item.product.productName || '') + '</b><br>' + e((r && r.baseName) || item.product.baseName || '') + ' · ' + e((r && r.canSize) || item.size.size || '') + '</div>' + recipeTable(item) + calibration + '<button class="btn paintCompareRemove" type="button" data-modal-remove="' + e(item.key) + '">Aus Vergleich entfernen</button></div></article>';
     }).join('');
   }
+
+  // Ein echter XLSX-Download des kompletten aktuellen Vergleichs, NICHT ein
+  // Screenshot oder nur der sichtbare Ausschnitt der horizontalen Karten.
+  async function downloadExcel() {
+    if (exportBtn.disabled || !items.length) return;
+    exportBtn.disabled = true;
+    exportStatus.classList.remove('error');
+    exportStatus.textContent = 'Rezeptdaten werden geprüft …';
+    try {
+      var missing = [];
+      for (var i = 0; i < items.length; i++) {
+        var entry = items[i];
+        if (entry.recipe && Array.isArray(entry.recipe.recipe) && entry.recipe.recipe.length) continue;
+        exportStatus.textContent = 'Rezept ' + (i+1) + ' von ' + items.length + ' wird nachgeladen …';
+        try {
+          var fetched = await api('/admin/api/paint/recipe?colourId=' +
+            encodeURIComponent(entry.color.id) + '&productId=' +
+            encodeURIComponent(entry.product.productId) + '&canSizeId=' +
+            encodeURIComponent(entry.size.canSizeId));
+          if (!fetched || !Array.isArray(fetched.recipe) || !fetched.recipe.length)
+            throw new Error('Keine Pastenpositionen');
+          entry.recipe = fetched;
+          entry.error = '';
+        } catch (error) {
+          entry.error = (error && error.message) || 'Rezept nicht verfügbar';
+          missing.push(entry.color.name || entry.color.code || 'Farbe ' + (i+1));
+        }
+      }
+      save();
+      if (missing.length) {
+        renderModal();
+        throw new Error('Nicht alle Rezepte verfügbar: ' + missing.join(', ') + '. Bitte erst die Rezepte laden.');
+      }
+      exportStatus.textContent = items.length + ' vollständige Rezepte werden als Excel erstellt …';
+      var token = new URLSearchParams(location.search).get('token') || '';
+      var endpoint = '/admin/api/paint/compare/export-xlsx' + (token ? '?token=' + encodeURIComponent(token) : '');
+      var response = await fetch(endpoint,{
+        method:'POST', cache:'no-store', credentials:'same-origin',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({items:items}),
+      });
+      if (!response.ok) {
+        var errorJson = await response.json().catch(function(){return {};});
+        throw new Error(errorJson.error || ('Server antwortet mit HTTP ' + response.status));
+      }
+      var blob = await response.blob();
+      if (!blob.size) throw new Error('Leere Excel-Datei erhalten');
+      var downloadUrl = URL.createObjectURL(blob);
+      var contentDisposition = response.headers && response.headers.get('content-disposition') || '';
+      var filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+      var filename = filenameMatch ? filenameMatch[1] :
+        'KRISTINE_Farbvergleich_' + new Date().toISOString().slice(0,10) + '_' + items.length + '_Farben.xlsx';
+      var link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      try { link.click(); }
+      finally {
+        link.remove();
+        setTimeout(function(){ URL.revokeObjectURL(downloadUrl); },30000);
+      }
+      exportStatus.textContent = items.length + ' Farben mit allen Rezeptpositionen als Excel heruntergeladen ✓';
+    } catch (error) {
+      exportStatus.classList.add('error');
+      exportStatus.textContent = 'Excel-Export fehlgeschlagen: ' + (error && error.message || error);
+    } finally {
+      exportBtn.disabled = !items.length;
+    }
+  }
+
+  exportBtn.addEventListener('click',downloadExcel);
 
   openBtn.addEventListener('click', function () { renderModal(); modal.classList.add('show'); });
   closeBtn.addEventListener('click', function () { modal.classList.remove('show'); });
