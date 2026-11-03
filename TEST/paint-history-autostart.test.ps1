@@ -41,7 +41,8 @@ $action=$task.Actions.Create(0)
 $action.Path=Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
 $action.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\Test\worker.ps1" -Mode Once'
 $taskXml=[string]$task.XmlText
-if ($taskXml -notmatch "PT12H15M" -or $taskXml -notmatch "PT1M" -or $taskXml -notmatch "LogonTrigger" -or $taskXml -notmatch "DailyTrigger") {
+Write-Output ("Task XML (read-only test): " + $taskXml.Substring(0,[Math]::Min(3500,$taskXml.Length)))
+if ($taskXml -notmatch "PT12H15M" -or $taskXml -notmatch "PT1M" -or $taskXml -notmatch "LogonTrigger" -or $taskXml -notmatch "ScheduleByDay") {
   throw "Task Scheduler did not produce expected daily/logon XML"
 }
 if ($taskXml -notmatch "InteractiveToken") {throw "Task must execute as currently logged-on user (DPAPI)"}
