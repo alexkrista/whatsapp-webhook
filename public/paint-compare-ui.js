@@ -83,7 +83,10 @@
     document.querySelectorAll('.compareAddBtn[data-compare-key]').forEach(function (button) {
       var active = items.some(function (item) { return item.key === button.dataset.compareKey; });
       button.classList.toggle('inCompare', active);
-      button.textContent = active ? 'Im Vergleich ✓' : '+ Vergleich';
+      var label = active ? 'Im Vergleich ✓' : '+ Vergleich';
+      // Keine staendige DOM-Mutation ausloesen: enhanceDetail beobachtet
+      // genau diesen Bereich und wuerde sonst endlos nachladen.
+      if (button.textContent !== label) button.textContent = label;
     });
   }
 
