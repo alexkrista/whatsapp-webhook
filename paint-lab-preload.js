@@ -24,6 +24,7 @@ const { registerPaintInventory } = require("./paint-inventory");
 const { registerPaintOutflow } = require("./paint-outflow");
 const { registerPaintReturnStock } = require("./paint-return-stock");
 const { registerPaintSampleLabelHistory } = require("./paint-sample-label-history");
+const { registerPaintCompareExcel } = require("./paint-compare-excel");
 const { registerPaintInventoryInsights } = require("./paint-inventory-insights");
 const { registerPaintInventoryCounter } = require("./paint-inventory-counter");
 const { registerPaintLiveBridge } = require("./paint-live-bridge");
@@ -181,6 +182,7 @@ function wrappedExpress(...args) {
         registerPaintOutflow(app, opts);
         registerPaintReturnStock(app, opts);
         registerPaintSampleLabelHistory(app, opts);
+        registerPaintCompareExcel(app, opts);
         registerPaintInventoryInsights(app, opts);
         registerPaintInventoryCounter(app, opts);
         registerPaintStockLedgerApi(app, opts);
