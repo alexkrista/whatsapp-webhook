@@ -114,6 +114,42 @@
     } finally { if (button) button.disabled = false; }
   }
 
+  function sampleEditor(item,row) {
+    const sample=item.sample||{};
+    const wrapper=document.createElement("div");
+    wrapper.className="mixhist-sample-editor";
+    wrapper.hidden=true;
+    wrapper.style.cssText="margin-top:10px;padding:12px;border:1px solid #d9dfd9;border-radius:10px;background:#f5f8f4";
+    wrapper.innerHTML=`
+      <div style="font-weight:800;margin-bottom:8px">Freie Dosierung als Muster erfassen · kein Lagerabzug</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px">
+        <label>Farbname<input class="field" data-sample="colourName" maxlength="180" value="${esc(sample.colourName||item.colourCode||item.colourName||"")}"></label>
+        <label>Material<input class="field" data-sample="productName" maxlength="180" value="${esc(sample.productName||"Kalkkind")}"></label>
+        <label>Projekt / Mustername<input class="field" data-sample="project" maxlength="180" value="${esc(sample.project||"")}"></label>
+        <label>Materialmenge<input class="field" data-sample="materialAmount" type="number" min="0.001" step="0.001" value="${esc(sample.materialAmount||"")}"></label>
+        <label>Einheit<select class="field" data-sample="unit"><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option></select></label>
+      </div>
+      <label style="display:block;margin-top:8px">Notiz / Korrektur<textarea class="field" data-sample="notes" maxlength="500" rows="2">${esc(sample.notes||"")}</textarea></label>
+      <div style="display:flex;gap:8px;margin-top:8px"><button type="button" class="btn primary" data-sample-save>Als Muster speichern</button><button type="button" class="btn" data-sample-cancel>Abbrechen</button></div>
+      <p class="mixhist-meta" data-sample-status>Die Originaldaten von InnovaTint bleiben unverändert.</p>`;
+    wrapper.querySelector('[data-sample="unit"]').value=sample.unit||"g";
+    const save=wrapper.querySelector("[data-sample-save]");
+    wrapper.querySelector("[data-sample-cancel]").onclick=()=>{wrapper.hidden=true};
+    save.onclick=async()=>{
+      const get=key=>wrapper.querySelector('[data-sample="'+key+'"]').value.trim();
+      const payload={colourName:get("colourName"),productName:get("productName"),project:get("project"),materialAmount:Number(get("materialAmount")),unit:get("unit"),notes:get("notes")};
+      if(!payload.colourName||!payload.productName||!payload.project||!(payload.materialAmount>0))return alert("Bitte Farbton, Material, Projekt und Menge vollständig eingeben.");
+      save.disabled=true;
+      try {
+        await api("/admin/api/paint/mix-history/"+encodeURIComponent(item.id)+"/sample",{method:"POST",body:JSON.stringify(payload)});
+        await loadAll();
+      }catch(err){wrapper.querySelector("[data-sample-status]").textContent=String(err.message||err)}
+      finally{save.disabled=false;}
+    };
+    row.appendChild(wrapper);
+    return wrapper;
+  }
+
   function renderRows(items) {
     const list = document.getElementById("mixHistoryList");
     if (!list) return;
@@ -124,9 +160,9 @@
     }
     for (const item of items) {
       const row = document.createElement("div"); row.className = "mixhist-row";
-      const tone = item.colourCode || item.colourName || "Farbton unbekannt";
+      const tone = item.sample?.colourName || item.colourCode || item.colourName || "Farbton unbekannt";
       row.innerHTML = `
-        <div class="mixhist-title">${esc(tone)} · ${esc(item.productName || "Produkt unbekannt")}</div>
+        <div class="mixhist-title">${esc(tone)} · ${esc(item.sample?.productName || item.productName || "Produkt unbekannt")}</div>
         <div class="mixhist-meta">${esc(item.baseName || item.baseCode || "Basis ?")} · ${esc(item.size || "Gebinde ?")} · ${fmtDate(item.mixedAt)}${item.machine ? ` · ${esc(item.machine)}` : ""}</div>
         <div class="mixhist-actions">
           <button class="btn primary" data-resolution="sale" type="button">Verkauf</button>
@@ -134,7 +170,16 @@
           <button class="btn" data-resolution="stock" type="button">Lager</button>
           <button class="btn" data-resolution="waste" type="button">Fehlmischung</button>
         </div>`;
-      if (item.requiresReview && item.status === "open") { row.querySelector(".mixhist-actions").textContent = "Freie Dosierung / Nachmischung: manuell prüfen, kein automatischer Dosenabzug."; list.appendChild(row); continue; }
+      if (item.requiresReview && (item.status === "open" || item.resolution === "sample")) {
+        const actions=row.querySelector(".mixhist-actions");
+        actions.replaceChildren();
+        const btn=document.createElement("button");btn.className="btn primary";btn.type="button";
+        btn.textContent=item.resolution==="sample"?"Muster bearbeiten":"Als Muster erfassen";
+        actions.appendChild(btn);
+        if(item.sample){const label=document.createElement("span");label.className="mixhist-meta";label.textContent="Gespeichertes Muster · "+item.sample.project+" · "+item.sample.materialAmount+" "+item.sample.unit;actions.appendChild(label);}
+        const editor=sampleEditor(item,row);btn.onclick=()=>{editor.hidden=!editor.hidden};
+        list.appendChild(row);continue;
+      }
       if (item.status === "baseline" && !item.jobId && (item.colourCode || item.colourName)) {
         row.querySelector(".mixhist-actions").innerHTML = '<button class="btn" data-resolution="project" type="button">Baustelle zuordnen – nur Farbwissen</button>';
       }

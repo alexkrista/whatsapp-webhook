@@ -473,6 +473,44 @@ function registerPaintMixHistory(app, options = {}) {
     } catch (error) { res.status(500).json({ ok: false, error: String(error?.message || error) }); }
   });
 
+  // A free dispense is a real tinting event, but not evidence that an LG paint can was consumed.
+  // Annotate it as a sample without mutating stocks, the machine history or its raw payload.
+  app.post("/admin/api/paint/mix-history/:id/sample", async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const result = await serial(async () => {
+        const rows = await readJson(historyFile, []);
+        if (!Array.isArray(rows)) throw new Error("Misch-History ist beschädigt");
+        const row = rows.find(item => String(item?.id || "") === String(req.params.id));
+        if (!row) return { statusCode:404,error:"Mischung nicht gefunden" };
+        if (!row.requiresReview && row.resolution !== "sample") return { statusCode:409,error:"Nur freie Dosierungen können hier als Muster erfasst werden" };
+        if (row.status === "resolved" && row.resolution !== "sample") return { statusCode:409,error:"Bereits anderweitig gebucht" };
+        const colourName=clean(req.body?.colourName,180),productName=clean(req.body?.productName,180);
+        const jobName=clean(req.body?.project,180),notes=clean(req.body?.notes,500);
+        const materialAmount=number(req.body?.materialAmount,-1);
+        const unit=clean(req.body?.unit,12).toLowerCase();
+        if (!colourName || !productName) return {statusCode:400,error:"Farbton und Material sind erforderlich"};
+        if (!(materialAmount>0 && materialAmount<=1000) || !["g","kg","ml","l"].includes(unit)) return {statusCode:400,error:"Menge und Einheit prüfen"};
+        if (!jobName) return {statusCode:400,error:"Projekt oder Musterbezeichnung fehlt"};
+        const now=new Date().toISOString();
+        // Only supplementary metadata, never the original machine facts.
+        row.sample={
+          colourName,productName,project:jobName,materialAmount,unit,notes,
+          savedAt:now
+        };
+        row.status="resolved";
+        row.resolution="sample";
+        row.resolvedAt=now;
+        row.knowledgeOnly=true;
+        await writeJson(historyFile,rows);
+        await markTaskDone(row.taskId);
+        return {statusCode:200,row,stockChanged:false};
+      });
+      if (result.error) return res.status(result.statusCode).json({ok:false,...result});
+      res.json({ok:true,...result});
+    } catch (error) { res.status(500).json({ok:false,error:String(error?.message || error)}); }
+  });
+
   app.post("/admin/api/paint/mix-history/:id/resolve", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {

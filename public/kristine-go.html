@@ -27,6 +27,22 @@
     .kg-brain-copy strong{font-size:16px;line-height:1.15}
     .kg-brain-copy small{font-size:12px;color:#657387}
     .kg-brain-arrow{font-size:28px;line-height:1;color:#657387}
+
+    .kg-terra-mix-card{background:#fff;border:1px solid #dbe2e7;border-radius:18px;margin:12px 0 18px;overflow:hidden;box-shadow:0 5px 18px #10233f0a}
+    .kg-terra-mix-toggle{width:100%;display:flex;align-items:center;gap:12px;padding:16px;background:#fff;border:0;text-align:left;color:#10233f;cursor:pointer}
+    .kg-terra-mix-toggle>span:nth-child(2){display:flex;flex:1;flex-direction:column;gap:4px}
+    .kg-terra-mix-toggle strong{font-size:16px}.kg-terra-mix-toggle small{font-size:12px;color:#657387}
+    .kg-terra-mix-mark{display:grid;place-items:center;flex-shrink:0;width:54px;height:44px;border-radius:12px;background:#e5efe9;color:#1b6545;font-size:13px;font-weight:800}
+    .kg-terra-mix-contents{padding:0 16px 16px}.kg-terra-mix-contents[hidden],.kg-terra-mix-results[hidden]{display:none!important}
+    .kg-terra-mix-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+    .kg-terra-mix-fields label{display:grid;gap:6px;font-size:12px;font-weight:700;color:#42536b}
+    .kg-terra-mix-fields input,.kg-terra-mix-fields select{width:100%;min-height:45px;padding:9px;background:#fff;border:1px solid #bdcbd3;border-radius:9px;color:#10233f;font:inherit;font-size:15px}
+    .kg-terra-mix-reference{font-size:12px;color:#66768a;margin:12px 0}
+    .kg-terra-mix-results{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+    .kg-terra-mix-results>div{padding:12px;border-radius:11px;border:1px solid #dde5e1;background:#f7faf8;display:flex;flex-direction:column;gap:6px}
+    .kg-terra-mix-results small{font-size:12px;color:#536477}.kg-terra-mix-results strong{font-size:19px;color:#10233f}
+    @media(max-width:650px){.kg-terra-mix-fields{grid-template-columns:1fr}.kg-terra-mix-results{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
   </style>
 
 </head>
@@ -78,6 +94,31 @@
             <span id="kgMaterialResponseCount"></span>
           </div>
           <div id="kgMaterialResponseList"></div>
+        </section>
+
+
+        <section id="kgTerraMix" class="kg-terra-mix-card" aria-label="Terra Icon Mischrechner">
+          <button type="button" id="kgTerraToggle" class="kg-terra-mix-toggle" aria-expanded="false">
+            <span class="kg-terra-mix-mark">A+B+C</span>
+            <span><strong>Terra Icon · Mischrechner</strong><small>Fein und Mittel · m² oder Komponentenmengen berechnen</small></span>
+            <span aria-hidden="true">▾</span>
+          </button>
+          <div id="kgTerraContents" class="kg-terra-mix-contents" hidden>
+            <div class="kg-terra-mix-fields">
+              <label>Produkt<select id="kgTerraType"><option value="fein">Terra Icon Fein</option><option value="mittel">Terra Icon Mittel</option></select></label>
+              <label>Ich gebe ein<select id="kgTerraBasis"><option value="m2">Fläche (m²)</option><option value="total">Gesamtmenge A+B+C (kg)</option><option value="a">Komponente A – flüssig (kg)</option><option value="b">Komponente B – Pulver (kg)</option><option value="c">Komponente C – Härter (kg)</option></select></label>
+              <label>Menge<input id="kgTerraInput" type="text" inputmode="decimal" autocomplete="off" value="27,02" aria-label="Eingegebene Menge"></label>
+            </div>
+            <p id="kgTerraReference" class="kg-terra-mix-reference"></p>
+            <div id="kgTerraOutput" class="kg-terra-mix-results">
+              <div><small>A · flüssig</small><strong data-terra-result="a"></strong></div>
+              <div><small>B · Pulver</small><strong data-terra-result="b"></strong></div>
+              <div><small>C · Härter</small><strong data-terra-result="c"></strong></div>
+              <div><small>Gesamt A+B+C</small><strong data-terra-result="total"></strong></div>
+              <div><small>Reichweite</small><strong data-terra-result="m2"></strong></div>
+            </div>
+            <p id="kgTerraNote" class="kg-terra-mix-reference" aria-live="polite"></p>
+          </div>
         </section>
 
         <section class="kg-site-card">
@@ -254,6 +295,7 @@
   <div id="kgToast" class="kg-toast" role="status" aria-live="polite"></div>
 
   <script src="/public/kristine-go.js?v=11"></script>
+  <script src="/public/kgo-terra-icon.js?v=1"></script>
   <script src="/public/ui/krista-photo-followup.js?v=20260909-2"></script>
   <script src="/public/ui/kgo-brain-access.js?v=20261023-regie-required-1"></script>
 </body>
