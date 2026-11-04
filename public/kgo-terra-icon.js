@@ -6,9 +6,9 @@
   });
   function calculate(kind, dimension, amount) {
     const r = recipes[kind];
-    if (!r || !["m2", "total", "a", "b", "c"].includes(dimension) || !(Number.isFinite(amount) && amount > 0)) return null;
+    if (!r || !["m2", "ab", "total", "a", "b", "c"].includes(dimension) || !(Number.isFinite(amount) && amount > 0)) return null;
     const total = r.a + r.b + r.c;
-    const scale = amount / (dimension === "m2" ? r.area : dimension === "total" ? total : r[dimension]);
+    const scale = amount / (dimension === "m2" ? r.area : dimension === "total" ? total : dimension === "ab" ? r.a + r.b : r[dimension]);
     return { a:r.a*scale, b:r.b*scale, c:r.c*scale, total:total*scale, m2:r.area*scale };
   }
   if (typeof module !== "undefined" && module.exports) module.exports = { recipes, calculate };
@@ -36,7 +36,7 @@
       return;
     }
     output.hidden=false;
-    note.textContent="Berechnung im konstanten Mischverhältnis A:B:C. Werte auf der Waage entsprechend ihrer Genauigkeit runden.";
+    note.textContent=basis.value==="ab"?"A+B ist bereits gemischt. C (Härter) zusätzlich zugeben; die Gesamtmenge und Reichweite gelten nach Zugabe von C.":"Berechnung im konstanten Mischverhältnis A:B:C. Werte auf der Waage entsprechend ihrer Genauigkeit runden.";
     for(const key of ["a","b","c","total","m2"]) {
       const element = root.querySelector("[data-terra-result='"+key+"']");
       if(element) element.textContent = fmt(calc[key]) + (key==="m2"?" m²":" kg");
