@@ -1,0 +1,135 @@
+{
+  "models": {
+    "keys": {
+      "model_position": "integer"
+    },
+    "source": "SELECT value raw,(ordinality-1)::int model_position FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY",
+    "texts": {
+      "legacy_id": "id",
+      "name_original": "name",
+      "description_original": "description",
+      "rule_version_original": "timeModelVersion",
+      "payroll_reason_original": "payrollReason",
+      "project_time_source_original": "projectTimeSource"
+    },
+    "numbers": {
+      "payroll_target_hours_weekday": "payrollTargetHoursWeekday",
+      "automatic_payroll_hours": "automaticPayrollHours"
+    },
+    "bools": {
+      "active_original": "active",
+      "system_protected_original": "systemProtected",
+      "office_model_original": "officeModel",
+      "configured_original": "configured",
+      "automatic_time_original": "automaticTime"
+    },
+    "jsons": {},
+    "fk": ""
+  },
+  "seasons": {
+    "keys": {
+      "model_position": "integer",
+      "season_position": "integer"
+    },
+    "source": "WITH models AS (SELECT value raw,(ordinality-1)::int model_position FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY), seasons AS (SELECT m.model_position,s.value raw,(s.ordinality-1)::int season_position FROM models m CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.raw->'seasons','[]'::jsonb)) WITH ORDINALITY s) SELECT * FROM seasons",
+    "texts": {
+      "legacy_id": "id",
+      "name_original": "name"
+    },
+    "numbers": {},
+    "bools": {},
+    "jsons": {
+      "months_original": "months"
+    },
+    "fk": "FOREIGN KEY(company_id,source_version_id,model_position) REFERENCES kristine.imported_company_rule_models(company_id,source_version_id,model_position)"
+  },
+  "weekdays": {
+    "keys": {
+      "model_position": "integer",
+      "season_position": "integer",
+      "weekday_key": "text"
+    },
+    "source": "WITH models AS (SELECT value raw,(ordinality-1)::int model_position FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY), seasons AS (SELECT m.model_position,s.value raw,(s.ordinality-1)::int season_position FROM models m CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.raw->'seasons','[]'::jsonb)) WITH ORDINALITY s) SELECT s.model_position,s.season_position,w.key weekday_key,w.value raw FROM seasons s CROSS JOIN LATERAL jsonb_each(COALESCE(s.raw->'weekdays','{}'::jsonb)) w",
+    "texts": {
+      "from_original": "from",
+      "to_original": "to"
+    },
+    "numbers": {
+      "lunch_break_minutes": "lunchBreakMinutes",
+      "other_break_minutes": "otherBreakMinutes",
+      "target_hours": "targetHours",
+      "payroll_target_hours": "payrollTargetHours"
+    },
+    "bools": {
+      "free_original": "free"
+    },
+    "jsons": {},
+    "fk": "FOREIGN KEY(company_id,source_version_id,model_position,season_position) REFERENCES kristine.imported_company_rule_seasons(company_id,source_version_id,model_position,season_position)"
+  },
+  "blocks": {
+    "keys": {
+      "model_position": "integer",
+      "block_key": "text"
+    },
+    "source": "WITH models AS (SELECT value raw,(ordinality-1)::int model_position FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY), blocks AS (SELECT m.model_position,b.key block_key,b.value raw FROM models m CROSS JOIN LATERAL jsonb_each(COALESCE(m.raw->'blocks','{}'::jsonb)) b) SELECT * FROM blocks",
+    "texts": {
+      "label_original": "label"
+    },
+    "numbers": {},
+    "bools": {
+      "enabled_original": "enabled"
+    },
+    "jsons": {},
+    "fk": "FOREIGN KEY(company_id,source_version_id,model_position) REFERENCES kristine.imported_company_rule_models(company_id,source_version_id,model_position)"
+  },
+  "block_rows": {
+    "keys": {
+      "model_position": "integer",
+      "block_key": "text",
+      "row_position": "integer"
+    },
+    "source": "WITH models AS (SELECT value raw,(ordinality-1)::int model_position FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY), blocks AS (SELECT m.model_position,b.key block_key,b.value raw FROM models m CROSS JOIN LATERAL jsonb_each(COALESCE(m.raw->'blocks','{}'::jsonb)) b) SELECT b.model_position,b.block_key,(r.ordinality-1)::int row_position,r.value raw FROM blocks b CROSS JOIN LATERAL jsonb_array_elements(COALESCE(b.raw->'rows','[]'::jsonb)) WITH ORDINALITY r",
+    "texts": {
+      "legacy_id": "id",
+      "from_original": "from",
+      "to_original": "to",
+      "lunch_from_original": "lunchFrom",
+      "lunch_to_original": "lunchTo",
+      "pause_from_original": "pauseFrom",
+      "pause_to_original": "pauseTo",
+      "activity_code_original": "activityCode",
+      "activity_label_original": "activityLabel"
+    },
+    "numbers": {},
+    "bools": {},
+    "jsons": {
+      "days_original": "days"
+    },
+    "fk": "FOREIGN KEY(company_id,source_version_id,model_position,block_key) REFERENCES kristine.imported_company_rule_blocks(company_id,source_version_id,model_position,block_key)"
+  },
+  "schedule_days": {
+    "keys": {
+      "model_position": "integer",
+      "day_position": "integer"
+    },
+    "source": "WITH models AS (SELECT value raw,(ordinality-1)::int model_position FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY) SELECT m.model_position,(d.ordinality-1)::int day_position,d.value raw FROM models m CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.raw->'days','[]'::jsonb)) WITH ORDINALITY d",
+    "texts": {
+      "day_name_original": "dayName",
+      "from_original": "from",
+      "to_original": "to",
+      "pause_start_original": "pauseStart",
+      "pause_end_original": "pauseEnd",
+      "lunch_start_original": "lunchStart",
+      "lunch_end_original": "lunchEnd"
+    },
+    "numbers": {
+      "pause_minutes": "pauseMinutes",
+      "should_hours": "shouldHours"
+    },
+    "bools": {
+      "is_work_day_original": "isWorkDay"
+    },
+    "jsons": {},
+    "fk": "FOREIGN KEY(company_id,source_version_id,model_position) REFERENCES kristine.imported_company_rule_models(company_id,source_version_id,model_position)"
+  }
+}

@@ -1,0 +1,2754 @@
+{
+  "baseline": "dcbcb525c0d03942314ce4da8bfaa3d843a949fd",
+  "scope": "132 JavaScript backend files; excludes public, TEST, backup files and Python services",
+  "method": "Heuristic literal and filesystem-call inventory, not proof of runtime ownership or data flow",
+  "sourceFiles": 132,
+  "jsonReferences": {
+    "./data/caparol-3d.json": [
+      "paint-lab.js:10"
+    ],
+    "./document-layout-defaults.json": [
+      "document-layout.js:3"
+    ],
+    ".accepted-order.json": [
+      "job-offer-source.js:25",
+      "job-offer-source.js:86",
+      "order-confirmation.js:49",
+      "server.js:3338"
+    ],
+    ".history.jsonl": [
+      "server.js:2626"
+    ],
+    ".json": [
+      "bauprojekt-standalone.js:15",
+      "bauprojekt.js:22",
+      "collection-view-cache.js:14",
+      "customer-portal-access.js:69",
+      "customer-portal-access.js:70",
+      "customer-portal-access.js:71",
+      "customer-portal-access.js:76",
+      "customer-portal-access.js:379",
+      "customer-portal-access.js:380",
+      "customer-portal-access.js:423",
+      "customer-portal-access.js:430",
+      "customer-portal-access.js:433",
+      "customer-portal-access.js:470",
+      "customer-portal-access.js:471",
+      "customer-portal-access.js:473",
+      "customer-portal-access.js:542",
+      "customer-portal-export.js:26",
+      "customer-portal-export.js:86",
+      "customer-portal-invoices.js:14",
+      "customer-portal-points.js:81",
+      "customer-portal-points.js:82",
+      "customer-portal-points.js:113",
+      "customer-portal-points.js:116",
+      "employee-login.js:23",
+      "employee-sessions.js:15",
+      "job-source-cache.js:14",
+      "job-source-cache.js:66",
+      "krisdrive-logbook.js:399",
+      "kristine-inbox.js:84",
+      "kristine-inbox.js:375",
+      "kristine-inbox.js:502",
+      "kristine-invoice-intake.js:33",
+      "kristine-invoice-intake.js:115",
+      "kristine-invoice-intake.js:171",
+      "paint-catalog-sync.js:144",
+      "regie-assistant.js:1040",
+      "server.js:466",
+      "server.js:3607"
+    ],
+    ".jsonl": [
+      "job-renumber.js:86",
+      "paint-stock-ledger.js:43"
+    ],
+    ".meta.json": [
+      "day-close.js:185",
+      "day-close.js:239",
+      "job-merge-audit.js:17",
+      "job-offer-source.js:48",
+      "job-renumber.js:64",
+      "legacy-collection-repair.js:27",
+      "legacy-collection-repair.js:28",
+      "legacy-collection-repair.js:36",
+      "nfon-integration.js:79",
+      "paint-lab.js:258",
+      "sammelmappen.js:44",
+      "sammelmappen.js:118",
+      "sammelmappen.js:139",
+      "server.js:2420",
+      "server.js:2797"
+    ],
+    ".offer-draft.json": [
+      "customer-portal-access.js:72",
+      "job-offer-source.js:37",
+      "server.js:3337"
+    ],
+    ".order-calculation.json": [
+      "customer-portal-access.js:313",
+      "job-offer-source.js:50",
+      "job-offer-source.js:58",
+      "job-offer-source.js:86",
+      "job-renumber.js:148",
+      "job-source-cache.js:59",
+      "order-calculation-preload.js:27",
+      "order-calculation-v2-preload.js:25",
+      "server.js:3339"
+    ],
+    ".order-lines-v2.json": [
+      "order-calculation-v2-preload.js:28"
+    ],
+    ".order-schedule.json": [
+      "server.js:3341"
+    ],
+    ".prepayment-invoice-draft.json": [
+      "job-offer-source.js:87",
+      "outgoing-billing-bridge.js:123",
+      "server.js:3340"
+    ],
+    "/_kristine/access-local-status.json": [
+      "access-status-people-fix.js:19"
+    ],
+    "KRISTINE / _system/holidays.json": [
+      "access-admin-cloud.js:215"
+    ],
+    "_kristine/paint/job-materials.jsonl": [
+      "customer-portal-materials.js:25"
+    ],
+    "_kristine/tasks.json": [
+      "customer-portal-access.js:412",
+      "customer-portal-points.js:83"
+    ],
+    "_shares.json": [
+      "bauprojekt.js:17"
+    ],
+    "_system/job-number-aliases.json": [
+      "job-renumber.js:43",
+      "job-renumber.js:68",
+      "job-renumber.js:82",
+      "job-renumber.js:99"
+    ],
+    "_system/sammelmappen.json": [
+      "job-renumber.js:66"
+    ],
+    "absences.json": [
+      "daily-report.js:26",
+      "morning-status.js:885",
+      "server.js:2107",
+      "task-digest.js:245"
+    ],
+    "access-admin.json": [
+      "access-admin-cloud.js:11",
+      "access-events-cloud.js:10",
+      "access-learn-multi.js:10"
+    ],
+    "access-chip-learn.json": [
+      "access-admin-cloud.js:13",
+      "access-learn-multi.js:12"
+    ],
+    "access-events.json": [
+      "access-events-cloud.js:11"
+    ],
+    "access-local-status.json": [
+      "access-admin-cloud.js:12",
+      "access-bridge-cloud.js:12",
+      "access-learn-multi.js:11"
+    ],
+    "access-manual-read.json": [
+      "access-learn-multi.js:14"
+    ],
+    "activity-log.jsonl": [
+      "kristine-activity-audit.js:67"
+    ],
+    "address-queue.json": [
+      "krisdrive-logbook.js:384"
+    ],
+    "appointments.json": [
+      "kristine-outlook-calendar.js:21"
+    ],
+    "articles.json": [
+      "material-master.js:43",
+      "paint-color-stock-overlay.js:10",
+      "paint-commercial.js:18",
+      "paint-ean-reconcile.js:44",
+      "paint-goods-receipt.js:34",
+      "paint-goods-receipt.js:49",
+      "paint-inventory-counter.js:10",
+      "paint-inventory-excel.js:11",
+      "paint-inventory-recovery.js:12",
+      "paint-inventory.js:11",
+      "paint-lab.js:39",
+      "paint-legacy-soll-import.js:11",
+      "paint-lg-order-excel-core.js:23",
+      "paint-lg-sent-order.js:13",
+      "paint-live-bridge.js:12",
+      "paint-live-fix.js:29",
+      "paint-mix-history.js:14",
+      "paint-order-review.js:12",
+      "paint-order-summary-fix.js:21",
+      "paint-orderform-fix.js:39",
+      "paint-outflow.js:11",
+      "paint-return-stock.js:11",
+      "paint-runtime-safety.js:11",
+      "paint-stock-base-migration.js:17",
+      "paint-stock-ledger-api.js:11",
+      "paint-stock-ledger-api.js:75"
+    ],
+    "assignments.json": [
+      "daily-report.js:27",
+      "kristine-shared-calendar.js:193",
+      "kristine.js:16",
+      "morning-status.js:884",
+      "regie-assistant.js:29",
+      "server.js:495",
+      "server.js:2118",
+      "server.js:3378",
+      "server.js:3773"
+    ],
+    "bauprojekt-catalog.json": [
+      "bauprojekt.js:184"
+    ],
+    "bauprojekt-sample.json": [
+      "bauprojekt.js:188"
+    ],
+    "catalog.json": [
+      "bauprojekt-standalone.js:25"
+    ],
+    "company-vacations.json": [
+      "morning-status.js:894",
+      "server.js:4037",
+      "task-digest.js:247"
+    ],
+    "company.json": [
+      "server.js:4092"
+    ],
+    "completed.json": [
+      "job-renumber.js:55",
+      "legacy-collection-repair.js:25",
+      "sammelmappen.js:100"
+    ],
+    "contact-master.json": [
+      "contact-master.js:276"
+    ],
+    "daily-report-scheduler.json": [
+      "daily-report.js:32"
+    ],
+    "day-closes.json": [
+      "day-close.js:17",
+      "morning-status.js:888"
+    ],
+    "day-controls.json": [
+      "kristine.js:26"
+    ],
+    "day-corrections.json": [
+      "kristine.js:24"
+    ],
+    "day-releases.json": [
+      "kristine.js:25"
+    ],
+    "day-review-entries.json": [
+      "daily-report.js:25",
+      "job-merge-audit.js:18",
+      "kristine.js:21",
+      "legacy-collection-repair.js:41",
+      "photo-inbox.js:20",
+      "photo-inbox.js:43",
+      "photo-inbox.js:68",
+      "regie-assistant.js:33",
+      "server.js:1475",
+      "server.js:1476"
+    ],
+    "document-layout.json": [
+      "document-layout.js:20"
+    ],
+    "employee-contact-emails.json": [
+      "employee-contact-email.js:7"
+    ],
+    "employee-documents.json": [
+      "employee-document-persistence.js:16"
+    ],
+    "employee-work-rules.json": [
+      "kristine.js:31"
+    ],
+    "employees.json": [
+      "access-admin-cloud.js:16",
+      "access-admin-cloud.js:16",
+      "archive-search.js:15",
+      "daily-report.js:28",
+      "daily-report.js:29",
+      "employee-sessions.js:33",
+      "kgo-office-preload.js:18",
+      "krisdrive-logbook.js:461",
+      "paint-goods-receipt.js:18",
+      "paint-mix-history.js:19",
+      "photo-inbox.js:52",
+      "photo-inbox.js:75",
+      "regie-assistant.js:30",
+      "regie-assistant.js:31",
+      "server.js:4025",
+      "vehicle-tracking.js:22"
+    ],
+    "enable-banking-personal.json": [
+      "enable-banking-personal.js:37"
+    ],
+    "events.jsonl": [
+      "kristine.js:19",
+      "vehicle-tracking.js:26"
+    ],
+    "farrow-ball-aliases.json": [
+      "paint-lab.js:42"
+    ],
+    "holidays.json": [
+      "access-admin-cloud.js:14",
+      "morning-status.js:891",
+      "server.js:4034",
+      "task-digest.js:246"
+    ],
+    "ideas.json": [
+      "server.js:4095"
+    ],
+    "index.json": [
+      "server.js:3798"
+    ],
+    "innovatint-catalog-candidate-meta.json": [
+      "paint-catalog-sync.js:13"
+    ],
+    "innovatint-catalog-candidate.json": [
+      "paint-catalog-sync.js:12"
+    ],
+    "innovatint-catalog.json": [
+      "paint-catalog-sync.js:11",
+      "paint-ean-reconcile.js:44",
+      "paint-lab.js:43"
+    ],
+    "job-materials.jsonl": [
+      "paint-mix-history.js:20",
+      "paint-outflow.js:13",
+      "regie-assistant.js:35"
+    ],
+    "late-notices.json": [
+      "morning-status.js:889",
+      "server.js:2093"
+    ],
+    "latest.json": [
+      "kristine.js:23",
+      "vehicle-tracking-preload.js:37"
+    ],
+    "lg-ean-identity.json": [
+      "paint-inventory-recovery.js:15"
+    ],
+    "lg-goods-receipts.json": [
+      "paint-goods-receipt.js:6"
+    ],
+    "lg-incoming-sync.json": [
+      "paint-goods-receipt.js:28",
+      "paint-inventory.js:15"
+    ],
+    "lg-order-catalog.json": [
+      "paint-inventory-recovery.js:13",
+      "paint-orderform-fix.js:40"
+    ],
+    "lg-order-template.json": [
+      "paint-lg-order-excel-core.js:25",
+      "paint-lg-order-template-bootstrap.js:10"
+    ],
+    "lg-pricelist.json": [
+      "paint-commercial.js:22",
+      "paint-order-summary-fix.js:24"
+    ],
+    "lg-purchases.json": [
+      "paint-commercial.js:24",
+      "paint-inventory.js:14",
+      "paint-live-fix.js:30",
+      "paint-order-summary-fix.js:22"
+    ],
+    "lg-sent-orders.json": [
+      "paint-goods-receipt.js:51",
+      "paint-goods-receipt.js:72",
+      "paint-lg-sent-order.js:14"
+    ],
+    "live-mix-bridge.json": [
+      "paint-live-bridge.js:11"
+    ],
+    "log.jsonl": [
+      "pdf.js:27",
+      "server.js:728",
+      "server.js:2146",
+      "server.js:2789",
+      "server.js:2868"
+    ],
+    "material-bookings.jsonl": [
+      "paint-mix-history.js:305",
+      "paint-outflow.js:68"
+    ],
+    "material-imports.json": [
+      "material-master.js:41"
+    ],
+    "material-inbox.json": [
+      "material-master.js:40"
+    ],
+    "material-notify-state.json": [
+      "kristine.js:30"
+    ],
+    "material-requests.json": [
+      "kristine.js:29"
+    ],
+    "material-settings.json": [
+      "material-master.js:42"
+    ],
+    "materials.json": [
+      "material-master.js:38",
+      "paint-commercial.js:19",
+      "regie-assistant.js:36"
+    ],
+    "media-assignments.json": [
+      "job-merge-audit.js:20",
+      "legacy-collection-repair.js:42",
+      "photo-inbox.js:36",
+      "photo-inbox.js:68"
+    ],
+    "mix-bridge-pair.json": [
+      "paint-mix-history.js:29",
+      "paint-mix-history.js:37"
+    ],
+    "mix-history-sync.json": [
+      "paint-mix-history.js:17"
+    ],
+    "mix-history.json": [
+      "paint-mix-history.js:16"
+    ],
+    "movements.jsonl": [
+      "paint-commercial.js:21",
+      "paint-goods-receipt.js:61",
+      "paint-inventory-counter.js:11",
+      "paint-inventory-insights.js:9",
+      "paint-inventory-recovery.js:14",
+      "paint-inventory.js:12",
+      "paint-lab.js:40",
+      "paint-mix-history.js:15",
+      "paint-order-summary-fix.js:23",
+      "paint-outflow.js:12",
+      "paint-stock-ledger-api.js:75",
+      "paint-stock-ledger.js:45"
+    ],
+    "offer-number-counter.json": [
+      "server.js:3474"
+    ],
+    "offer-position-templates.json": [
+      "server.js:3475"
+    ],
+    "office-clock-reminders.json": [
+      "kgo-office-core.js:75",
+      "kgo-office-preload.js:20"
+    ],
+    "outlook-calendar.jsonl": [
+      "kristine-outlook-calendar.js:24"
+    ],
+    "outlook-token.enc.json": [
+      "kristine-outlook-calendar.js:25"
+    ],
+    "photo-inbox.json": [
+      "job-merge-audit.js:19",
+      "legacy-collection-repair.js:40",
+      "photo-inbox.js:17",
+      "photo-inbox.js:103"
+    ],
+    "plan.json": [
+      "job-renumber.js:55",
+      "legacy-collection-repair.js:101",
+      "sammelmappen.js:103"
+    ],
+    "price-history.jsonl": [
+      "paint-commercial.js:20",
+      "paint-goods-receipt.js:66",
+      "paint-inventory.js:13",
+      "paint-lab.js:41"
+    ],
+    "project-time-archive.json": [
+      "job-merge-audit.js:22",
+      "kristine.js:28",
+      "regie-assistant.js:28"
+    ],
+    "projekt.json": [
+      "customer-portal-export.js:20",
+      "customer-portal-export.js:72"
+    ],
+    "protocol-sessions.json": [
+      "server.js:244"
+    ],
+    "regie-confirmations.json": [
+      "regie-assistant.js:26"
+    ],
+    "regie-reports.json": [
+      "day-close.js:21",
+      "regie-assistant.js:25"
+    ],
+    "regie.json": [
+      "regie-assistant.js:517",
+      "regie-assistant.js:1037",
+      "server.js:4531",
+      "server.js:4601"
+    ],
+    "return-materials.json": [
+      "paint-return-stock.js:12"
+    ],
+    "return-print-queue.json": [
+      "paint-return-stock.js:14"
+    ],
+    "returns.json": [
+      "paint-return-stock.js:13"
+    ],
+    "rides.json": [
+      "krisdrive-logbook.js:461",
+      "kristine-outlook-calendar.js:23",
+      "vehicle-tracking-preload.js:189",
+      "vehicle-tracking.js:25"
+    ],
+    "sammelmappen.json": [
+      "sammelmappen.js:30"
+    ],
+    "sample.json": [
+      "bauprojekt-standalone.js:25"
+    ],
+    "schedule-models.json": [
+      "server.js:4031"
+    ],
+    "scheduler-state.json": [
+      "morning-status.js:890"
+    ],
+    "sdb-agent-config.json": [
+      "tools/sdb-agent-reader.js:4"
+    ],
+    "sdb-agent-state.json": [
+      "tools/sdb-agent-reader.js:4"
+    ],
+    "sdb-masterindex.json": [
+      "safety-sdb.js:120"
+    ],
+    "sessions.json": [
+      "krisdrive-live-preload.js:82",
+      "vehicle-tracking.js:24"
+    ],
+    "settings.json": [
+      "paint-lab.js:44"
+    ],
+    "shared-calendar-outbound.json": [
+      "kristine-shared-calendar.js:195"
+    ],
+    "shared-calendar-state.json": [
+      "kristine-shared-calendar.js:194"
+    ],
+    "shared-mailbox-state.json": [
+      "kristine-shared-mailbox.js:19"
+    ],
+    "states.json": [
+      "day-close.js:19",
+      "kristine.js:17",
+      "morning-status.js:887"
+    ],
+    "suppliers.json": [
+      "material-master.js:39"
+    ],
+    "task-digest-state.json": [
+      "task-digest.js:249"
+    ],
+    "tasks.json": [
+      "day-close.js:20",
+      "kristine-outlook-calendar.js:22",
+      "kristine-user-access.js:59",
+      "kristine.js:18",
+      "nfon-integration.js:93",
+      "paint-goods-receipt.js:7",
+      "paint-mix-history.js:18",
+      "photo-inbox.js:52",
+      "regie-assistant.js:34",
+      "server.js:471",
+      "server.js:474",
+      "server.js:475",
+      "server.js:486",
+      "server.js:494",
+      "task-digest.js:244"
+    ],
+    "time-events.json": [
+      "access-bridge-cloud.js:118",
+      "archive-search.js:11",
+      "daily-report.js:24",
+      "day-close.js:18",
+      "job-merge-audit.js:21",
+      "kgo-office-core.js:74",
+      "kgo-office-preload.js:19",
+      "kgo-office-whatsapp.js:123",
+      "kristine.js:20",
+      "morning-status.js:886",
+      "photo-inbox.js:20",
+      "photo-inbox.js:68",
+      "regie-assistant.js:27",
+      "server.js:1505",
+      "server.js:3774",
+      "server.js:4767",
+      "tower-planning.js:165"
+    ],
+    "tower-plans.json": [
+      "tower-planning.js:164"
+    ],
+    "tracker-config.json": [
+      "krisdrive-live-preload.js:81",
+      "krisdrive-logbook.js:460",
+      "krisdrive-logbook.js:664",
+      "vehicle-tracking.js:23"
+    ],
+    "user-access.json": [
+      "employee-sessions.js:37",
+      "kristine-user-access.js:58"
+    ],
+    "vehicles.json": [
+      "krisdrive-live-preload.js:80",
+      "krisdrive-logbook.js:460",
+      "krisdrive-logbook.js:664",
+      "server.js:4094",
+      "vehicle-tracking-preload.js:190",
+      "vehicle-tracking.js:21"
+    ],
+    "visit-workflows.json": [
+      "server.js:470"
+    ],
+    "wallpaper-order.json": [
+      "paint-order-summary-fix.js:25",
+      "paint-wallpaper-order.js:10"
+    ],
+    "wallpaper-pricelists.json": [
+      "paint-inventory.js:17"
+    ],
+    "whatsapp-sender.json": [
+      "access-bridge-cloud.js:53",
+      "kgo-office-preload.js:21",
+      "server.js:166"
+    ],
+    "worktime-models.json": [
+      "daily-report.js:30",
+      "kristine.js:27",
+      "morning-status.js:898",
+      "server.js:4028",
+      "task-digest.js:248",
+      "worktime-model-presets.js:13",
+      "worktime-model-presets.js:170",
+      "worktime-model-v2-migration.js:6"
+    ],
+    "za-old-ledger.json": [
+      "kristine.js:32"
+    ]
+  },
+  "filesystemCalls": [
+    {
+      "file": "access-admin-cloud.js",
+      "line": 29,
+      "operation": "readFile"
+    },
+    {
+      "file": "access-admin-cloud.js",
+      "line": 34,
+      "operation": "writeFile"
+    },
+    {
+      "file": "access-admin-cloud.js",
+      "line": 35,
+      "operation": "rename"
+    },
+    {
+      "file": "access-bridge-cloud.js",
+      "line": 16,
+      "operation": "readFile"
+    },
+    {
+      "file": "access-bridge-cloud.js",
+      "line": 17,
+      "operation": "writeFile"
+    },
+    {
+      "file": "access-bridge-cloud.js",
+      "line": 53,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "access-events-cloud.js",
+      "line": 21,
+      "operation": "readFile"
+    },
+    {
+      "file": "access-events-cloud.js",
+      "line": 26,
+      "operation": "writeFile"
+    },
+    {
+      "file": "access-events-cloud.js",
+      "line": 27,
+      "operation": "rename"
+    },
+    {
+      "file": "access-learn-multi.js",
+      "line": 23,
+      "operation": "readFile"
+    },
+    {
+      "file": "access-learn-multi.js",
+      "line": 28,
+      "operation": "writeFile"
+    },
+    {
+      "file": "access-learn-multi.js",
+      "line": 29,
+      "operation": "rename"
+    },
+    {
+      "file": "archive-search.js",
+      "line": 99,
+      "operation": "readFile"
+    },
+    {
+      "file": "archive-search.js",
+      "line": 110,
+      "operation": "readFile"
+    },
+    {
+      "file": "bauprojekt-standalone.js",
+      "line": 15,
+      "operation": "readFile"
+    },
+    {
+      "file": "bauprojekt-standalone.js",
+      "line": 26,
+      "operation": "readFile"
+    },
+    {
+      "file": "bauprojekt.js",
+      "line": 33,
+      "operation": "readFile"
+    },
+    {
+      "file": "bauprojekt.js",
+      "line": 57,
+      "operation": "writeFile"
+    },
+    {
+      "file": "bauprojekt.js",
+      "line": 58,
+      "operation": "rename"
+    },
+    {
+      "file": "bauprojekt.js",
+      "line": 65,
+      "operation": "readFile"
+    },
+    {
+      "file": "bauprojekt.js",
+      "line": 76,
+      "operation": "writeFile"
+    },
+    {
+      "file": "bauprojekt.js",
+      "line": 77,
+      "operation": "rename"
+    },
+    {
+      "file": "bauprojekt.js",
+      "line": 184,
+      "operation": "readFile"
+    },
+    {
+      "file": "bauprojekt.js",
+      "line": 188,
+      "operation": "readFile"
+    },
+    {
+      "file": "baustellen-hours-service.js",
+      "line": 19,
+      "operation": "readFile"
+    },
+    {
+      "file": "collection-view-cache.js",
+      "line": 16,
+      "operation": "readFile"
+    },
+    {
+      "file": "collection-view-cache.js",
+      "line": 46,
+      "operation": "writeFile"
+    },
+    {
+      "file": "contact-master.js",
+      "line": 282,
+      "operation": "readFile"
+    },
+    {
+      "file": "contact-master.js",
+      "line": 292,
+      "operation": "writeFile"
+    },
+    {
+      "file": "contact-master.js",
+      "line": 293,
+      "operation": "rename"
+    },
+    {
+      "file": "customer-activity-notifications.js",
+      "line": 64,
+      "operation": "writeFile"
+    },
+    {
+      "file": "customer-activity-notifications.js",
+      "line": 70,
+      "operation": "readFile"
+    },
+    {
+      "file": "customer-activity-notifications.js",
+      "line": 122,
+      "operation": "readFile"
+    },
+    {
+      "file": "customer-portal-access.js",
+      "line": 20,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "customer-portal-access.js",
+      "line": 21,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "customer-portal-access.js",
+      "line": 77,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "customer-portal-access.js",
+      "line": 80,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "customer-portal-access.js",
+      "line": 364,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "customer-portal-export.js",
+      "line": 9,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "customer-portal-export.js",
+      "line": 35,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "customer-portal-export.js",
+      "line": 77,
+      "operation": "rename"
+    },
+    {
+      "file": "customer-portal-export.js",
+      "line": 86,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "customer-portal-invoices.js",
+      "line": 14,
+      "operation": "readFile"
+    },
+    {
+      "file": "customer-portal-invoices.js",
+      "line": 58,
+      "operation": "readFile"
+    },
+    {
+      "file": "customer-portal-invoices.js",
+      "line": 79,
+      "operation": "writeFile"
+    },
+    {
+      "file": "customer-portal-materials.js",
+      "line": 25,
+      "operation": "readFile"
+    },
+    {
+      "file": "customer-portal-materials.js",
+      "line": 43,
+      "operation": "readFile"
+    },
+    {
+      "file": "customer-portal-points.js",
+      "line": 9,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "customer-portal-points.js",
+      "line": 10,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "daily-report.js",
+      "line": 36,
+      "operation": "readFile"
+    },
+    {
+      "file": "daily-report.js",
+      "line": 45,
+      "operation": "writeFile"
+    },
+    {
+      "file": "daily-report.js",
+      "line": 46,
+      "operation": "rename"
+    },
+    {
+      "file": "daily-report.js",
+      "line": 1616,
+      "operation": "writeFile"
+    },
+    {
+      "file": "daily-report.js",
+      "line": 1648,
+      "operation": "writeFile"
+    },
+    {
+      "file": "day-close.js",
+      "line": 25,
+      "operation": "readFile"
+    },
+    {
+      "file": "day-close.js",
+      "line": 33,
+      "operation": "writeFile"
+    },
+    {
+      "file": "day-close.js",
+      "line": 39,
+      "operation": "writeFile"
+    },
+    {
+      "file": "day-close.js",
+      "line": 40,
+      "operation": "rename"
+    },
+    {
+      "file": "day-close.js",
+      "line": 187,
+      "operation": "readFile"
+    },
+    {
+      "file": "document-layout.js",
+      "line": 21,
+      "operation": "readFile"
+    },
+    {
+      "file": "document-layout.js",
+      "line": 101,
+      "operation": "writeFile"
+    },
+    {
+      "file": "documentation-mail.js",
+      "line": 49,
+      "operation": "readFile"
+    },
+    {
+      "file": "employee-contact-email.js",
+      "line": 10,
+      "operation": "readFile"
+    },
+    {
+      "file": "employee-contact-email.js",
+      "line": 16,
+      "operation": "writeFile"
+    },
+    {
+      "file": "employee-document-persistence.js",
+      "line": 51,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "employee-document-persistence.js",
+      "line": 61,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "employee-document-persistence.js",
+      "line": 62,
+      "operation": "renameSync"
+    },
+    {
+      "file": "employee-login.js",
+      "line": 31,
+      "operation": "readFile"
+    },
+    {
+      "file": "employee-login.js",
+      "line": 35,
+      "operation": "writeFile"
+    },
+    {
+      "file": "employee-sessions.js",
+      "line": 22,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "employee-sessions.js",
+      "line": 53,
+      "operation": "writeFile"
+    },
+    {
+      "file": "enable-banking-personal.js",
+      "line": 44,
+      "operation": "readFile"
+    },
+    {
+      "file": "enable-banking-personal.js",
+      "line": 55,
+      "operation": "readFile"
+    },
+    {
+      "file": "enable-banking-personal.js",
+      "line": 62,
+      "operation": "writeFile"
+    },
+    {
+      "file": "job-merge-audit.js",
+      "line": 7,
+      "operation": "readFile"
+    },
+    {
+      "file": "job-offer-source.js",
+      "line": 9,
+      "operation": "readFile"
+    },
+    {
+      "file": "job-offer-source.js",
+      "line": 89,
+      "operation": "writeFile"
+    },
+    {
+      "file": "job-renumber.js",
+      "line": 11,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "job-renumber.js",
+      "line": 15,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "job-renumber.js",
+      "line": 73,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "job-renumber.js",
+      "line": 78,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "job-renumber.js",
+      "line": 83,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "job-renumber.js",
+      "line": 101,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "job-renumber.js",
+      "line": 111,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "job-renumber.js",
+      "line": 116,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "job-renumber.js",
+      "line": 129,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "job-renumber.js",
+      "line": 133,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "job-renumber.js",
+      "line": 137,
+      "operation": "renameSync"
+    },
+    {
+      "file": "job-renumber.js",
+      "line": 140,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "job-renumber.js",
+      "line": 146,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "job-source-cache.js",
+      "line": 14,
+      "operation": "readFile"
+    },
+    {
+      "file": "job-source-cache.js",
+      "line": 31,
+      "operation": "readFile"
+    },
+    {
+      "file": "job-source-cache.js",
+      "line": 45,
+      "operation": "writeFile"
+    },
+    {
+      "file": "job-source-cache.js",
+      "line": 66,
+      "operation": "readFile"
+    },
+    {
+      "file": "kgo-office-core.js",
+      "line": 82,
+      "operation": "readFile"
+    },
+    {
+      "file": "kgo-office-core.js",
+      "line": 89,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kgo-office-core.js",
+      "line": 90,
+      "operation": "rename"
+    },
+    {
+      "file": "kgo-office-preload.js",
+      "line": 26,
+      "operation": "readFile"
+    },
+    {
+      "file": "kgo-office-preload.js",
+      "line": 33,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kgo-office-preload.js",
+      "line": 34,
+      "operation": "rename"
+    },
+    {
+      "file": "kgo-office-whatsapp.js",
+      "line": 52,
+      "operation": "readFile"
+    },
+    {
+      "file": "kgo-office-whatsapp.js",
+      "line": 59,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kgo-office-whatsapp.js",
+      "line": 60,
+      "operation": "rename"
+    },
+    {
+      "file": "krisdrive-address-queue.js",
+      "line": 14,
+      "operation": "readFile"
+    },
+    {
+      "file": "krisdrive-address-queue.js",
+      "line": 25,
+      "operation": "writeFile"
+    },
+    {
+      "file": "krisdrive-address-queue.js",
+      "line": 26,
+      "operation": "rename"
+    },
+    {
+      "file": "krisdrive-live-preload.js",
+      "line": 40,
+      "operation": "readFile"
+    },
+    {
+      "file": "krisdrive-live-preload.js",
+      "line": 197,
+      "operation": "readFile"
+    },
+    {
+      "file": "krisdrive-logbook.js",
+      "line": 368,
+      "operation": "readFile"
+    },
+    {
+      "file": "krisdrive-logbook.js",
+      "line": 412,
+      "operation": "writeFile"
+    },
+    {
+      "file": "krisdrive-logbook.js",
+      "line": 413,
+      "operation": "rename"
+    },
+    {
+      "file": "kristine-activity-audit.js",
+      "line": 92,
+      "operation": "appendFile"
+    },
+    {
+      "file": "kristine-activity-audit.js",
+      "line": 100,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-inbox.js",
+      "line": 273,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-inbox.js",
+      "line": 279,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine-inbox.js",
+      "line": 289,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine-inbox.js",
+      "line": 318,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine-inbox.js",
+      "line": 329,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-inbox.js",
+      "line": 330,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine-inbox.js",
+      "line": 340,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-inbox.js",
+      "line": 378,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-inbox.js",
+      "line": 413,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-inbox.js",
+      "line": 504,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-invoice-intake.js",
+      "line": 34,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-invoice-intake.js",
+      "line": 57,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine-invoice-intake.js",
+      "line": 81,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine-invoice-intake.js",
+      "line": 93,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-invoice-intake.js",
+      "line": 118,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-invoice-intake.js",
+      "line": 132,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine-invoice-intake.js",
+      "line": 156,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-invoice-intake.js",
+      "line": 162,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine-invoice-intake.js",
+      "line": 174,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-outlook-calendar.js",
+      "line": 150,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-outlook-calendar.js",
+      "line": 157,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine-outlook-calendar.js",
+      "line": 158,
+      "operation": "rename"
+    },
+    {
+      "file": "kristine-outlook-calendar.js",
+      "line": 170,
+      "operation": "appendFile"
+    },
+    {
+      "file": "kristine-shared-calendar.js",
+      "line": 199,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-shared-calendar.js",
+      "line": 203,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine-shared-calendar.js",
+      "line": 204,
+      "operation": "rename"
+    },
+    {
+      "file": "kristine-shared-mailbox.js",
+      "line": 26,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-shared-mailbox.js",
+      "line": 33,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine-shared-mailbox.js",
+      "line": 34,
+      "operation": "rename"
+    },
+    {
+      "file": "kristine-user-access.js",
+      "line": 62,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-user-access.js",
+      "line": 68,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine-voicemail-preload.js",
+      "line": 145,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine-voicemail-preload.js",
+      "line": 167,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine-voicemail-preload.js",
+      "line": 215,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine.js",
+      "line": 40,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine.js",
+      "line": 54,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine.js",
+      "line": 246,
+      "operation": "readFile"
+    },
+    {
+      "file": "kristine.js",
+      "line": 253,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine.js",
+      "line": 254,
+      "operation": "writeFile"
+    },
+    {
+      "file": "kristine.js",
+      "line": 338,
+      "operation": "appendFile"
+    },
+    {
+      "file": "legacy-collection-repair.js",
+      "line": 12,
+      "operation": "readFile"
+    },
+    {
+      "file": "legacy-collection-repair.js",
+      "line": 19,
+      "operation": "writeFile"
+    },
+    {
+      "file": "legacy-collection-repair.js",
+      "line": 20,
+      "operation": "rename"
+    },
+    {
+      "file": "legacy-collection-repair.js",
+      "line": 98,
+      "operation": "readFile"
+    },
+    {
+      "file": "legacy-collection-repair.js",
+      "line": 99,
+      "operation": "writeFile"
+    },
+    {
+      "file": "material-master.js",
+      "line": 52,
+      "operation": "readFile"
+    },
+    {
+      "file": "material-master.js",
+      "line": 61,
+      "operation": "writeFile"
+    },
+    {
+      "file": "material-master.js",
+      "line": 62,
+      "operation": "rename"
+    },
+    {
+      "file": "material-master.js",
+      "line": 357,
+      "operation": "readFile"
+    },
+    {
+      "file": "morning-status.js",
+      "line": 129,
+      "operation": "readFile"
+    },
+    {
+      "file": "morning-status.js",
+      "line": 137,
+      "operation": "writeFile"
+    },
+    {
+      "file": "nfon-integration.js",
+      "line": 80,
+      "operation": "readFile"
+    },
+    {
+      "file": "nfon-integration.js",
+      "line": 94,
+      "operation": "readFile"
+    },
+    {
+      "file": "offer-html-pdf.js",
+      "line": 86,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "offer-html-pdf.js",
+      "line": 102,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "order-calculation-preload.js",
+      "line": 160,
+      "operation": "writeFile"
+    },
+    {
+      "file": "order-calculation-preload.js",
+      "line": 277,
+      "operation": "writeFile"
+    },
+    {
+      "file": "order-calculation-preload.js",
+      "line": 280,
+      "operation": "unlink"
+    },
+    {
+      "file": "order-calculation-v2-preload.js",
+      "line": 51,
+      "operation": "readFile"
+    },
+    {
+      "file": "order-calculation-v2-preload.js",
+      "line": 81,
+      "operation": "writeFile"
+    },
+    {
+      "file": "order-confirmation.js",
+      "line": 49,
+      "operation": "readFile"
+    },
+    {
+      "file": "order-confirmation.js",
+      "line": 105,
+      "operation": "writeFile"
+    },
+    {
+      "file": "outgoing-billing-bridge.js",
+      "line": 123,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-catalog-sync.js",
+      "line": 20,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-catalog-sync.js",
+      "line": 24,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-catalog-sync.js",
+      "line": 25,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-catalog-sync.js",
+      "line": 134,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-catalog-sync.js",
+      "line": 138,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-catalog-sync.js",
+      "line": 187,
+      "operation": "unlink"
+    },
+    {
+      "file": "paint-catalog-sync.js",
+      "line": 196,
+      "operation": "unlink"
+    },
+    {
+      "file": "paint-color-stock-overlay.js",
+      "line": 39,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-commercial.js",
+      "line": 57,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-commercial.js",
+      "line": 185,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-commercial.js",
+      "line": 190,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-commercial.js",
+      "line": 191,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-commercial.js",
+      "line": 195,
+      "operation": "appendFile"
+    },
+    {
+      "file": "paint-commercial.js",
+      "line": 199,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-commercial.js",
+      "line": 436,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-ean-reconcile.js",
+      "line": 46,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "paint-ean-reconcile.js",
+      "line": 53,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "paint-ean-reconcile.js",
+      "line": 54,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "paint-goods-receipt.js",
+      "line": 9,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-goods-receipt.js",
+      "line": 10,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-goods-receipt.js",
+      "line": 61,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-goods-receipt.js",
+      "line": 63,
+      "operation": "appendFile"
+    },
+    {
+      "file": "paint-goods-receipt.js",
+      "line": 67,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-goods-receipt.js",
+      "line": 70,
+      "operation": "appendFile"
+    },
+    {
+      "file": "paint-inventory-counter.js",
+      "line": 16,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-inventory-counter.js",
+      "line": 38,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-inventory-excel.js",
+      "line": 24,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-inventory-excel.js",
+      "line": 29,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-inventory-excel.js",
+      "line": 30,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-inventory-insights.js",
+      "line": 17,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-inventory-recovery.js",
+      "line": 45,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-inventory-recovery.js",
+      "line": 51,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-inventory-recovery.js",
+      "line": 52,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-inventory-recovery.js",
+      "line": 59,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-inventory.js",
+      "line": 40,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-inventory.js",
+      "line": 41,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-inventory.js",
+      "line": 42,
+      "operation": "appendFile"
+    },
+    {
+      "file": "paint-inventory.js",
+      "line": 100,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-lab-preload.js",
+      "line": 45,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-lab.js",
+      "line": 50,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-lab.js",
+      "line": 55,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-lab.js",
+      "line": 56,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-lab.js",
+      "line": 60,
+      "operation": "appendFile"
+    },
+    {
+      "file": "paint-lab.js",
+      "line": 258,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-legacy-soll-import.js",
+      "line": 51,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-legacy-soll-import.js",
+      "line": 56,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-legacy-soll-import.js",
+      "line": 57,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-lg-order-excel-core.js",
+      "line": 40,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-lg-order-excel-core.js",
+      "line": 45,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-lg-order-excel-core.js",
+      "line": 46,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-lg-order-excel-core.js",
+      "line": 254,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-lg-order-excel-core.js",
+      "line": 255,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-lg-order-excel-core.js",
+      "line": 271,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-lg-order-template-bootstrap.js",
+      "line": 25,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "paint-lg-order-template-bootstrap.js",
+      "line": 32,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "paint-lg-order-template-bootstrap.js",
+      "line": 59,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "paint-lg-order-template-bootstrap.js",
+      "line": 60,
+      "operation": "renameSync"
+    },
+    {
+      "file": "paint-lg-order-template-bootstrap.js",
+      "line": 61,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "paint-lg-sent-order.js",
+      "line": 34,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-lg-sent-order.js",
+      "line": 39,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-lg-sent-order.js",
+      "line": 40,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-live-bridge.js",
+      "line": 31,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-live-bridge.js",
+      "line": 36,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-live-bridge.js",
+      "line": 37,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-live-fix.js",
+      "line": 54,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "paint-live-fix.js",
+      "line": 62,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "paint-live-fix.js",
+      "line": 63,
+      "operation": "renameSync"
+    },
+    {
+      "file": "paint-live-fix.js",
+      "line": 122,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "paint-live-fix.js",
+      "line": 126,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "paint-mix-history.js",
+      "line": 43,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-mix-history.js",
+      "line": 47,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-mix-history.js",
+      "line": 48,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-mix-history.js",
+      "line": 52,
+      "operation": "appendFile"
+    },
+    {
+      "file": "paint-mix-history.js",
+      "line": 56,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-order-review.js",
+      "line": 25,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-order-review.js",
+      "line": 31,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-order-review.js",
+      "line": 32,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-order-summary-fix.js",
+      "line": 38,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-order-summary-fix.js",
+      "line": 42,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-orderform-fix.js",
+      "line": 95,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-orderform-fix.js",
+      "line": 99,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-orderform-fix.js",
+      "line": 100,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-outflow.js",
+      "line": 33,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-outflow.js",
+      "line": 37,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-outflow.js",
+      "line": 38,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-outflow.js",
+      "line": 42,
+      "operation": "appendFile"
+    },
+    {
+      "file": "paint-return-stock.js",
+      "line": 33,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-return-stock.js",
+      "line": 38,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-return-stock.js",
+      "line": 39,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-return-stock.js",
+      "line": 225,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-return-stock.js",
+      "line": 251,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-return-stock.js",
+      "line": 275,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-return-stock.js",
+      "line": 368,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-runtime-safety.js",
+      "line": 16,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-stock-base-migration.js",
+      "line": 99,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "paint-stock-base-migration.js",
+      "line": 132,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "paint-stock-base-migration.js",
+      "line": 133,
+      "operation": "renameSync"
+    },
+    {
+      "file": "paint-stock-base-migration.js",
+      "line": 140,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "paint-stock-ledger-api.js",
+      "line": 23,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-stock-ledger-api.js",
+      "line": 28,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-stock-ledger-api.js",
+      "line": 29,
+      "operation": "rename"
+    },
+    {
+      "file": "paint-stock-ledger.js",
+      "line": 48,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-wallpaper-order.js",
+      "line": 22,
+      "operation": "readFile"
+    },
+    {
+      "file": "paint-wallpaper-order.js",
+      "line": 27,
+      "operation": "writeFile"
+    },
+    {
+      "file": "paint-wallpaper-order.js",
+      "line": 28,
+      "operation": "rename"
+    },
+    {
+      "file": "pdf.js",
+      "line": 29,
+      "operation": "readFile"
+    },
+    {
+      "file": "photo-inbox.js",
+      "line": 4,
+      "operation": "readFile"
+    },
+    {
+      "file": "photo-inbox.js",
+      "line": 5,
+      "operation": "writeFile"
+    },
+    {
+      "file": "regie-assistant.js",
+      "line": 39,
+      "operation": "readFile"
+    },
+    {
+      "file": "regie-assistant.js",
+      "line": 44,
+      "operation": "writeFile"
+    },
+    {
+      "file": "regie-assistant.js",
+      "line": 45,
+      "operation": "rename"
+    },
+    {
+      "file": "regie-assistant.js",
+      "line": 49,
+      "operation": "readFile"
+    },
+    {
+      "file": "regie-assistant.js",
+      "line": 460,
+      "operation": "writeFile"
+    },
+    {
+      "file": "regie-assistant.js",
+      "line": 483,
+      "operation": "writeFile"
+    },
+    {
+      "file": "regie-assistant.js",
+      "line": 1013,
+      "operation": "writeFile"
+    },
+    {
+      "file": "safety-sdb.js",
+      "line": 121,
+      "operation": "readFile"
+    },
+    {
+      "file": "safety-sdb.js",
+      "line": 122,
+      "operation": "writeFile"
+    },
+    {
+      "file": "sammelmappen.js",
+      "line": 14,
+      "operation": "readFile"
+    },
+    {
+      "file": "sammelmappen.js",
+      "line": 24,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 171,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "server.js",
+      "line": 183,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 248,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 254,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 282,
+      "operation": "appendFile"
+    },
+    {
+      "file": "server.js",
+      "line": 434,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 440,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 459,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 461,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 471,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 472,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 474,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 475,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 486,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 494,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 495,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 646,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 682,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 720,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 886,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 1031,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 1095,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 1137,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 1166,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 1286,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 1350,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 1468,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 1501,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 1535,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2094,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2097,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2108,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2111,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2118,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2162,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2171,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2205,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2316,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2571,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2643,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2707,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2756,
+      "operation": "unlink"
+    },
+    {
+      "file": "server.js",
+      "line": 2781,
+      "operation": "rename"
+    },
+    {
+      "file": "server.js",
+      "line": 2783,
+      "operation": "unlink"
+    },
+    {
+      "file": "server.js",
+      "line": 2790,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2791,
+      "operation": "appendFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2792,
+      "operation": "unlink"
+    },
+    {
+      "file": "server.js",
+      "line": 2799,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2800,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2804,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2807,
+      "operation": "unlink"
+    },
+    {
+      "file": "server.js",
+      "line": 2821,
+      "operation": "rename"
+    },
+    {
+      "file": "server.js",
+      "line": 2823,
+      "operation": "unlink"
+    },
+    {
+      "file": "server.js",
+      "line": 2875,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 2903,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3349,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3358,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3359,
+      "operation": "rename"
+    },
+    {
+      "file": "server.js",
+      "line": 3380,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3382,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3476,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3477,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3479,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3483,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3499,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3501,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3508,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3510,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3516,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3517,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3528,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3535,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3536,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3561,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3575,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3585,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3586,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3597,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3599,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3605,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3607,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3612,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3617,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3622,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3709,
+      "operation": "rename"
+    },
+    {
+      "file": "server.js",
+      "line": 3775,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3776,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3801,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3804,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3829,
+      "operation": "unlink"
+    },
+    {
+      "file": "server.js",
+      "line": 3838,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 3846,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4096,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4097,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4134,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4135,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4137,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4218,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4222,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4231,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4328,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4340,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4585,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4604,
+      "operation": "readFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4625,
+      "operation": "writeFile"
+    },
+    {
+      "file": "server.js",
+      "line": 4769,
+      "operation": "readFile"
+    },
+    {
+      "file": "task-digest.js",
+      "line": 108,
+      "operation": "readFile"
+    },
+    {
+      "file": "task-digest.js",
+      "line": 114,
+      "operation": "writeFile"
+    },
+    {
+      "file": "tools/sdb-agent-reader.js",
+      "line": 14,
+      "operation": "readFile"
+    },
+    {
+      "file": "tools/sdb-agent-reader.js",
+      "line": 17,
+      "operation": "readFile"
+    },
+    {
+      "file": "tools/sdb-agent-reader.js",
+      "line": 19,
+      "operation": "writeFile"
+    },
+    {
+      "file": "tower-planning.js",
+      "line": 168,
+      "operation": "readFile"
+    },
+    {
+      "file": "tower-planning.js",
+      "line": 175,
+      "operation": "writeFile"
+    },
+    {
+      "file": "tower-planning.js",
+      "line": 176,
+      "operation": "rename"
+    },
+    {
+      "file": "vehicle-tracking-preload.js",
+      "line": 23,
+      "operation": "readFile"
+    },
+    {
+      "file": "vehicle-tracking.js",
+      "line": 39,
+      "operation": "readFile"
+    },
+    {
+      "file": "vehicle-tracking.js",
+      "line": 48,
+      "operation": "writeFile"
+    },
+    {
+      "file": "vehicle-tracking.js",
+      "line": 49,
+      "operation": "rename"
+    },
+    {
+      "file": "vehicle-tracking.js",
+      "line": 54,
+      "operation": "appendFile"
+    },
+    {
+      "file": "vehicle-tracking.js",
+      "line": 284,
+      "operation": "appendFile"
+    },
+    {
+      "file": "worktime-model-presets.js",
+      "line": 145,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "worktime-model-presets.js",
+      "line": 147,
+      "operation": "writeFileSync"
+    },
+    {
+      "file": "worktime-model-presets.js",
+      "line": 174,
+      "operation": "readFile"
+    },
+    {
+      "file": "worktime-model-presets.js",
+      "line": 180,
+      "operation": "readFile"
+    },
+    {
+      "file": "worktime-model-presets.js",
+      "line": 186,
+      "operation": "writeFile"
+    },
+    {
+      "file": "worktime-model-v2-migration.js",
+      "line": 21,
+      "operation": "readFileSync"
+    },
+    {
+      "file": "worktime-model-v2-migration.js",
+      "line": 51,
+      "operation": "writeFileSync"
+    }
+  ]
+}
