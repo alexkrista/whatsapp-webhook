@@ -27,7 +27,7 @@ const sample={
 };
 const fn=html.slice(begin,end);
 const result=vm.runInNewContext(
- "let foreignTransferText='';\n"+fn+
+ "let foreignTransferText=''; let foreignSelected=null; function resetForeignXml(){} function loadForeignSources(){}\n"+fn+
  "\nshowForeignPayment(item);\n({text:foreignTransferText,shown:dp('foreignPayData').textContent});",
  {dp,foreignDialog,money,item:sample},
 );

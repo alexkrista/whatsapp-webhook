@@ -328,7 +328,7 @@ class Payments:
 def install(ns,client,write_allowed,csrf):
     app=ns['app'];payments=Payments(client)
     client.brain_payments=payments
-    ns['brain_bank_payments']={'payments':payments,'client':client,'write_allowed':write_allowed}
+    ns['brain_bank_payments']={'payments':payments,'client':client,'write_allowed':write_allowed,'csrf':csrf}
     import brain_konfipay_archive
     brain_konfipay_archive.install(ns,client,write_allowed)
     import brain_bank_assignment

@@ -170,7 +170,7 @@ def install(ns):
     page=str(ns.get("MOBILE_PAGE") or ""); app=ns.get("app")
     if not page or app is None:return
     allowed=ns.get("MOBILE_ALLOWED_PATHS")
-    paths=("/incoming/open-items","/incoming/open-items/override","/incoming/payment-meta","/incoming/creditor-details","/incoming/payment-open-items","/incoming/payment-batch/prepare","/incoming/payment-batch/xml","/incoming/payment-foreign/preview","/incoming/payment-batches","/incoming/payment-batches/xml","/incoming/payment-approvals/sync","/incoming/payments","/incoming/revolut/items","/incoming/revolut")
+    paths=("/incoming/open-items","/incoming/open-items/override","/incoming/payment-meta","/incoming/creditor-details","/incoming/payment-open-items","/incoming/payment-batch/prepare","/incoming/payment-batch/xml","/incoming/payment-foreign/preview","/incoming/payment-foreign/konfipay-context","/incoming/payment-foreign/konfipay-preview","/incoming/payment-foreign/konfipay-stage","/incoming/payment-batches","/incoming/payment-batches/xml","/incoming/payment-approvals/sync","/incoming/payments","/incoming/revolut/items","/incoming/revolut")
     if isinstance(allowed,set):
         for p in paths:allowed.add(p)
     store=FinanceStore(ns)
@@ -305,6 +305,29 @@ def install(ns):
             y=dict(x);y["availablePaymentAmount"]=round(available,2);y["paymentAmount"]=round(pay,2);y["partialPayment"]=bool(pay<round(available,2)-0.004);y["remittanceText"]=remittance_for(y);out.append(y);total+=pay
         return out,round(total,2)
 
+    # CHF-Entwuerfe sind kurzlebig und werden erst nach einer neuen,
+    # expliziten Bestaetigung an konfipay (submit=false) gegeben.
+    import threading, time, secrets, hashlib, sqlite3
+    foreign_drafts={}
+    foreign_lock=threading.RLock()
+    foreign_journal=os.path.join(os.environ.get("DATA_DIR") or "/var/data","_kristine","foreign-konfipay-staged.sqlite3")
+    def reserve_foreign_payment(fingerprint):
+        os.makedirs(os.path.dirname(foreign_journal),exist_ok=True)
+        con=sqlite3.connect(foreign_journal,timeout=15)
+        try:
+            con.execute("CREATE TABLE IF NOT EXISTS staged (fingerprint TEXT PRIMARY KEY, at TEXT NOT NULL, state TEXT NOT NULL, provider_rid TEXT, error TEXT)")
+            con.execute("INSERT INTO staged(fingerprint,at,state) VALUES(?,?,?)",
+                        (fingerprint,datetime.now().isoformat(timespec="seconds"),"attempting"))
+            con.commit()
+        finally:con.close()
+    def update_foreign_payment(fingerprint,state,rid=None,error=None):
+        con=sqlite3.connect(foreign_journal,timeout=15)
+        try:
+            con.execute("UPDATE staged SET state=?,provider_rid=?,error=? WHERE fingerprint=?",
+                        (state,rid,str(error or "")[:300],fingerprint))
+            con.commit()
+        finally:con.close()
+
     if "brain_incoming_open_items" not in app.view_functions:
         from flask import request,jsonify,Response
         import brain_finance_direct_pay
@@ -416,6 +439,121 @@ def install(ns):
                 return jsonify(**_foreign_payment_preview(out))
             except (ValueError,TypeError) as e:return jsonify(ok=False,error=str(e)),400
             except Exception as e:return jsonify(ok=False,error=str(e)),500
+
+        @app.get("/incoming/payment-foreign/konfipay-context")
+        def brain_foreign_konfipay_context():
+            try:
+                bank=ns.get("brain_bank_payments") or {}
+                client=bank.get("client")
+                if client is None or not client.store.exists():
+                    return jsonify(ok=True,configured=False,enabled=False,accounts=[],
+                                   message="konfipay noch nicht verbunden.")
+                accounts=[{"id":a["id"],"name":a.get("name") or "Bankkonto",
+                           "ibanTail":str(a.get("iban") or "")[-4:],
+                           "currency":"EUR"} for a in client.accounts(client.auth_token())
+                          if a.get("iban") and str(a.get("currency") or "").upper()=="EUR"]
+                return jsonify(ok=True,configured=True,enabled=bool(accounts),
+                               accounts=accounts,mode="draft_only",
+                               message="Übertragung ausschließlich als konfipay-Entwurf; keine Bankeinreichung.")
+            except Exception as e:return jsonify(ok=False,error=str(e)),500
+
+        @app.post("/incoming/payment-foreign/konfipay-preview")
+        def brain_foreign_konfipay_preview():
+            try:
+                from brain_chf_iso import create_chf_crossborder_xml
+                b=request.get_json(silent=True) or {}
+                invoice=b.get("item") or {}
+                out,_=requested_live_items([invoice])
+                prepared=_foreign_payment_preview(out)
+                row=prepared["item"]
+                if row["currency"]!="CHF":raise ValueError("Nur CHF-Zahlungen über diesen Weg.")
+                bank=ns.get("brain_bank_payments") or {}
+                client=bank.get("client")
+                if client is None or not client.store.exists():
+                    raise ValueError("konfipay-Verbindung nicht eingerichtet.")
+                accounts=client.accounts(client.auth_token())
+                source=next((a for a in accounts if a.get("id")==b.get("sourceAccountId")
+                            and str(a.get("currency") or "").upper()=="EUR" and a.get("iban")),None)
+                if not source:raise ValueError("Bitte ein aktives EUR-Ausgangskonto in konfipay auswählen.")
+                result=create_chf_crossborder_xml(
+                    debtor_name=os.environ.get("KRISTINE_SEPA_DEBTOR_NAME") or DEFAULT_SETTINGS["company_name"],
+                    debtor_iban=source["iban"],debtor_bic=b.get("sourceBic"),
+                    recipient=row["recipient"],iban=row["iban"],bic=row["bic"],
+                    amount=row["amount"],purpose=row["purpose"],reference=b.get("qrReference") or "")
+                # Aufruf dieser Vorschau erzeugt KEINEN Auftrag bei konfipay.
+                token=secrets.token_urlsafe(32)
+                fingerprint=hashlib.sha256("|".join([
+                    str(row["source"]),str(row["id"]),result["amount"],row["iban"],
+                    row["bic"],row["recipient"],row["purpose"],str(result["reference"]),source["id"]
+                ]).encode("utf-8")).hexdigest()
+                with foreign_lock:
+                    now=time.time()
+                    foreign_drafts.clear() if len(foreign_drafts)>200 else None
+                    foreign_drafts[token]={"expires":now+600,"xml":result["xml"],"invoice":invoice,
+                       "amount":row["amount"],"iban":row["iban"],"bic":row["bic"],
+                       "recipient":row["recipient"],"sourceAccountId":source["id"],
+                       "sourceIban":source["iban"],"fingerprint":fingerprint}
+                return jsonify(ok=True,mode="staging_available",bankSubmission=False,draft=token,
+                               filename=result["filename"],xml=result["xml"],
+                               details={"recipient":row["recipient"],"iban":row["iban"],
+                                        "bic":row["bic"],"amount":result["amount"],
+                                        "currency":"CHF","sourceAccount":source.get("name"),
+                                        "sourceIbanTail":str(source["iban"])[-4:],
+                                        "purpose":row["purpose"],"reference":result["reference"]},
+                               message="ISO-20022-Auslandsüberweisung erstellt. Noch nicht bei konfipay eingereicht.")
+            except (ValueError,TypeError) as e:return jsonify(ok=False,error=str(e)),400
+            except Exception as e:return jsonify(ok=False,error="Auslandsentwurf konnte nicht geprüft werden."),500
+
+        @app.post("/incoming/payment-foreign/konfipay-stage")
+        def brain_foreign_konfipay_stage():
+            # No bank submit endpoint is called. The provider stores an unsubmitted draft.
+            try:
+                body=request.get_json(silent=True) or {}
+                if body.get("confirmed") is not True:
+                    raise ValueError("Ausdrückliche Freigabe für den Konfipay-Entwurf fehlt.")
+                bank=ns.get("brain_bank_payments") or {}
+                client=bank.get("client")
+                csrf=bank.get("csrf")
+                if not client or not csrf or request.headers.get("X-Brain-Konfipay")!=csrf:
+                    raise ValueError("Sicherheitsfreigabe fehlt. Seite neu laden.")
+                if not bank.get("write_allowed") or not bank["write_allowed"]():
+                    raise ValueError("Konfipay ist aktuell nicht für Übergaben freigegeben.")
+                token=str(body.get("draft") or "")
+                with foreign_lock:
+                    entry=foreign_drafts.pop(token,None)
+                if not entry or entry["expires"]<time.time():
+                    raise ValueError("Vorschau abgelaufen oder schon verwendet. Bitte erneut prüfen.")
+                out,_=requested_live_items([entry["invoice"]])
+                current=_foreign_payment_preview(out)["item"]
+                if (current["currency"]!="CHF" or current["amount"]!=entry["amount"]
+                    or current["iban"]!=entry["iban"] or current["bic"]!=entry["bic"]
+                    or current["recipient"]!=entry["recipient"]):
+                    raise ValueError("Zahlungsdaten haben sich geändert. Bitte neu prüfen.")
+                accounts=client.accounts(client.auth_token())
+                source=next((a for a in accounts if a.get("id")==entry["sourceAccountId"]
+                             and a.get("iban")==entry["sourceIban"] and str(a.get("currency") or "").upper()=="EUR"),None)
+                if source is None:raise ValueError("Ausgangskonto nicht mehr vorhanden.")
+                fingerprint=entry["fingerprint"]
+                try:reserve_foreign_payment(fingerprint)
+                except sqlite3.IntegrityError:
+                    raise ValueError("Dieser Entwurf wurde schon an Konfipay übergeben oder versucht. Im Portal prüfen, nicht erneut senden.") from None
+                try:
+                    result=client.authenticated("POST","/payment-files?submit=false&scope=CrossBorder",
+                                                body=entry["xml"].encode("utf-8"))
+                    info=(result or {}).get("paymentInfo") or {}
+                    rid=str(info.get("rId") or "")
+                    status=str((info.get("status") or {}).get("statusValue") or "")
+                    if not rid or status=="KON_REJECTED":
+                        update_foreign_payment(fingerprint,"rejected",rid,status or "Konfipay hat den Entwurf abgelehnt.")
+                        return jsonify(ok=False,error="Konfipay hat den Entwurf nicht angenommen. Im Portal prüfen."),409
+                    update_foreign_payment(fingerprint,"staged",rid)
+                    return jsonify(ok=True,providerRid=rid,status=status,bankSubmitted=False,
+                                   message="Nur bei konfipay als Entwurf gespeichert. Nicht an die Bank eingereicht.")
+                except Exception:
+                    update_foreign_payment(fingerprint,"unknown",error="Konfipay-Ergebnis unklar")
+                    return jsonify(ok=False,error="Ergebnis unklar. Konfipay-Portal prüfen, keinesfalls erneut senden."),502
+            except (ValueError,TypeError) as e:return jsonify(ok=False,error=str(e)),400
+            except Exception:return jsonify(ok=False,error="Konfipay-Entwurf konnte nicht sicher vorbereitet werden."),500
 
         @app.post("/incoming/payment-batch/prepare")
         def brain_incoming_payment_batch_prepare():

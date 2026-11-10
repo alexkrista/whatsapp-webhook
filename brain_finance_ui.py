@@ -38,6 +38,15 @@ def payments_page():
 <dialog id="foreignPayDialog" style="width:min(730px,92vw);max-height:85vh;overflow:auto;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:16px;padding:24px">
   <h2>Schweizer / Auslandszahlung</h2>
   <p class="note">Dies sind geprüfte Zahlungsdaten, keine ausgelöste Zahlung. CHF nicht als EUR-SEPA übergeben oder automatisch umrechnen.</p>
+  <section class="card" style="margin:10px 0">
+    <h3>CHF-Auslandsdatei für konfipay (ISO 20022)</h3>
+    <p class="note">Zuerst Zahlungsdaten prüfen. Eine eigene Freigabe speichert die Datei nur als Entwurf in konfipay (submit=false) – keine Bankeinreichung.</p>
+    <label>Ausgangskonto<select id="foreignSourceAccount" style="width:100%"><option value="">Konten werden geladen …</option></select></label>
+    <label>BIC/SWIFT des Ausgangskontos<input id="foreignSourceBic" autocomplete="off" maxlength="11" placeholder="BIC der eigenen Bank" style="width:100%"></label>
+    <label>Schweizer QR-Referenz (nur falls QR-IBAN)<input id="foreignQrReference" autocomplete="off" maxlength="27" placeholder="27 Ziffern laut QR-Rechnung" style="width:100%"></label>
+    <div class="section-title"><button id="foreignMakeXml" type="button">ISO-20022-Datei prüfen</button><button id="foreignDownloadXml" type="button" disabled>CHF-Datei herunterladen</button><button id="foreignStageKonfipay" type="button" disabled>Als Entwurf in konfipay speichern</button></div>
+    <p id="foreignXmlMessage" class="note" role="status"></p>
+  </section>
   <pre id="foreignPayData" style="white-space:pre-wrap;overflow-wrap:anywhere;padding:16px;border:1px solid var(--line);border-radius:12px;background:#101a20;font:14px/1.65 system-ui"></pre>
   <p id="foreignPayMessage" class="note" role="status">IBAN, Bankangaben, Referenz und Originalbeleg im Bankportal prüfen. Erst nach tatsächlicher Bankausführung gilt eine Zahlung als angewiesen.</p>
   <div class="section-title"><button id="foreignPayClose" type="button">Schließen</button><button id="foreignPayCopy" type="button">Zahlungsdaten kopieren</button></div>
@@ -81,6 +90,74 @@ def payments_page():
  const dp=id=>document.getElementById(id),dialog=dp('directPayDialog');let directToken=null,directCsrf='',directBusy=false,directSent=false;
  const foreignDialog=dp('foreignPayDialog');
  let foreignTransferText='';
+ let foreignSelected=null,foreignXml=null,foreignFilename=null,foreignDraftToken=null;
+ const sourceSelect=dp('foreignSourceAccount'),makeXml=dp('foreignMakeXml'),downloadXml=dp('foreignDownloadXml'),stageXml=dp('foreignStageKonfipay'),xmlMessage=dp('foreignXmlMessage');
+ async function loadForeignSources(){
+   sourceSelect.replaceChildren(new Option('Konten werden geprüft …',''));
+   try {
+     const response=await fetch('/incoming/payment-foreign/konfipay-context',{cache:'no-store'});
+     const data=await response.json();
+     if(!response.ok||!data.ok)throw Error(data.error||'Konfipay-Konten nicht erreichbar');
+     sourceSelect.replaceChildren(new Option('Ausgangskonto auswählen',''));
+     for(const account of data.accounts||[])
+       sourceSelect.appendChild(new Option(account.name+' · EUR · IBAN …'+account.ibanTail,account.id));
+     if((data.accounts||[]).length===1)sourceSelect.value=data.accounts[0].id;
+     xmlMessage.textContent=data.message||'';
+   }catch(error) {
+     sourceSelect.replaceChildren(new Option('Konfipay nicht erreichbar',''));
+     xmlMessage.textContent=error.message||String(error);
+   }
+ }
+ function resetForeignXml(){foreignXml=null;foreignFilename=null;foreignDraftToken=null;downloadXml.disabled=true;stageXml.disabled=true;}
+ [sourceSelect,dp('foreignSourceBic'),dp('foreignQrReference')].forEach(x=>x.addEventListener('input',resetForeignXml));
+ makeXml.onclick=async()=>{
+   resetForeignXml();
+   if(!foreignSelected||!sourceSelect.value){xmlMessage.textContent='Bitte Rechnung und Ausgangskonto auswählen.';return;}
+   makeXml.disabled=true;
+   try{
+     const response=await fetch('/incoming/payment-foreign/konfipay-preview',{
+       method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',
+       body:JSON.stringify({item:{source:foreignSelected.source,id:foreignSelected.id,paymentAmount:foreignSelected.amount},
+         sourceAccountId:sourceSelect.value,sourceBic:dp('foreignSourceBic').value,
+         qrReference:dp('foreignQrReference').value})
+     });
+     const data=await response.json();
+     if(!response.ok||!data.ok)throw Error(data.error||'CHF-Datei konnte nicht erstellt werden');
+     foreignXml=data.xml;foreignFilename=data.filename;foreignDraftToken=data.draft;
+     downloadXml.disabled=false;stageXml.disabled=!foreignDraftToken;
+     xmlMessage.textContent='Geprüft: '+data.details.amount+' CHF an '+data.details.recipient+'. Nur Datei, keine Bankübertragung.';
+   }catch(error){xmlMessage.textContent=error.message||String(error);}
+   finally{makeXml.disabled=false;}
+ };
+ stageXml.onclick=async()=>{
+   if(!foreignDraftToken)return;
+   if(!confirm('Die geprüfte CHF-Datei ausschließlich als Entwurf bei konfipay speichern?\n\nKEINE Übertragung an die Bank. Die Freigabe im konfipay-Portal ist anschließend getrennt erforderlich.'))return;
+   stageXml.disabled=true;
+   const draft=foreignDraftToken;foreignDraftToken=null;
+   try {
+     const c=await fetch('/konfipay/api/context',{cache:'no-store'});
+     const context=await c.json();
+     if(!c.ok||!context.ok||!context.csrf)throw Error('Konfipay-Sicherheitsfreigabe nicht verfügbar.');
+     const response=await fetch('/incoming/payment-foreign/konfipay-stage',{
+       method:'POST',headers:{'Content-Type':'application/json','X-Brain-Konfipay':context.csrf},
+       body:JSON.stringify({draft,confirmed:true}),cache:'no-store'
+     });
+     const data=await response.json();
+     if(!response.ok||!data.ok)throw Error(data.error||'Entwurf konnte nicht sicher gespeichert werden.');
+     xmlMessage.textContent='Konfipay-Entwurf gespeichert. Referenz '+data.providerRid+'. KEINE Bankeinreichung. Bitte im konfipay-Portal prüfen und getrennt freigeben.';
+     downloadXml.disabled=true;
+   }catch(error){
+     xmlMessage.textContent='Keine bestätigte Übergabe: '+(error.message||String(error))+' Bitte Konfipay-Portal prüfen, nicht erneut senden.';
+   }
+ };
+ downloadXml.onclick=()=>{
+   if(!foreignXml)return;
+   const blob=new Blob([foreignXml],{type:'application/xml;charset=utf-8'});
+   const url=URL.createObjectURL(blob),a=document.createElement('a');
+   a.href=url;a.download=foreignFilename||'CHF-Auslandszahlung.xml';document.body.appendChild(a);a.click();a.remove();
+   setTimeout(()=>URL.revokeObjectURL(url),2000);
+ };
+
  dp('foreignPayClose').onclick=()=>foreignDialog.close();
  dp('foreignPayCopy').onclick=async()=>{
   const content=foreignTransferText;
@@ -95,6 +172,10 @@ def payments_page():
   }
  };
  function showForeignPayment(item){
+   foreignSelected=item;resetForeignXml();loadForeignSources();
+   dp('foreignSourceBic').value='';
+   dp('foreignQrReference').value='';
+
    foreignTransferText=[
       'Art: Schweizer / Auslandsüberweisung (KEIN EUR-SEPA)',
       'Empfänger: '+item.recipient,
