@@ -99,13 +99,14 @@
 
         <section id="kgTerraMix" class="kg-terra-mix-card" aria-label="Terra Icon Mischrechner">
           <button type="button" id="kgTerraToggle" class="kg-terra-mix-toggle" aria-expanded="false">
-            <span class="kg-terra-mix-mark">A+B+C</span>
-            <span><strong>Terra Icon · Mischrechner</strong><small>Fein und Mittel · m² oder Komponentenmengen berechnen</small></span>
+            <span class="kg-terra-mix-mark" id="kgTerraMark">A+B+C</span>
+            <span><strong>Terra · Mischrechner</strong><small>Icon Fein, Icon Mittel und POWER · Fläche oder Komponentenmengen berechnen</small></span>
             <span aria-hidden="true">▾</span>
           </button>
           <div id="kgTerraContents" class="kg-terra-mix-contents" hidden>
             <div class="kg-terra-mix-fields">
-              <label>Produkt<select id="kgTerraType"><option value="fein">Terra Icon Fein</option><option value="mittel">Terra Icon Mittel</option></select></label>
+              <label>Produkt<select id="kgTerraType"><option value="fein">Terra Icon Fein</option><option value="mittel">Terra Icon Mittel</option><option value="power">Terra POWER</option></select></label>
+              <label id="kgTerraLayersField" hidden>Lagen<select id="kgTerraLayers"><option value="1">1 Lage</option><option value="2">2 Lagen</option><option value="3">3 Lagen</option></select></label>
               <label>Ich gebe ein<select id="kgTerraBasis"><option value="m2">Fläche (m²)</option><option value="ab">Vorgemischt A+B (kg)</option><option value="total">Gesamtmenge A+B+C (kg)</option><option value="a">Komponente A – flüssig (kg)</option><option value="b">Komponente B – Pulver (kg)</option><option value="c">Komponente C – Härter (kg)</option></select></label>
               <label>Menge<input id="kgTerraInput" type="text" inputmode="decimal" autocomplete="off" value="27,02" aria-label="Eingegebene Menge"></label>
             </div>
@@ -113,8 +114,8 @@
             <div id="kgTerraOutput" class="kg-terra-mix-results">
               <div><small>A · flüssig</small><strong data-terra-result="a"></strong></div>
               <div><small>B · Pulver</small><strong data-terra-result="b"></strong></div>
-              <div><small>C · Härter</small><strong data-terra-result="c"></strong></div>
-              <div><small>Gesamt A+B+C</small><strong data-terra-result="total"></strong></div>
+              <div id="kgTerraCResult"><small>C · Härter</small><strong data-terra-result="c"></strong></div>
+              <div><small id="kgTerraTotalLabel">Gesamt A+B+C</small><strong data-terra-result="total"></strong></div>
               <div><small>Reichweite</small><strong data-terra-result="m2"></strong></div>
             </div>
             <p id="kgTerraNote" class="kg-terra-mix-reference" aria-live="polite"></p>
@@ -295,7 +296,7 @@
   <div id="kgToast" class="kg-toast" role="status" aria-live="polite"></div>
 
   <script src="/public/kristine-go.js?v=11"></script>
-  <script src="/public/kgo-terra-icon.js?v=2"></script>
+  <script src="/public/kgo-terra-icon.js?v=3"></script>
   <script src="/public/ui/krista-photo-followup.js?v=20260909-2"></script>
   <script src="/public/ui/kgo-brain-access.js?v=20261023-regie-required-1"></script>
 </body>
