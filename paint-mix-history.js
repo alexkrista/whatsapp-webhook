@@ -13,6 +13,7 @@ function registerPaintMixHistory(app, options = {}) {
   const kristineRoot = path.join(dataDir, "_kristine");
   const articlesFile = path.join(root, "articles.json");
   const movementsFile = path.join(root, "movements.jsonl");
+  const correctionFile = path.join(root, "mix-resolution-corrections.jsonl");
   const historyFile = path.join(root, "mix-history.json");
   const syncStateFile = path.join(root, "mix-history-sync.json");
   const tasksFile = path.join(kristineRoot, "tasks.json");
@@ -383,15 +384,67 @@ function registerPaintMixHistory(app, options = {}) {
     return { statusCode: 200, row, article, movement };
   }
 
-  function aggregateStats(movements, articles, year) {
+  // Zuordnungskorrektur ohne zweiten Lagerabgang. Originalbewegung bleibt
+  // unveraendert, jede Korrektur wird separat und unveraenderlich protokolliert.
+  async function correctMix(id, body, actor) {
+    const history = await readJson(historyFile, []);
+    if (!Array.isArray(history)) throw Error("Misch-History ist beschädigt");
+    const row=history.find(item=>String(item?.id||"")===String(id));
+    if(!row)return {statusCode:404,error:"Mischung nicht gefunden"};
+    if(row.status!=="resolved" || row.requiresReview || !["sale","stock","waste","project"].includes(row.resolution))
+      return {statusCode:409,error:"Diese Mischung ist nicht als normaler Lagerabgang korrigierbar"};
+    const allowed={sale:"sale",project:"project",stock:"stock",waste:"waste"};
+    const resolution=allowed[norm(body?.resolution)]||"";
+    if(!resolution)return {statusCode:400,error:"Neue Zuordnung auswählen"};
+    const jobId=resolution==="project"?clean(body?.jobId,80):"";
+    const jobName=resolution==="project"?clean(body?.jobName,180):"";
+    const component=resolution==="project"?clean(body?.component,180):"";
+    if(resolution==="project"&&(!/^[A-Za-z0-9_-]{1,80}$/.test(jobId)||!jobName))
+      return {statusCode:400,error:"Bitte eine gültige Baustelle auswählen"};
+    if(row.resolution===resolution && (resolution!=="project"||row.jobId===jobId))
+      return {statusCode:200,row,unchanged:true};
+    // Bereits eingetragenes Baustellenwissen kann nicht ohne Gegenbuchung geloescht werden.
+    if(row.resolution==="project")
+      return {statusCode:409,error:"Baustellenbuchungen benötigen eine separate Korrektur des Projektwissens. Keine Änderung vorgenommen."};
+    const movements=await readJsonl(movementsFile);
+    const recorded=movements.find(x=>x.historyId===row.id && x.source==="innovatint-history" && x.direction==="out");
+    if(!recorded)return {statusCode:409,error:"Original-Lagerabgang nicht gefunden; keine sichere Korrektur möglich"};
+    if(row.articleId && String(row.articleId)!==String(recorded.articleId))
+      return {statusCode:409,error:"Lagerartikel weicht vom Original ab; keine Änderung vorgenommen"};
+    const article=(await readJson(articlesFile,[])).find(x=>String(x.id)===String(recorded.articleId));
+    if(!article)return {statusCode:409,error:"Originalartikel nicht mehr vorhanden; keine Änderung vorgenommen"};
+    const at=new Date().toISOString();
+    const previous=row.resolution;
+    const identity=clean(actor||"KRISTINE Farben/Lager",120);
+    const correction={at,historyId:row.id,from:previous,to:resolution,jobId,jobName,component,
+      originalMovementAt:recorded.at,articleId:recorded.articleId,stockChanged:false,user:identity};
+    // Keine zusaetzliche Lagerbewegung; Projektmaterial wird nur im Ziel "project" erfasst.
+    if(resolution==="project") {
+      await appendProjectMaterial(row,article,"project",jobId,jobName,
+        {...recorded,at,jobId,jobName,component,knowledgeOnly:false});
+    }
+    await appendJsonl(correctionFile,correction);
+    row.originalResolution=row.originalResolution||previous;
+    row.resolution=resolution;row.jobId=jobId;row.jobName=jobName;row.component=component;
+    row.correctedAt=at;row.correctedBy=identity;
+    await writeJson(historyFile,history);
+    return {statusCode:200,row,stockChanged:false,correction};
+  }
+
+  function aggregateStats(movements, articles, year, history=[]) {
     const articleById = new Map((Array.isArray(articles) ? articles : []).map(article => [String(article?.id || ""), article]));
     const groups = { sale: [], project: [], waste: [], mixed_stock: [] };
+    const classifications=new Map((Array.isArray(history)?history:[]).filter(row=>row.status==="resolved")
+      .map(row=>[String(row.id),row.resolution]));
     for (const movement of movements) {
       if (String(movement?.direction || "") !== "out") continue;
       const at = String(movement?.at || "");
       if (!at.startsWith(`${year}-`)) continue;
-      const reason = String(movement?.reason || "");
-      if (groups[reason]) groups[reason].push(movement);
+      const original=String(movement?.reason||"");
+      const effective=movement.source==="innovatint-history" && movement.historyId
+        ? classifications.get(String(movement.historyId)) : null;
+      const reason=effective==="stock"?"mixed_stock":(["sale","project","waste"].includes(effective)?effective:original);
+      if(groups[reason])groups[reason].push(movement);
     }
     const summarize = rows => {
       let pieces = 0, liters = 0, value = 0;
@@ -511,6 +564,16 @@ function registerPaintMixHistory(app, options = {}) {
     } catch (error) { res.status(500).json({ok:false,error:String(error?.message || error)}); }
   });
 
+  app.post("/admin/api/paint/mix-history/:id/correct",async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{
+      const actor=req.kristineActor?.name || req.headers?.["x-krista-user-name"] || "KRISTINE Farben/Lager";
+      const result=await serial(()=>correctMix(req.params.id,req.body||{},actor));
+      if(result.error)return res.status(result.statusCode||400).json({ok:false,...result});
+      res.status(result.statusCode||200).json({ok:true,...result});
+    }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)});}
+  });
+
   app.post("/admin/api/paint/mix-history/:id/resolve", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -525,7 +588,8 @@ function registerPaintMixHistory(app, options = {}) {
     try {
       const year = /^20\d{2}$/.test(String(req.query.year || "")) ? String(req.query.year) : viennaDate().slice(0,4);
       const [movements, articles] = await Promise.all([readJsonl(movementsFile), readJson(articlesFile, [])]);
-      res.json({ ok: true, ...aggregateStats(movements, articles, year) });
+      const history=await readJson(historyFile,[]);
+      res.json({ ok: true, ...aggregateStats(movements, articles, year, history) });
     } catch (error) { res.status(500).json({ ok: false, error: String(error?.message || error) }); }
   });
 

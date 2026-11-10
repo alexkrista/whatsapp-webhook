@@ -114,6 +114,23 @@
     } finally { if (button) button.disabled = false; }
   }
 
+  async function correct(id, resolution, extra={}, button=null) {
+    const confirmText="Zuordnung auf "+({sale:"Verkauf",project:"Baustelle",stock:"Lager",waste:"Fehlmischung"}[resolution]||resolution)
+      +" ändern? Die ursprüngliche Lagerbewegung bleibt erhalten; es wird kein zweiter Abgang gebucht.";
+    if(!confirm(confirmText))return;
+    const old=button?.textContent||"";
+    if(button){button.disabled=true;button.textContent="…";}
+    try {
+      await api("/admin/api/paint/mix-history/"+encodeURIComponent(id)+"/correct",{
+        method:"POST",body:JSON.stringify({resolution,...extra})
+      });
+      await loadAll();
+    }catch(error){
+      alert(String(error?.message||error));
+      if(button)button.textContent=old;
+    }finally{if(button)button.disabled=false;}
+  }
+
   function sampleEditor(item,row) {
     const sample=item.sample||{};
     const wrapper=document.createElement("div");
@@ -186,6 +203,42 @@
       if (item.status !== "open" && !(item.status === "baseline" && !item.jobId && (item.colourCode || item.colourName))) {
         row.querySelector(".mixhist-actions").textContent = item.status === "baseline" ? "Altbestand – kein Lagerabzug" + (item.jobId ? " · Farbwissen: " + item.jobId + " · " + item.jobName : "") : ({sale:"Verkauf",project:"Baustelle",stock:"Lager",waste:"Fehlmischung"}[item.resolution] || item.resolution) + (item.jobId ? " · " + item.jobId + " · " + item.jobName : "");
         if (item.component) row.querySelector(".mixhist-actions").appendChild(document.createTextNode(" · " + item.component));
+        if(item.status==="resolved" && ["sale","stock","waste"].includes(item.resolution)) {
+          const actions=row.querySelector(".mixhist-actions");
+          const toggle=document.createElement("button");toggle.type="button";toggle.className="btn";toggle.textContent="Zuordnung ändern";
+          actions.appendChild(toggle);
+          const edit=document.createElement("div");edit.hidden=true;edit.className="mixhist-actions";
+          edit.style.cssText="margin-top:10px;padding:10px;border:1px solid #d9dfd9;border-radius:10px;background:#f5f8f4";
+          const note=document.createElement("p");note.className="mixhist-meta";
+          note.textContent="Fehlzuordnung korrigieren · Originalbuchung bleibt im Prüfprotokoll, kein zweiter Lagerabgang.";
+          edit.appendChild(note);
+          for(const choice of [["sale","Verkauf"],["project","Baustelle"],["stock","Lager"],["waste","Fehlmischung"]]) {
+            const button=document.createElement("button");button.type="button";button.className="btn";
+            button.textContent=choice[1];button.disabled=item.resolution===choice[0];
+            edit.appendChild(button);
+            if(choice[0]==="project") {
+              button.onclick=async()=>{
+                try {
+                  picker.wrap.hidden=false;
+                  picker.setJobs(await loadJobs());picker.search.focus();
+                }catch(error){alert(String(error?.message||error));}
+              };
+            } else {
+              button.onclick=()=>correct(item.id,choice[0],{},button);
+            }
+          }
+          row.appendChild(edit);
+          const picker=projectPicker(row);
+          picker.save.textContent="Zuordnung auf Baustelle korrigieren";
+          picker.save.onclick=()=>{
+            const option=picker.select.selectedOptions[0];if(!option)return;
+            correct(item.id,"project",{
+              jobId:picker.select.value,jobName:option.dataset.name||option.textContent||"",
+              component:picker.component.value.trim()
+            },picker.save);
+          };
+          toggle.onclick=()=>{edit.hidden=!edit.hidden; if(edit.hidden)picker.wrap.hidden=true;};
+        }
         list.appendChild(row); continue;
       }
       const picker = projectPicker(row);
