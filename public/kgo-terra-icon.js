@@ -72,4 +72,10 @@
     root.querySelector("#kgTerraToggle").setAttribute("aria-expanded",String(open));
   });
   update();
+  if(location.hash==="#kgTerraMix") {
+    const contents=root.querySelector("#kgTerraContents");
+    contents.hidden=false;
+    root.querySelector("#kgTerraToggle").setAttribute("aria-expanded","true");
+    setTimeout(()=>root.scrollIntoView({block:"start",behavior:"smooth"}),100);
+  }
 })();
