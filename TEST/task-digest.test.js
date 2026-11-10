@@ -3,7 +3,16 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { employeeScheduledToWork } = require("../task-digest");
+const { employeeScheduledToWork, suppressWhatsAppReminder } = require("../task-digest");
+
+test("Bettina Eberle-Nigsch erhält keine automatischen WhatsApp-Erinnerungen", () => {
+  assert.equal(suppressWhatsAppReminder({id:"bettina-eberle-nigsch",name:"Eberle-Nigsch Bettina"}),true);
+  assert.equal(suppressWhatsAppReminder({name:"Bettina Eberle-Nigsch"}),true);
+  assert.equal(suppressWhatsAppReminder(null,"Bettina",""),true);
+  assert.equal(suppressWhatsAppReminder(null,"","bettina-eberle-nigsch"),true);
+  assert.equal(suppressWhatsAppReminder({name:"Turtscher Dunja"}),false);
+  assert.equal(suppressWhatsAppReminder({name:"Alexander Krista"}),false);
+});
 
 test("08:30-Aufgabenliste beachtet freie Tage aus dem Zeitmodell", () => {
   const employee = { id: "edmund-mock-mreyk5vk-k27g", name: "Edmund Mock", worktimeModelId: "edmund" };

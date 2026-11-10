@@ -57,6 +57,17 @@ function normalizeName(value) {
   return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+// Bettina Eberle-Nigsch erhält keine automatischen Aufgaben-Erinnerungen per WhatsApp.
+// Neue Aufgaben und andere Kommunikationswege werden dadurch nicht verändert.
+function suppressWhatsAppReminder(employee, fallbackName = "", assigneeId = "") {
+  const names = [employee?.name, employee?.employeeName, fallbackName]
+    .filter(Boolean).map(normalizeName);
+  const ids = [employee?.id, employee?.employeeId, assigneeId]
+    .filter(Boolean).map(normalizeName);
+  return names.some(name => name === "bettina" || (name.split(" ").includes("bettina") && (name.includes("eberle") || name.includes("nigsch"))))
+    || ids.some(id => id === "bettina" || (id.includes("bettina") && (id.includes("eberle") || id.includes("nigsch"))));
+}
+
 function isAlex(value) {
   const name = normalizeName(value);
   return name === "alexander krista" || name === "alex krista" || name.startsWith("alexander krista ") || name.startsWith("alex krista ");
@@ -281,6 +292,10 @@ async function registerTaskDigest({ dataDir, readEmployees, sendWhatsApp, chefPh
     for (const [assigneeId, allRows] of groups) {
       const employee = employeeById.get(String(assigneeId)) || null;
       const assigneeName = String(employee?.name || employee?.employeeName || allRows[0]?.assigneeName || assigneeId);
+      if (suppressWhatsAppReminder(employee, assigneeName, assigneeId)) {
+        suppressed += allRows.length;
+        continue; // Keine 08:30 WhatsApp-Erinnerungen an Bettina, auch nicht bei force=true.
+      }
       const modelFree = employee ? !employeeScheduledToWork(employee, date, worktimeModels) : false;
       const urgentOnly = nonWork || modelFree || employeeAbsent(assigneeId, date, absences);
       const rows = urgentOnly ? allRows.filter(task => task.priority === "sofort") : allRows;
@@ -343,4 +358,4 @@ async function registerTaskDigest({ dataDir, readEmployees, sendWhatsApp, chefPh
   return { run, files };
 }
 
-module.exports = { registerTaskDigest, buildDigest, normalizePhone, isAlex, employeeScheduledToWork };
+module.exports = { registerTaskDigest, buildDigest, normalizePhone, isAlex, employeeScheduledToWork, suppressWhatsAppReminder };
