@@ -39,6 +39,19 @@ function explicitOutcome(body) {
   if (/erlaubt|allowed|granted|zutritt ok|access ok|success|freigegeben/.test(raw)) return "allowed";
   return "";
 }
+function isSystemEvent(event) {
+  if (clean(event?.code).toUpperCase() === "N" || event?.systemEvent === true) return true;
+  // These two legacy records were verified against the local GAT raw log.
+  // Older history did not retain the event code; do not infer other chips from their ID.
+  return clean(event?.terminalId) === "1" && (
+    (clean(event?.hardwareId) === "00000000002" && clean(event?.at) === "2026-11-11T17:00:00") ||
+    (clean(event?.hardwareId) === "00000000010" && clean(event?.at) === "2026-11-11T17:01:35")
+  );
+}
+function displayEvent(event) {
+  if (isSystemEvent(event)) return {...event, name:"Kristine", outcome:"system", systemEvent:true, unknownChip:false};
+  return {...event, unknownChip:event.unknownChip===true || event.outcome==="unknown" || /^unbekannter chip$/i.test(clean(event.name))};
+}
 async function buildEvent(body) {
   const hardwareId = clean(body?.hardwareId ?? body?.uid ?? body?.badgeId ?? body?.cardId ?? body?.ident ?? body?.transponder);
   const internalChipNo = clean(body?.internalChipNo ?? body?.chipNo ?? body?.chip);
@@ -59,7 +72,7 @@ async function buildEvent(body) {
     at, receivedAt:nowIso(), terminalId, terminalName:terminalName(terminalId),
     hardwareId:hardwareId || clean(chip?.hardwareId),
     internalChipNo:internalChipNo || clean(chip?.internalChipNo),
-    name, outcome, reason, unknownChip,
+    name, outcome, reason, unknownChip, code:clean(body?.code), systemEvent:isSystemEvent(body),
   };
 }
 let writeChain = Promise.resolve();
@@ -89,7 +102,7 @@ function wrappedExpress(...args) {
     try {
       const store = await readJson(EVENTS_FILE, { events:[] });
       const events = Array.isArray(store?.events) ? store.events : [];
-      res.json({ ok:true, events:events.map(event=>({...event, unknownChip:event.unknownChip===true || event.outcome==="unknown" || /^unbekannter chip$/i.test(clean(event.name))})).sort((a,b)=>(Date.parse(b.at)||0)-(Date.parse(a.at)||0)).slice(0, MAX_EVENTS), updatedAt:store?.updatedAt || null });
+      res.json({ ok:true, events:events.map(displayEvent).sort((a,b)=>(Date.parse(b.at)||0)-(Date.parse(a.at)||0)).slice(0, MAX_EVENTS), updatedAt:store?.updatedAt || null });
     } catch (e) { res.status(500).json({ ok:false, error:String(e?.message || e) }); }
   });
 

@@ -56,6 +56,7 @@
     }
   }
   function label(outcome){
+    if(outcome==="system")return ["⚙️","Systemaktion",""];
     if(outcome==="allowed")return ["✅","Zutritt erlaubt","ok"];
     if(outcome==="denied")return ["❌","Abgewiesen","bad"];
     if(outcome==="unknown")return ["⚠️","Unbekannter Chip","warn"];
@@ -67,7 +68,7 @@
     box.innerHTML=rows.length?rows.map((e,index)=>{
       const [icon,text]=label(unknownChip(e)&&!["allowed","denied"].includes(e.outcome)?"unknown":e.outcome);
       const reason=e.reason?`<div class="access-reason">${esc(e.reason)}</div>`:"";
-      return `<button type="button" class="access-event-row access-event-link" data-event-index="${index}"><div class="access-main"><strong>${icon} ${esc(text)}</strong><span>${esc(doorLabel(e))}</span></div><div class="access-person">${esc(e.name||"Unbekannter Chip")}</div><div class="access-meta">${fmt(e.at)} · Chip ${esc(e.internalChipNo||"—")} · ID ${esc(e.hardwareId||"—")}</div>${reason}<span class="access-open">Schlüssel & Historie öffnen →</span></button>`;
+      return `<button type="button" class="access-event-row access-event-link" data-event-index="${index}"><div class="access-main"><strong>${icon} ${esc(text)}</strong><span>${esc(doorLabel(e))}</span></div><div class="access-person">${esc(e.name||"Unbekannter Chip")}</div><div class="access-meta">${fmt(e.at)}${e.systemEvent ? " · Automatik · kein Chip" : ` · Chip ${esc(e.internalChipNo||"—")} · ID ${esc(e.hardwareId||"—")}`}</div>${reason}${e.systemEvent ? "" : '<span class="access-open">Schlüssel & Historie öffnen →</span>'}</button>`;
     }).join(""):'<div class="empty">Noch keine passenden Zutrittsereignisse.</div>';
     box.querySelectorAll("[data-event-index]").forEach(button=>{button.onclick=()=>openEvent(rows[Number(button.dataset.eventIndex)]);});
     document.querySelectorAll("[data-access-filter]").forEach(b=>b.classList.toggle("active",b.dataset.accessFilter===filter));
@@ -88,7 +89,7 @@
     box.innerHTML=historyMarkup(chip);
   }
   function openEvent(event){
-    if(!event)return;
+    if(!event || event.systemEvent)return;
     const chip=resolveChip(event);
     if(chip && typeof window.openEditor==="function"){window.openEditor(chip.internalChipNo);return;}
     // Ohne Stammsatz nur Details zeigen; Klick legt keinen Chip an und ändert keine Rechte.
