@@ -876,8 +876,6 @@ async function registerMorningStatus({
 
     const id = String(employee?.id || employee?.employeeId || "").trim();
     if (id) url.searchParams.set("employeeId", id);
-    if (adminToken) url.searchParams.set("token", String(adminToken));
-
     return url.toString();
   }
 

@@ -1680,7 +1680,6 @@ function registerDailyReport(app, {
     const base = String(publicBaseUrl || "").replace(/\/$/, "");
     if (!base) return "";
     const url = new URL(`${base}/admin/daily-report/${date}`);
-    if (adminToken) url.searchParams.set("token", String(adminToken));
     return url.toString();
   }
 

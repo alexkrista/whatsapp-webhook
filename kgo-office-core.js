@@ -228,7 +228,6 @@ function installOfficeRoutes(app, deps = {}) {
     const url = new URL("/public/kristine-go.html", publicBaseUrl);
     url.searchParams.set("employeeId", employeeId(employee));
     url.searchParams.set("officePrompt", "1");
-    if (adminToken) url.searchParams.set("token", adminToken);
     await sendWhatsApp({
       phoneNumberId,
       to:phone,

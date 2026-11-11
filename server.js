@@ -428,12 +428,10 @@ function fileSizeMB(bytes) {
   return `${(Number(bytes || 0) / 1024 / 1024).toFixed(1)} MB`;
 }
 function pdfUrlFor(jobId, date) {
-  const token = ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : "";
-  return `${PUBLIC_BASE_URL}/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(date)}${token}`;
+  return `${PUBLIC_BASE_URL}/admin/pdf/${encodeURIComponent(jobId)}/${encodeURIComponent(date)}`;
 }
 function pdfDownloadUrlFor(jobId, date) {
-  const token = ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : "";
-  return `${PUBLIC_BASE_URL}/admin/download/${encodeURIComponent(jobId)}/${encodeURIComponent(date)}${token}`;
+  return `${PUBLIC_BASE_URL}/admin/download/${encodeURIComponent(jobId)}/${encodeURIComponent(date)}`;
 }
 
 const visitRecordingRoot = path.join(DATA_DIR, "_kristine", "visit-recordings");
@@ -1606,7 +1604,6 @@ async function kristineGoLinkForWhatsAppRecipient(to) {
   );
 
   url.searchParams.set("employeeId", String(employee.id));
-  if (ADMIN_TOKEN) url.searchParams.set("token", String(ADMIN_TOKEN));
   return url.toString();
 }
 
@@ -2527,8 +2524,7 @@ ${downloadUrl}
 
 // Admin UI
 app.get("/admin", (req, res) => {
-  const token = req.query.token ? `?token=${encodeURIComponent(req.query.token)}` : "";
-  res.redirect(`/admin/ui${token}`);
+  res.redirect("/admin/ui");
 });
 
 // Admin UI (serves /public/admin.html)

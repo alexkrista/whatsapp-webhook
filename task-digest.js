@@ -183,8 +183,6 @@ function taskLine(task) {
 function tasksUrl() {
   const base = String(process.env.PUBLIC_BASE_URL || "https://protokoll.krista.at").replace(/\/$/, "");
   const url = new URL(`${base}/kristine`);
-  const token = String(process.env.ADMIN_TOKEN || "").trim();
-  if (token) url.searchParams.set("token", token);
   url.hash = "tasks";
   return url.toString();
 }

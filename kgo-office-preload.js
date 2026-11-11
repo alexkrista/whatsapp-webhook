@@ -266,7 +266,6 @@ function registerKgoOffice(app) {
     const url = new URL("/public/kristine-go.html", publicBaseUrl);
     url.searchParams.set("employeeId", employeeId(employee));
     url.searchParams.set("officePrompt", "1");
-    if (adminToken) url.searchParams.set("token", adminToken);
     const text = `⏰ Du bist in KRISTINE noch eingestempelt.\n\nVergessen auszutempeln? Wann war Ende?\nBitte kurz in KGO prüfen:\n${url.href}`;
     const response = await fetch(`https://graph.facebook.com/v22.0/${encodeURIComponent(senderId)}/messages`, {
       method:"POST",
