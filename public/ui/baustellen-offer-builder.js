@@ -414,16 +414,16 @@
         const baseFloor=room.includeFloor?localNumber(room.length)*localNumber(room.width):0;
         let extraM2=0;
         room.measureLines.forEach((line,i)=>{
-          if(line.hasDimensions){line.quantity=+measured(line).toFixed(2);const q=table.querySelector('[data-extra-qty="'+i+'"]');if(q)q.value=line.quantity;const result=table.querySelector('[data-extra-result="'+i+'"]');if(result)result.textContent=fmt(line.quantity)+" mÂ²"}
-          if(String(line.unit||"mÂ²").replace("Â²","2").toLowerCase().includes("m2"))extraM2+=localNumber(line.quantity);
+          if(line.hasDimensions){line.quantity=+measured(line).toFixed(2);const q=table.querySelector('[data-extra-qty="'+i+'"]');if(q)q.value=line.quantity;const result=table.querySelector('[data-extra-result="'+i+'"]');if(result)result.textContent=fmt(line.quantity)+" m\u00c2\u00b2"}
+          if(String(line.unit||"m\u00c2\u00b2").replace("\u00c2\u00b2","2").toLowerCase().includes("m2"))extraM2+=localNumber(line.quantity);
         });
         const sum=baseWalls+baseCeiling+baseFloor+extraM2;
         const total=wrap.querySelector("[data-extra-total]");
-        if(total)total.textContent="GesamtaufmaÃŸ dieses Raums: "+fmt(sum)+" mÂ² (GrundaufmaÃŸ "+fmt(baseWalls+baseCeiling+baseFloor)+" mÂ² + zusÃ¤tzliche Zeilen "+fmt(extraM2)+" mÂ²)";
+        if(total)total.textContent="Gesamtaufma\u00c3\u0178 dieses Raums: "+fmt(sum)+" m\u00c2\u00b2 (Grundaufma\u00c3\u0178 "+fmt(baseWalls+baseCeiling+baseFloor)+" m\u00c2\u00b2 + zus\u00c3\u00a4tzliche Zeilen "+fmt(extraM2)+" m\u00c2\u00b2)";
         const result=card.querySelector(".koffer-room-result");
-        if(result)result.textContent="Boden "+fmt(baseFloor)+" mÂ² Â· WÃ¤nde "+fmt(baseWalls+extraM2)+" mÂ² Â· Decke "+fmt(baseCeiling)+" mÂ² Â· LeistungsflÃ¤che "+fmt(sum)+" mÂ²";
+        if(result)result.textContent="Boden "+fmt(baseFloor)+" m\u00c2\u00b2 \u00c2\u00b7 W\u00c3\u00a4nde "+fmt(baseWalls+extraM2)+" m\u00c2\u00b2 \u00c2\u00b7 Decke "+fmt(baseCeiling)+" m\u00c2\u00b2 \u00c2\u00b7 Leistungsfl\u00c3\u00a4che "+fmt(sum)+" m\u00c2\u00b2";
         const overall=roomAreas(),host=document.getElementById("kofferRooms"),footer=host?.querySelector(".koffer-room-total");
-        if(footer)footer.textContent="Gesamt: Boden "+fmt(overall.floor)+" mÂ² Â· WÃ¤nde "+fmt(overall.walls)+" mÂ² Â· Decke "+fmt(overall.ceiling)+" mÂ²";
+        if(footer)footer.textContent="Gesamt: Boden "+fmt(overall.floor)+" m\u00c2\u00b2 \u00c2\u00b7 W\u00c3\u00a4nde "+fmt(overall.walls)+" m\u00c2\u00b2 \u00c2\u00b7 Decke "+fmt(overall.ceiling)+" m\u00c2\u00b2";
       };
       table.querySelectorAll("tbody tr").forEach((tr,i)=>{
         const line=room.measureLines[i];if(!line)return;
@@ -431,7 +431,7 @@
         const dims=document.createElement("div");dims.className="koffer-extra-dimensions";
         dims.style.cssText="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:8px";
         const active=Boolean(line.hasDimensions);
-        dims.innerHTML='<label style="font-size:12px">LÃ¤nge m<input data-dim="length" type="number" min="0" step="0.01" style="width:86px" value="'+esc(line.length??"")+'"></label><label style="font-size:12px">Breite m<input data-dim="width" type="number" min="0" step="0.01" style="width:86px" value="'+esc(line.width??"")+'"></label><label style="font-size:12px">HÃ¶he m<input data-dim="height" type="number" min="0" step="0.01" style="width:86px" value="'+esc(line.height??"")+'"></label><label style="font-size:12px">Ã–ffnungen mÂ²<input data-dim="openingsDeduction" type="number" min="0" step="0.01" style="width:96px" value="'+esc(line.openingsDeduction??"")+'"></label><label style="font-size:12px"><input data-dim="includeWalls" type="checkbox" '+(line.includeWalls!==false?"checked":"")+'> WÃ¤nde</label><label style="font-size:12px"><input data-dim="includeCeiling" type="checkbox" '+(line.includeCeiling?"checked":"")+'> Decke</label><label style="font-size:12px"><input data-dim="includeFloor" type="checkbox" '+(line.includeFloor?"checked":"")+'> Boden</label><strong data-extra-result="'+i+'" style="font-size:13px">'+(active?fmt(line.quantity)+" mÂ²":"Freie Menge")+'</strong>';
+        dims.innerHTML='<label style="font-size:12px">L\u00c3\u00a4nge m<input data-dim="length" type="number" min="0" step="0.01" style="width:86px" value="'+esc(line.length??"")+'"></label><label style="font-size:12px">Breite m<input data-dim="width" type="number" min="0" step="0.01" style="width:86px" value="'+esc(line.width??"")+'"></label><label style="font-size:12px">H\u00c3\u00b6he m<input data-dim="height" type="number" min="0" step="0.01" style="width:86px" value="'+esc(line.height??"")+'"></label><label style="font-size:12px">\u00c3\u2013ffnungen m\u00c2\u00b2<input data-dim="openingsDeduction" type="number" min="0" step="0.01" style="width:96px" value="'+esc(line.openingsDeduction??"")+'"></label><label style="font-size:12px"><input data-dim="includeWalls" type="checkbox" '+(line.includeWalls!==false?"checked":"")+'> W\u00c3\u00a4nde</label><label style="font-size:12px"><input data-dim="includeCeiling" type="checkbox" '+(line.includeCeiling?"checked":"")+'> Decke</label><label style="font-size:12px"><input data-dim="includeFloor" type="checkbox" '+(line.includeFloor?"checked":"")+'> Boden</label><strong data-extra-result="'+i+'" style="font-size:13px">'+(active?fmt(line.quantity)+" m\u00c2\u00b2":"Freie Menge")+'</strong>';
         cell.append(dims);
         const qty=tr.querySelector("[data-extra-qty]");if(qty&&active)qty.readOnly=true;
         dims.querySelectorAll("[data-dim]").forEach(input=>{
@@ -443,7 +443,7 @@
       });
       const total=document.createElement("div");total.dataset.extraTotal="1";total.style.cssText="font-weight:700;text-align:right;margin:10px 0 6px";wrap.append(total);
       const rebuild=()=>{wrap.remove();extra.remove();enhanceRoomExtras();placeRoomMeasurementLines();refreshScopeFromRooms();syncPositions(true)};
-      add.onclick=()=>{room.measureLines.push({label:"",quantity:0,unit:"mÂ²",hasDimensions:true,length:0,width:0,height:0,openingsDeduction:0,includeWalls:true,includeCeiling:false,includeFloor:false});rebuild()};
+      add.onclick=()=>{room.measureLines.push({label:"",quantity:0,unit:"m\u00c2\u00b2",hasDimensions:true,length:0,width:0,height:0,openingsDeduction:0,includeWalls:true,includeCeiling:false,includeFloor:false});rebuild()};
       wrap.querySelectorAll("[data-extra-remove]").forEach(button=>button.onclick=()=>{room.measureLines.splice(+button.dataset.extraRemove,1);rebuild()});
       refresh();
     });
