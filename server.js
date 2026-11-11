@@ -96,7 +96,9 @@ const { createCoverPdf } = require("./baustellen-deckblatt");
 
 const app = express();
 const camperProject = require("./camper-project").registerCamper(app);
-app.use(express.json({ limit: "25mb" }));
+app.use(express.json({ limit: "25mb", verify(req, res, buffer) {
+  if (String(req.originalUrl || req.url || "").startsWith("/webhook")) req.metaRawBody = Buffer.from(buffer);
+} }));
 
 // ===================== Version =====================
 const APP_VERSION = "3.6.0";
@@ -371,6 +373,13 @@ function isAllowedPdfSender(sender) {
   return allowed.includes(String(sender || "").trim());
 }
 const requireAdmin = require("./admin-auth").requireAdmin;
+const alexWhatsAppScenes = require("./alex-whatsapp-scene-cloud").createAlexSceneQueue({
+  dataDir: DATA_DIR,
+  sendReply: ({to,phoneNumberId,reply}) => sendWhatsAppKristineReply({
+    to,phoneNumberId,reply,buttons:[],includeGoLink:false,
+  }),
+});
+alexWhatsAppScenes.installRoutes(app,requireAdmin);
 require("./enable-banking-personal").register(app, { dataDir: DATA_DIR, requireAdmin });
 
 registerKristineActivityAudit(app, {
@@ -1955,6 +1964,61 @@ app.post("/webhook", async (req, res) => {
       }
 
       let protocolSite = protocolAllowed ? activeProtocol(sender) : null;
+
+      // Chef-Szenen ohne Zeiterfassung. Exakte Chefnummer und WhatsApp-Text.
+      // Ist ein Meta-App-Secret vorhanden, wird die ORIGINAL-Webhooksignatur
+      // geprüft. Ohne Secret ist IMMER ein per WhatsApp zugestellter Einmalcode
+      // erforderlich, bevor ein lokaler Türbefehl möglich wird.
+      if (msg.type === "text" && !protocolSite && !PROTOCOL_START_PENDING[sender]) {
+        const sceneAction = alexWhatsAppScenes.parseCommand(textOrCaption);
+        const confirmation = alexWhatsAppScenes.parseConfirmation(textOrCaption);
+        if ((sceneAction || confirmation) && alexWhatsAppScenes.isOwner(sender,CHEF_PHONE)) {
+          const appSecret=process.env.META_APP_SECRET || process.env.WHATSAPP_APP_SECRET || "";
+          if (appSecret && !alexWhatsAppScenes.verifyMetaSignature(
+            req.metaRawBody,req.headers["x-hub-signature-256"],appSecret)) {
+            console.warn("ALEX_SCENE_REJECTED_UNVERIFIED_WEBHOOK");
+            continue; // Never allow spoofed owner identity to move doors.
+          }
+          try {
+            const base={sender,chefPhone:CHEF_PHONE,command:textOrCaption,
+              messageId:msg.id,timestamp:tsSec,phoneNumberId};
+            const result=confirmation
+              ? await alexWhatsAppScenes.confirm(base)
+              : appSecret
+                ? await alexWhatsAppScenes.enqueue(base)
+                : await alexWhatsAppScenes.challenge(base);
+            if (result.status!=="duplicate") {
+              const reply=result.status==="challenge"
+                ? "🔐 Alex "+(sceneAction==="arrive"?"kommt":"geht")+
+                  ": Zur sicheren Türsteuerung bitte innerhalb von 2 Minuten exakt antworten:\nAlex freigeben "+result.code+
+                  "\n\nNoch keine Tür- oder Lichtschaltung ausgelöst."
+                :result.status==="queued"
+                  ? "🚪 Alex "+(result.action==="arrive"?"kommt":"geht")+
+                    ": bestätigt und an die lokale Gebäudesteuerung übergeben. Ausführung noch NICHT bestätigt."
+                :result.status==="offline"
+                  ? "⚠️ Gebäudesteuerung derzeit offline. Keine Tür- oder Lichtschaltung ausgelöst."
+                :result.status==="busy"
+                  ? "⚠️ Ein Gebäudebefehl wartet bereits. Bitte zuerst dessen Bestätigung abwarten."
+                :result.status==="stale"
+                  ? "⚠️ WhatsApp-Nachricht zu alt. Aus Sicherheitsgründen keine Schaltung. Bitte erneut senden."
+                :result.status==="invalid_code"
+                  ? "⚠️ Sicherheitscode falsch. Keine Türschaltung."
+                :result.status==="no_challenge"
+                  ? "⚠️ Keine gültige Bestätigung offen. Bitte zuerst „Alex kommt“ oder „Alex geht“ senden."
+                : "⚠️ Gebäudebefehl nicht angenommen. Bitte eine neue Nachricht senden.";
+              await sendWhatsAppKristineReply({
+                phoneNumberId,to:sender,reply,buttons:[],includeGoLink:false,
+              });
+            }
+          } catch(error) {
+            console.error("ALEX_SCENE_QUEUE_FAILED",String(error?.message||error).slice(0,180));
+            try{await sendWhatsAppKristineReply({phoneNumberId,to:sender,
+              reply:"⚠️ Gebäudebefehl konnte nicht sicher übernommen werden. Keine Ausführung bestätigt.",
+              buttons:[],includeGoLink:false});}catch{}
+          }
+          continue;
+        }
+      }
 
       // Chefmodus: Nur "proto" startet den gefÃ¼hrten Baustellenprotokoll-Dialog.
       if (!protocolSite && msg.type === "text" && protocolAllowed && isProtocolCommand(textOrCaption)) {

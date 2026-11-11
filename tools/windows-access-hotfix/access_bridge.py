@@ -12,6 +12,7 @@ import urllib.request
 from pathlib import Path
 from threading import Thread
 from manual_chip_bookings import ManualChipBookings
+from alex_scene_worker import run_loop as run_alex_scene_loop
 
 APP = Path(r"C:\Kristine\AccessBridge")
 APP.mkdir(parents=True, exist_ok=True)
@@ -507,6 +508,10 @@ def monitor_learning_jobs():
 
 def send_heartbeat():
     try:
+        alex_worker = json.loads((APP / "alex_scene_worker_status.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        alex_worker = {}
+    try:
         gantner = gantner_status()
     except Exception as exc:
         gantner = {
@@ -521,6 +526,7 @@ def send_heartbeat():
         "services": service_status(),
         "sentAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "accessSyncVersion": ACCESS_SYNC_VERSION,
+        "alexSceneWorker": alex_worker,
     }
 
     remote_json(
@@ -549,6 +555,7 @@ def main():
     ).start()
     Thread(target=monitor_learning_jobs, daemon=True).start()
     Thread(target=sync_access_loop, daemon=True).start()
+    Thread(target=run_alex_scene_loop, args=(remote_json, gantner_config), daemon=True).start()
 
     applied = {
         "bettina": None,
