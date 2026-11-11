@@ -299,7 +299,11 @@ function wrappedExpress(...args) {
   const app = originalExpress(...args), originalUse = app.use.bind(app); let inserted = false;
   app.use = function (...useArgs) {
     const result = originalUse(...useArgs);
-    if (!inserted) { inserted = true; installRoutes(app); }
+    // Other routers (e.g. Camper) can be mounted before the JSON parser.
+    // Access POST handlers must run only after their payload has been parsed.
+    const jsonReady = useArgs.length === 1 &&
+      typeof useArgs[0] === "function" && useArgs[0].name === "jsonParser";
+    if (!inserted && jsonReady) { inserted = true; installRoutes(app); }
     return result;
   };
   return app;
