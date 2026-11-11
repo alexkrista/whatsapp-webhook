@@ -1972,6 +1972,10 @@ app.post("/webhook", async (req, res) => {
       if (msg.type === "text" && !protocolSite && !PROTOCOL_START_PENDING[sender]) {
         const sceneAction = alexWhatsAppScenes.parseCommand(textOrCaption);
         const confirmation = alexWhatsAppScenes.parseConfirmation(textOrCaption);
+        if ((sceneAction || confirmation) && !alexWhatsAppScenes.isOwner(sender,CHEF_PHONE)) {
+          console.warn("ALEX_SCENE_REJECTED_NOT_OWNER");
+          continue; // Auch nicht als normalen Mitarbeiterdialog auswerten.
+        }
         if ((sceneAction || confirmation) && alexWhatsAppScenes.isOwner(sender,CHEF_PHONE)) {
           const appSecret=process.env.META_APP_SECRET || process.env.WHATSAPP_APP_SECRET || "";
           if (appSecret && !alexWhatsAppScenes.verifyMetaSignature(
