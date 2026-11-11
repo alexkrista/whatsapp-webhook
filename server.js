@@ -4489,6 +4489,8 @@ function cleanEmployeeMaster(e, existingId = "") {
       : String(e?.specialties || "").split(",").map(x => x.trim()).filter(Boolean).slice(0, 30),
     foreman: !!e?.foreman,
     canManageTeam: !!e?.canManageTeam,
+    kristineAccess: e?.kristineAccess === true,
+    kgoAccess: e?.kgoAccess === true,
     active: e?.active !== false,
     worktimeModelId: String(e?.worktimeModelId || "krista-standard").trim().slice(0, 80),
     grossMonthlySalary: Math.max(0, Number(e?.grossMonthlySalary || 0)),
