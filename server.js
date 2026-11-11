@@ -1430,7 +1430,7 @@ app.get(["/kristool-preview", "/kristool-preview/"], (req, res) => {
 });
 
 // ===================== Base Routes =====================
-app.get("/", (req, res) => res.type("html").send(`webhook lÃ¤uft âœ…<br><a href="/admin/ui${ADMIN_TOKEN ? `?token=${encodeURIComponent(ADMIN_TOKEN)}` : ""}">Admin Ã¶ffnen</a>`));
+app.get("/", (_req, res) => { res.setHeader("Cache-Control", "no-store"); res.type("html").send('<!doctype html><html lang="de"><meta charset="utf-8"><title>KRISTINE</title><body><h1>KRISTINE</h1><p>Für den Verwaltungszugang ist eine Anmeldung erforderlich.</p><a href="/anmelden">Sicher anmelden</a></body></html>'); });
 
 app.get("/health", (req, res) =>
   res.json({
