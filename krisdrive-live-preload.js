@@ -71,8 +71,7 @@ function wrappedExpress(...args) {
   }
 
   app.get("/krisdrive", (req, res) => {
-    const token = req.query.token ? `?token=${encodeURIComponent(String(req.query.token))}` : "";
-    res.redirect(302, `/public/krisdrive.html${token}`);
+    res.redirect(302, "/public/krisdrive.html");
   });
 
   app.get("/kristine/api/krisdrive/live", async (req, res) => {

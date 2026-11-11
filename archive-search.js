@@ -36,14 +36,12 @@ async function loadKristineBrainSource(runtimeToken = "") {
     KRISTINE_API_BASE
   );
 
-  // Browser-Test hat bestätigt: Render akzeptiert den bestehenden ADMIN_TOKEN
-  // zuverlässig als Query-Parameter. Deshalb hier bewusst dieselbe Variante.
-  if (token) url.searchParams.set("token", token);
-
+  // Interner Serveraufruf: Geheimnisse niemals in URLs schreiben.
   const response = await fetch(url, {
     method: "GET",
     headers: {
-      "Accept": "application/json"
+      "Accept": "application/json",
+      ...(token ? { "X-Admin-Token": token } : {})
     }
   });
 
@@ -679,7 +677,7 @@ function registerArchiveSearch(app) {
 
   app.get("/gehirn", async (req, res) => {
     const runtimeToken = String(req.query.token || "").trim();
-    const backUrl = `/kristine${runtimeToken ? `?token=${encodeURIComponent(runtimeToken)}` : ""}`;
+    const backUrl = "/kristine";
 
     const html = `
 <!doctype html>

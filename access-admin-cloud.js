@@ -241,8 +241,7 @@ async function bootstrapPayload() {
   };
 }
 function pageRedirect(req, res) {
-  const token = String(req.query?.token || "");
-  res.redirect(302, `/public/access-admin.html${token ? `?token=${encodeURIComponent(token)}` : ""}`);
+  res.redirect(302, "/public/access-admin.html");
 }
 function cleanChipName(value) { return String(value || "").trim().replace(/\s+/g, " ").slice(0, 80); }
 function normalizeImportedChip(row) {
