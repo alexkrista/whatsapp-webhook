@@ -41,11 +41,14 @@ function explicitOutcome(body) {
 }
 function isSystemEvent(event) {
   if (clean(event?.code).toUpperCase() === "N" || event?.systemEvent === true) return true;
-  // These two legacy records were verified against the local GAT raw log.
+  // These legacy records were verified against the local GAT raw log.
   // Older history did not retain the event code; do not infer other chips from their ID.
   return clean(event?.terminalId) === "1" && (
     (clean(event?.hardwareId) === "00000000002" && clean(event?.at) === "2026-11-11T17:00:00") ||
-    (clean(event?.hardwareId) === "00000000010" && clean(event?.at) === "2026-11-11T17:01:35")
+    (clean(event?.hardwareId) === "00000000010" && clean(event?.at) === "2026-11-11T17:01:35") ||
+    (clean(event?.hardwareId) === "00000040000" && clean(event?.at) === "2026-11-11T16:58:58") ||
+    (clean(event?.hardwareId) === "00000000020" && clean(event?.at) === "2026-11-11T12:47:21") ||
+    (clean(event?.hardwareId) === "00008000000" && clean(event?.at) === "2026-11-09T08:15:20")
   );
 }
 function displayEvent(event) {
