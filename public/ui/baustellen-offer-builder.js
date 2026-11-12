@@ -229,7 +229,23 @@
   async function ensureOfferMaterials(context=editorContext()){requireEditorContext(context);for(const p of context.draft.positions||[])for(const m of p.materials||[]){requireEditorContext(context);const name=String(m.name||"").trim();if(!name||m.materialId)continue;const known=materialMaster.find(x=>String(x.product||x.name||x.label||"").trim().toLowerCase()===name.toLowerCase());if(known){m.materialId=known.materialId||known.id||"";continue}const result=await api("/admin/api/materials/auto",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,unit:m.unit,unitPrice:m.unitPrice})});requireEditorContext(context);if(result.material){m.materialId=result.material.materialId||result.material.id||"";m.name=result.material.product||name;materialMaster.push({...result.material,name:result.material.product||name})}}}
   function mountAutomaticMaterialSave(){const btn=document.getElementById("kofferSave");if(!btn||btn.dataset.materialAuto)return;btn.dataset.materialAuto="1";const original=btn.onclick;btn.onclick=async()=>{const context=editorContext();if(!editorContextActive(context))return original.call(btn,context);btn.disabled=true;const msg=context.editor.querySelector("#kofferMsg");try{msg.textContent="Neue Materialien werden in den Stamm übernommen …";await ensureOfferMaterials(context);await original.call(btn,context)}catch(error){if(document.getElementById("koffer")===context.editor)msg.textContent="Fehler beim Materialstamm: "+error.message;if(editorContextActive(context))btn.disabled=false}}}
   async function prepareFinalOfferPortal(context=editorContext()){requireEditorContext(context);await Promise.all([ensureOfferMaterials(context),ensureOfferTerms()]);requireEditorContext(context);const saved=await save(context);if(!saved)throw new Error("Angebot wurde nicht gespeichert.");context={...context,draft};requireEditorContext(context);const finalized=await api(`/admin/api/job/${encodeURIComponent(context.jobId)}/offer-draft/finalize`,{method:"POST"});requireEditorContext(context);draft=finalized.draft;const refreshed={...context,draft};const portal=await api(`/admin/api/job/${encodeURIComponent(context.jobId)}/customer-portal/invitation`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({purpose:"offer",offerNumber:draft.offerNumber,offerRevision:draft.offerRevision})});requireEditorContext(refreshed);offerPortal=portal;return{portal,context:refreshed}}
-  function offerDispatchContact(){const c=job?.customerMaster||{},owner=job?.projectContacts?.owner||{},name=offerRecipientNames(owner,c)[0]||owner.customer||c.name||job?.contactName||"",email=owner.womanEmail||owner.manEmail||owner.email||c.email||job?.contactEmail||"",phone=owner.phoneOwnerWoman||owner.phoneOwnerMan||c.phone||job?.contactPhone||"";return{name:String(name).trim(),email:String(email).trim(),phone:String(phone).trim()}}
+  function offerDispatchContact(){
+    const c=job?.customerMaster||{},owner=job?.projectContacts?.owner||{};
+    const named=(kind)=>{
+      const woman=kind==="woman",first=String(woman?(owner.womanFirstName||owner.firstName||""):(owner.manFirstName||"")).trim();
+      const last=String((woman?owner.womanLastName:owner.manLastName)||owner.sharedLastName||"").trim();
+      const title=String((woman?owner.womanTitle:owner.manTitle)||"").trim();
+      const name=[first,last].filter(Boolean).join(" ").trim();
+      return name?(title?title+" "+name:(woman?"Frau ":"Herr ")+name):"";
+    };
+    const womanEmail=String(owner.womanEmail||"").trim(),manEmail=String(owner.manEmail||"").trim();
+    const womanPhone=String(owner.phoneOwnerWoman||"").trim(),manPhone=String(owner.phoneOwnerMan||"").trim();
+    const selected=womanEmail?"woman":manEmail?"man":"";
+    const name=(selected?named(selected):"")||offerRecipientNames(owner,c)[0]||owner.customer||c.name||job?.contactName||"";
+    const email=(selected==="woman"?womanEmail:selected==="man"?manEmail:"")||owner.email||c.email||job?.contactEmail||"";
+    const phone=(selected==="woman"?womanPhone:selected==="man"?manPhone:"")||womanPhone||manPhone||c.phone||job?.contactPhone||"";
+    return {name:String(name).trim(),email:String(email).trim(),phone:String(phone).trim()};
+  }
   function offerDispatchText(channel,contact){if(!offerPortalCredentials?.loginName||!offerPortalCredentials?.startPassword)throw new Error("Projektakten-Zugangsdaten fehlen.");
     const greeting=contact.name?`Guten Tag ${contact.name},`:"Guten Tag,";
     const number=draft.offerNumber||"";
