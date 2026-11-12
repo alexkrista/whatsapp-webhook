@@ -20,3 +20,12 @@ test("Angebotsversand verwendet Projektakte ohne Links oder passwortfreien Zugan
  assert.match(src,/E-Mail und WhatsApp enthalten keine Links/);
  assert.match(src,/E-Mail ohne Link geöffnet/);
 });
+test('E-Mail ohne doppelte Signatur; WhatsApp mit Abschluss',()=>{
+ const start=src.indexOf('function offerDispatchText('),end=src.indexOf('function normalizeOfferPhone(',start);
+ const fn=vm.runInNewContext('('+src.slice(start,end).trim()+')',{draft:{offerNumber:'2611001',offerSchedule:{mode:'customer_request'}},offerPortalCredentials:{loginName:'Fritz',startPassword:'26115'}});
+ const email=fn('email',{name:'Herr Harry Fritz'}),wa=fn('whatsapp',{name:'Herr Harry Fritz'});
+ assert.ok(email.startsWith('Guten Tag Herr Harry Fritz,'));
+ assert.match(email,/Benutzername: Fritz/);
+ assert.doesNotMatch(email,/Freundliche Grüße|Alexander Krista|\nFarben Krista/);
+ assert.match(wa,/Freundliche Grüße\nAlexander Krista\nFarben Krista/);
+});
