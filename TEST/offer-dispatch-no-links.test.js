@@ -1,0 +1,20 @@
+"use strict";
+const test=require("node:test");
+const assert=require("node:assert/strict");
+const fs=require("node:fs");
+const vm=require("node:vm");
+const path=require("node:path");
+const src=fs.readFileSync(path.join(__dirname,"../public/ui/baustellen-offer-builder.js"),"utf8");
+test("Angebotsversand verwendet Projektakte ohne Links oder passwortfreien Zugang",()=>{
+ const start=src.indexOf("function offerDispatchText(channel,contact)");
+ const end=src.indexOf("function normalizeOfferPhone(",start);
+ assert.ok(start>0 && end>start);
+ const fn=vm.runInNewContext("("+src.slice(start,end).trim()+")",{draft:{offerNumber:"2611001",offerSchedule:{mode:"customer_request"}}});
+ const body=fn("email",{name:"Herr Testkunde"});
+ assert.match(body,/Angebot Nr\. 2611001/);
+ assert.match(body,/persönlichen Projektakte/);
+ assert.match(body,/Benutzernamen und Ihrem persönlichen Passwort/);
+ assert.doesNotMatch(body,/https?:\/\/|portalUrl|zugang=|Klicken Sie einfach auf den Link|Passwort ist nicht erforderlich/i);
+ assert.match(src,/E-Mail und WhatsApp enthalten keine Links/);
+ assert.match(src,/E-Mail ohne Link geöffnet/);
+});
