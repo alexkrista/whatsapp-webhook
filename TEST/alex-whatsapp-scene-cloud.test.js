@@ -37,7 +37,7 @@ test("WhatsApp-Warteschlange: einmalige, frische Jobs, keine Hardware/Aufgabenze
     const queue=createAlexSceneQueue({dataDir:dir,now:()=>now,
       sendReply:async x=>replies.push(x)});
     const req={sender:"436641234567",chefPhone:"+436641234567",
-      command:"Alex kommt",messageId:"wamid.alex-fresh-123456789",
+      command:"Alex kommt",messageId:"wamid.HBgMNDM2NjQxMjM0NTY3FQIAERgSMzQ1+/==",
       timestamp:now/1000,phoneNumberId:"12345"};
     assert.equal((await queue.enqueue({...req,sender:"436641234568"})).status,"unauthorized");
     assert.equal((await queue.enqueue({...req,timestamp:now/1000-400})).status,"stale");
@@ -60,17 +60,17 @@ test("WhatsApp-Warteschlange: einmalige, frische Jobs, keine Hardware/Aufgabenze
     await queue.ack({id:claimedLeave.id,ok:true,doors:{"1":"OPEN","2":"OPEN","3":"OPEN"},alex:false,bettina:true,dunja:false});
     assert.match(replies[1].reply,/Bettina/);
     const challenge=await queue.challenge({...req,command:"Alex kommt",
-      messageId:"wamid.challenge-123456789"});
+      messageId:"wamid.challenge-123456789+/="});
     assert.equal(challenge.status,"challenge");
     assert.match(challenge.code,/^[a-f0-9]{24}$/);
     assert.equal(await queue.claim(),null,"challenge must not open doors");
     assert.equal((await queue.confirm({...req,command:"Alex freigeben "+"f".repeat(24),
       messageId:"wamid.wrongcode-123456789"})).status,"invalid_code");
     const confirmed=await queue.confirm({...req,command:"Alex freigeben "+challenge.code,
-      messageId:"wamid.confirmed-123456789"});
+      messageId:"wamid.confirmed-123456789+/="});
     assert.equal(confirmed.status,"queued");
     assert.equal((await queue.confirm({...req,command:"Alex freigeben "+challenge.code,
-      messageId:"wamid.confirmed-123456789"})).status,"duplicate");
+      messageId:"wamid.confirmed-123456789+/="})).status,"duplicate");
     const claimedVerified=await queue.claim();
     assert.equal(claimedVerified.action,"arrive");
     await queue.ack({id:claimedVerified.id,ok:true,doors:{"1":"OPEN","2":"OPEN","3":"OPEN"},
@@ -85,3 +85,4 @@ test("WhatsApp-Warteschlange: einmalige, frische Jobs, keine Hardware/Aufgabenze
       messageId:"wamid.bridge-stale-123456789"})).status,"offline");
   } finally{await fs.rm(dir,{recursive:true,force:true});}
 });
+

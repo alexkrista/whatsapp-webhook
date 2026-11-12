@@ -92,7 +92,7 @@ function createAlexSceneQueue({dataDir,sendReply=async()=>{},now=()=>Date.now()}
     if(!Number.isFinite(sentAt)||!sentAt||Math.abs(now()-sentAt)>180_000)
       return {status:"stale"};
     const message=String(messageId||"").trim();
-    if(!/^[A-Za-z0-9._:-]{12,250}$/.test(message))return {status:"unverified"};
+    if(!/^[A-Za-z0-9._:+/=-]{12,250}$/.test(message))return {status:"unverified"};
     const key=crypto.createHash("sha256").update(message).digest("hex");
     return serial(async()=>{
       const data=await read();housekeeping(data);
@@ -115,7 +115,7 @@ function createAlexSceneQueue({dataDir,sendReply=async()=>{},now=()=>Date.now()}
     if(!action)return {status:"unknown"};
     if(!Number.isFinite(sent)||!sent||Math.abs(now()-sent)>180_000)return {status:"stale"};
     const message=String(messageId||"");
-    if(!/^[A-Za-z0-9._:-]{12,250}$/.test(message))return {status:"unverified"};
+    if(!/^[A-Za-z0-9._:+/=-]{12,250}$/.test(message))return {status:"unverified"};
     const key=crypto.createHash("sha256").update(message).digest("hex");
     return serial(async()=>{
       const data=await read();housekeeping(data);
@@ -139,7 +139,7 @@ function createAlexSceneQueue({dataDir,sendReply=async()=>{},now=()=>Date.now()}
     if(!code)return {status:"unknown"};
     if(!Number.isFinite(sent)||!sent||Math.abs(now()-sent)>180_000)return {status:"stale"};
     const message=String(messageId||"");
-    if(!/^[A-Za-z0-9._:-]{12,250}$/.test(message))return {status:"unverified"};
+    if(!/^[A-Za-z0-9._:+/=-]{12,250}$/.test(message))return {status:"unverified"};
     const key=crypto.createHash("sha256").update(message).digest("hex");
     return serial(async()=>{
       const data=await read();housekeeping(data);
