@@ -1974,10 +1974,16 @@ app.post("/webhook", async (req, res) => {
           continue; // Auch nicht als normalen Mitarbeiterdialog auswerten.
         }
         if ((sceneAction || confirmation) && alexWhatsAppScenes.isOwner(sender,CHEF_PHONE)) {
-          const appSecret=process.env.META_APP_SECRET || process.env.WHATSAPP_APP_SECRET || "";
+          const appSecret=String(process.env.META_APP_SECRET || process.env.WHATSAPP_APP_SECRET || "").trim();
           if (appSecret && !alexWhatsAppScenes.verifyMetaSignature(
             req.metaRawBody,req.headers["x-hub-signature-256"],appSecret)) {
-            console.warn("ALEX_SCENE_REJECTED_UNVERIFIED_WEBHOOK");
+            console.warn("ALEX_SCENE_REJECTED_UNVERIFIED_WEBHOOK", JSON.stringify({
+              rawBodyPresent:Buffer.isBuffer(req.metaRawBody),
+              signaturePresent:Boolean(req.headers["x-hub-signature-256"]),
+              secretFormatValid:/^[0-9a-f]{32}$/i.test(appSecret),
+              reason:!Buffer.isBuffer(req.metaRawBody)?"raw_body_missing":
+                !req.headers["x-hub-signature-256"]?"signature_missing":"signature_mismatch",
+            }));
             continue; // Never allow spoofed owner identity to move doors.
           }
           try {
