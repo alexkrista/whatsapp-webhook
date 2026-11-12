@@ -9,11 +9,13 @@ test("Angebotsversand verwendet Projektakte ohne Links oder passwortfreien Zugan
  const start=src.indexOf("function offerDispatchText(channel,contact)");
  const end=src.indexOf("function normalizeOfferPhone(",start);
  assert.ok(start>0 && end>start);
- const fn=vm.runInNewContext("("+src.slice(start,end).trim()+")",{draft:{offerNumber:"2611001",offerSchedule:{mode:"customer_request"}}});
+ const fn=vm.runInNewContext("("+src.slice(start,end).trim()+")",{draft:{offerNumber:"2611001",offerSchedule:{mode:"customer_request"}},offerPortalCredentials:{loginName:"Frau Karin Fritz und Herr Harry Fritz",startPassword:"26115"}});
  const body=fn("email",{name:"Herr Testkunde"});
  assert.match(body,/Angebot Nr\. 2611001/);
- assert.match(body,/persönlichen Projektakte/);
- assert.match(body,/Benutzernamen und Ihrem persönlichen Passwort/);
+ assert.match(body,/persönliche Projektakte/);
+ assert.match(body,/Benutzername: Frau Karin Fritz und Herr Harry Fritz/);
+ assert.match(body,/Startpasswort: 26115/);
+ assert.match(body,/Beim ersten Einstieg/);
  assert.doesNotMatch(body,/https?:\/\/|portalUrl|zugang=|Klicken Sie einfach auf den Link|Passwort ist nicht erforderlich/i);
  assert.match(src,/E-Mail und WhatsApp enthalten keine Links/);
  assert.match(src,/E-Mail ohne Link geöffnet/);
