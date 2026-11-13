@@ -13,8 +13,8 @@ test("one personal WhatsApp login opens KrisDrive and LG, while roles and write 
   process.env.ADMIN_TOKEN = "legacy-machine-secret";
   process.env.KRISTINE_PERSONAL_LOGIN_ENABLED = "true";
   const people = [
-    { id:"alex", name:"Alexander Krista", phone:"+43 660 111111", active:true },
-    { id:"mario", name:"Mario", phone:"+43 660 222222", active:true },
+    { id:"alex", name:"Alexander Krista", phone:"+43 660 111111", active:true, kristineAccess:true },
+    { id:"mario", name:"Mario", phone:"+43 660 222222", active:true, kristineAccess:true },
     { id:"bettina", name:"Bettina", phone:"+43 660 333333", active:true },
   ];
   await fs.mkdir(path.join(dir, "_system"), { recursive:true });
@@ -49,6 +49,10 @@ test("one personal WhatsApp login opens KrisDrive and LG, while roles and write 
   assert.equal((await request("/admin/api/paint/status", { headers:{ Cookie:legacyCookie } })).status, 200);
   assert.equal((await post("/kristine/api/access-heartbeat", {}, { Cookie:legacyCookie })).status, 403);
 
+  const noGrantCount = messages.length;
+  await post('/auth/whatsapp/start', { phone:'+43 660 333333' });
+  assert.equal(messages.length, noGrantCount);
+
   async function login(phone) {
     const start = await post("/auth/whatsapp/start", { phone });
     assert.equal(start.status, 200);
@@ -71,6 +75,11 @@ test("one personal WhatsApp login opens KrisDrive and LG, while roles and write 
   const alex = await login("+43 660 111111");
   const authorized = await request("/kristine/api/user-access", { method:"PUT", headers:{ Cookie:alex, Origin:base, "Content-Type":"application/json" }, body:JSON.stringify({ users:[] }) });
   assert.equal(authorized.status, 200);
+  people[1].kristineAccess = false;
+  await fs.writeFile(path.join(dir, '_system', 'employees.json'), JSON.stringify(people));
+  assert.equal((await request('/auth/me', { headers:{Cookie:mario} })).status, 401);
+  people[0].kristineAccess = false;
+  await fs.writeFile(path.join(dir, '_system', 'employees.json'), JSON.stringify(people));
   process.env.KRISTINE_PERSONAL_LOGIN_ENABLED = 'alexander';
   assert.equal((await request('/anmelden')).status,200);
   assert.equal((await request('/auth/me',{headers:{Cookie:mario}})).status,401);
@@ -82,6 +91,17 @@ test("one personal WhatsApp login opens KrisDrive and LG, while roles and write 
   const saveApproval=cookie=>request('/kristine/api/tasks',{method:'PUT',headers:{Cookie:cookie,Origin:base,'Content-Type':'application/json','X-Krista-User-Id':'alex'},body:JSON.stringify({tasks:[finance],actorId:'alex'})});
   assert.equal((await saveApproval(alex)).status,200);
   assert.equal((await saveApproval(mario)).status,403);
+  assert.equal((await saveApproval(legacyCookie)).status,403,'shared cookie plus forged Alexander identity cannot approve');
+  assert.equal((await request('/kristine/api/tasks?token=legacy-machine-secret', {method:'PUT',headers:{Origin:base,'Content-Type':'application/json','X-Krista-User-Id':'alex'},body:JSON.stringify({tasks:[finance],actorId:'alex'})})).status,403);
+  const freshAlex = await login('+43 660 111111');
+  assert.equal((await request('/auth/me', {headers:{Cookie:freshAlex}})).status,200,'Alexander can obtain a new session without employee grant');
+  process.env.KRISTINE_PERSONAL_LOGIN_ENABLED = 'true';
+  assert.equal((await request('/auth/me', {headers:{Cookie:freshAlex}})).status,401);
+  people[2].kristineAccess = true;
+  await post('/auth/whatsapp/start', {phone:'+43 660 333333'});
+  const pendingCode = messages.at(-1).reply.match(/\b\d{6}\b/)[0];
+  people[2].kristineAccess = false;
+  assert.equal((await post('/auth/whatsapp/verify', {phone:'+43 660 333333',code:pendingCode})).status,401,'removing a grant also invalidates pending codes');
 
   assert.equal((await post("/auth/logout", {}, { Cookie:alex })).status, 200);
   assert.equal((await request("/auth/me", { headers:{ Cookie:alex } })).status, 401);
