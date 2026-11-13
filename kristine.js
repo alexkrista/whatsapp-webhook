@@ -1316,6 +1316,20 @@ const open = taskId
     };
   }
 
+  const storyPoolDir = path.join(__dirname, "story-pool");
+  function serveStoryPoolFile(filename) {
+    return (req, res) => {
+      if (!requireAdmin(req, res)) return;
+      res.sendFile(path.join(storyPoolDir, filename), {
+        headers: { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" },
+      });
+    };
+  }
+
+  app.get("/kristine/story-pool", serveStoryPoolFile("index.html"));
+  app.get("/kristine/story-pool/cozy.jpg", serveStoryPoolFile("cozy.jpg"));
+  app.get("/kristine/story-pool/schauraum.jpg", serveStoryPoolFile("schauraum.jpg"));
+
   app.get("/kristine", (req, res) => {
     if (!requireAdmin(req, res)) return;
     res.sendFile(path.join(publicDir, "kristine.html"));
