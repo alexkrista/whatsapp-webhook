@@ -1,0 +1,129 @@
+{
+  "employee_profiles": {
+    "texts": {
+      "legacy_id": "id",
+      "name_original": "name",
+      "nickname_original": "nickname",
+      "personnel_number_original": "finkzeitPersonalNumber",
+      "short_code_original": "shortCode",
+      "phone_original": "phone",
+      "role_original": "role",
+      "team_original": "team",
+      "worktime_model_id_original": "worktimeModelId",
+      "gross_monthly_salary_original": "grossMonthlySalary",
+      "employment_percent_original": "employmentPercent",
+      "employment_start_original": "employmentStart",
+      "employment_end_original": "employmentEnd",
+      "birth_date_original": "birthDate",
+      "driving_license_last_check_original": "drivingLicenseLastCheck",
+      "driving_license_front_image": "drivingLicenseFrontImage",
+      "driving_license_back_image": "drivingLicenseBackImage",
+      "passport_page1_image": "passportPage1Image",
+      "passport_page2_image": "passportPage2Image",
+      "passport_expiry_original": "passportExpiry",
+      "standard_start_original": "standardStart",
+      "standard_end_original": "standardEnd",
+      "standard_break_minutes_original": "standardBreakMinutes",
+      "updated_at_original": "updatedAt"
+    },
+    "bools": {
+      "foreman_original": "foreman",
+      "can_manage_team_original": "canManageTeam",
+      "active_original": "active"
+    },
+    "jsons": {
+      "specialties": "specialties",
+      "clothing_sizes": "clothingSizes",
+      "clothing_issues": "clothingIssues"
+    }
+  },
+  "vehicle_rides": {
+    "texts": {
+      "legacy_id": "id",
+      "legacy_vehicle_id": "vehicleId",
+      "started_at_original": "startedAt",
+      "closed_at_original": "closedAt",
+      "source_original": "source",
+      "driver_assigned_at_original": "driverAssignedAt",
+      "date_original": "date",
+      "created_at_original": "createdAt",
+      "odometer_start_original": "odometerStart",
+      "odometer_end_original": "odometerEnd",
+      "distance_meters_original": "distanceMeters",
+      "distance_km_original": "distanceKm",
+      "buzzer_due_at_original": "buzzerDueAt",
+      "buzzer_changed_at_original": "buzzerChangedAt",
+      "buzzer_reason_original": "buzzerReason"
+    },
+    "bools": {
+      "unresolved_driver_original": "unresolvedDriver",
+      "buzzer_wanted_original": "buzzerWanted"
+    },
+    "jsons": {
+      "driver_original": "driver",
+      "start_position": "startPosition",
+      "last_position": "lastPosition"
+    }
+  },
+  "vehicle_positions": {
+    "texts": {
+      "legacy_vehicle_id": "vehicleId",
+      "traccar_position_id_original": "traccarPositionId",
+      "device_id_original": "deviceId",
+      "at_original": "at",
+      "lat_original": "lat",
+      "lng_original": "lng",
+      "speed_knots_original": "speedKnots",
+      "course_original": "course",
+      "address_original": "address",
+      "odometer_original": "odometer",
+      "battery_level_original": "batteryLevel"
+    },
+    "bools": {
+      "ignition_original": "ignition"
+    },
+    "jsons": {
+      "can_original": "can",
+      "attributes_original": "rawAttributes"
+    }
+  },
+  "gps_rows": {
+    "texts": {
+      "legacy_id": "id",
+      "date_original": "date",
+      "driver_name_original": "driverName",
+      "driver_key_original": "driverKey",
+      "gps_employee_id_original": "gpsEmployeeId",
+      "vehicle_name_original": "vehicleName",
+      "vehicle_number_original": "vehicleNumber",
+      "license_plate_original": "licensePlate",
+      "start_location_original": "startLocation",
+      "stop_location_original": "stopLocation",
+      "start_time_original": "startTime",
+      "arrival_time_original": "arrivalTime",
+      "departure_time_original": "departureTime",
+      "travel_seconds_original": "travelSeconds",
+      "stay_seconds_original": "staySeconds",
+      "idle_seconds_original": "idleSeconds",
+      "distance_km_original": "distanceKm",
+      "odometer_start_original": "odometerStart",
+      "odometer_end_original": "odometerEnd",
+      "start_lat_original": "startLat",
+      "start_lng_original": "startLng",
+      "stop_lat_original": "stopLat",
+      "stop_lng_original": "stopLng",
+      "fuel_type_original": "fuelType",
+      "private_marked_at_original": "privateMarkedAt",
+      "assigned_employee_id_original": "assignedEmployeeId",
+      "assigned_employee_name_original": "assignedEmployeeName",
+      "assignment_updated_at_original": "assignmentUpdatedAt"
+    },
+    "bools": {
+      "is_private_original": "isPrivate"
+    },
+    "jsons": {
+      "passengers_original": "passengers",
+      "change_history": "changeHistory"
+    }
+  }
+}
