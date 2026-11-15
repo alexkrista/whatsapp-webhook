@@ -64,7 +64,41 @@
           try { await request("/" + encodeURIComponent(item.id), { method: "PATCH", body: JSON.stringify({ status: select.value }) }); report("Status gespeichert."); await refresh(); }
           catch (error) { report(error.message); await refresh(); }
         });
-        card.append(title, date, note, actions, select);
+        const supplierLabel = document.createElement("label");
+        supplierLabel.textContent = "Lieferant zuordnen: ";
+        const supplierInput = document.createElement("input");
+        supplierInput.type = "text";
+        supplierInput.maxLength = 90;
+        supplierInput.setAttribute("list", "krista-suppliers");
+        supplierInput.setAttribute("aria-label", "Lieferant auswählen oder eingeben");
+        supplierInput.value = item.supplier === "Lieferant noch zuordnen" ? "" : item.supplier;
+        supplierInput.placeholder = "Lieferant auswählen oder eingeben";
+        supplierInput.style.cssText = "width:100%;padding:.65rem;margin:.3rem 0;min-height:44px";
+        const saveSupplier = button("Zuordnung speichern", async () => {
+          const value = supplierInput.value.trim();
+          if (!value) { report("Bitte Lieferanten auswählen oder eingeben."); return; }
+          saveSupplier.disabled = true;
+          try {
+            await request("/" + encodeURIComponent(item.id), { method: "PATCH", body: JSON.stringify({ supplier: value }) });
+            await refresh(); report("Lieferant zugeordnet.");
+          } catch (error) { report(error.message); saveSupplier.disabled = false; }
+        });
+        supplierLabel.append(supplierInput);
+        const noteLabel = document.createElement("label");
+        noteLabel.textContent = "Krista-Kommentar bearbeiten: ";
+        const noteInput = document.createElement("textarea");
+        noteInput.rows = 2; noteInput.maxLength = 1200;
+        noteInput.value = item.note || "";
+        noteInput.style.cssText = "display:block;width:100%;padding:.65rem;margin:.3rem 0";
+        const saveNote = button("Kommentar speichern", async () => {
+          saveNote.disabled = true;
+          try {
+            await request("/" + encodeURIComponent(item.id), { method: "PATCH", body: JSON.stringify({note:noteInput.value}) });
+            await refresh(); report("Kommentar gespeichert.");
+          } catch (error) { report(error.message); saveNote.disabled = false; }
+        });
+        noteLabel.append(noteInput);
+        card.append(title, date, note, supplierLabel, saveSupplier, noteLabel, saveNote, actions, select);
         list.append(card);
       }
       report("");

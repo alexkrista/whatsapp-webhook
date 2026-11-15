@@ -50,6 +50,11 @@ test("routes require admin and save entries without duplicate URLs", async () =>
     assert.equal(call("PATCH", base+"/:id", {id,status:"ungueltig"}).status, 400);
     assert.equal(call("PATCH", base+"/:id", {id,status:"freigabe"}).status, 200);
     assert.equal(call("GET", base).payload.items[0].status, "freigabe");
+    assert.equal(call("PATCH", base+"/:id", {id,supplier:"Arte",note:"Neuer Kommentar"}).status, 200);
+    assert.equal(call("GET", base).payload.items[0].supplier, "Arte");
+    assert.equal(call("GET", base).payload.items[0].note, "Neuer Kommentar");
+    assert.equal(call("GET", base).payload.items[0].status, "freigabe");
+    assert.equal(call("PATCH", base+"/:id", {id,supplier:""}).status, 400);
     assert.equal(call("GET", base, {}, false).status, 401);
   } finally { fs.rmSync(folder, {recursive:true, force:true}); }
 });
