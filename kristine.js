@@ -1327,7 +1327,7 @@ const open = taskId
   }
 
   const { registerSupplierStoryPool } = require("./supplier-story-pool");
-  registerSupplierStoryPool(app, requireAdmin);
+  registerSupplierStoryPool(app, requireAdmin, { file: path.join(dataDir || process.env.DATA_DIR || "/var/data", "_kristine", "supplier-story-items.json") });
   app.get("/kristine/story-pool/supplier-ui.js", serveStoryPoolFile("supplier-ui.js"));
 
   app.get("/kristine/story-pool", serveStoryPoolFile("index.html"));
