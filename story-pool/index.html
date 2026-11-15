@@ -50,6 +50,18 @@ figure img{display:block;width:100%;max-width:250px;height:auto;margin:0 auto .8
   </div>
   <p id="booking"><a href="https://www.etermin.net/FarbenKristaTermine" target="_blank" rel="noreferrer">Krista-Buchungsseite</a> · <button type="button" data-copy="booking">Buchungslink kopieren</button></p>
 </section>
+<section id="supplier-pool" aria-labelledby="supplier-pool-title">
+  <h2 id="supplier-pool-title">Lieferanten-Stories übernehmen</h2>
+  <p class="note">Instagram-Link einfügen und als Idee speichern. KRISTINE übernimmt keinen fremden Story-Inhalt ohne Berechtigung. Original teilen öffnet Instagram; Canva öffnet den Editor, eine automatische Übernahme findet noch nicht statt.</p>
+  <form id="supplier-form" class="card">
+    <label>Instagram- oder Lieferanten-Link <input name="link" type="url" required placeholder="https://www.instagram.com/..." style="display:block;width:100%;padding:.7rem;margin:.4rem 0 1rem"></label>
+    <label>Lieferant (optional) <input name="supplier" type="text" maxlength="90" placeholder="wird aus dem Link vorgeschlagen" style="display:block;width:100%;padding:.7rem;margin:.4rem 0 1rem"></label>
+    <label>Krista-Kommentar (optional) <textarea name="note" rows="3" maxlength="1200" placeholder="Was gefällt uns daran?" style="display:block;width:100%;padding:.7rem;margin:.4rem 0 1rem"></textarea></label>
+    <button type="submit">Im Ideenpool speichern</button>
+  </form>
+  <p id="supplier-message" role="status" class="note" aria-live="polite"></p>
+  <div id="supplier-list" class="grid"></div>
+</section>
 <section><h2>Reposts mit Original-Link</h2><div class="grid">
 <article class="card">
   <h3>Little Greene · French Grey</h3>
@@ -155,5 +167,6 @@ document.addEventListener("click", async (event) => {
   }
 });
 </script>
+<script src="/kristine/story-pool/supplier-ui.js" defer></script>
 </body>
 </html>

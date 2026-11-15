@@ -1326,6 +1326,10 @@ const open = taskId
     };
   }
 
+  const { registerSupplierStoryPool } = require("./supplier-story-pool");
+  registerSupplierStoryPool(app, requireAdmin);
+  app.get("/kristine/story-pool/supplier-ui.js", serveStoryPoolFile("supplier-ui.js"));
+
   app.get("/kristine/story-pool", serveStoryPoolFile("index.html"));
   app.get("/kristine/story-pool/cozy.jpg", serveStoryPoolFile("cozy.jpg"));
   app.get("/kristine/story-pool/schauraum.jpg", serveStoryPoolFile("schauraum.jpg"));
