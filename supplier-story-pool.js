@@ -63,12 +63,20 @@ function registerSupplierStoryPool(app, requireAdmin, options = {}) {
   });
   app.patch("/kristine/api/supplier-stories/:id", (req, res) => {
     if (!requireAdmin(req, res)) return;
-    if (!validStatuses.has(req.body?.status)) return res.status(400).json({ error: "Unbekannter Status." });
+    const status = req.body?.status;
+    const supplier = req.body?.supplier;
+    const note = req.body?.note;
+    if (status !== undefined && !validStatuses.has(status)) return res.status(400).json({ error: "Unbekannter Status." });
+    if (supplier !== undefined && (typeof supplier !== "string" || !supplier.trim() || supplier.length > 90)) return res.status(400).json({ error: "Lieferant fehlt oder ist zu lang." });
+    if (note !== undefined && (typeof note !== "string" || note.length > 1200)) return res.status(400).json({ error: "Kommentar ist zu lang." });
+    if (status === undefined && supplier === undefined && note === undefined) return res.status(400).json({ error: "Keine Änderung angegeben." });
     try {
       const items = load();
       const item = items.find((x) => x.id === req.params.id);
       if (!item) return res.status(404).json({ error: "Eintrag nicht gefunden." });
-      item.status = req.body.status;
+      if (status !== undefined) item.status = status;
+      if (supplier !== undefined) item.supplier = supplier.trim();
+      if (note !== undefined) item.note = note;
       item.updatedAt = new Date().toISOString();
       save(items); res.json({ item });
     } catch { res.status(500).json({ error: "Status konnte nicht gespeichert werden." }); }
