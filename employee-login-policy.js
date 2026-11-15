@@ -6,6 +6,9 @@ function personalLoginEnabled() {
 function personalLoginAllowed(employee) {
   if (!employee || employee.active === false) return false;
   const mode=process.env.KRISTINE_PERSONAL_LOGIN_ENABLED;
-  return mode === 'true' || (mode === 'alexander' && isAlexander(employee));
+  // Keep PR #142's isolated Alexander path independent of employee grants.
+  // General login must fail closed for records without an explicit grant.
+  return (mode === 'true' && employee.kristineAccess === true) ||
+    (mode === 'alexander' && isAlexander(employee));
 }
 module.exports={personalLoginEnabled,personalLoginAllowed};
