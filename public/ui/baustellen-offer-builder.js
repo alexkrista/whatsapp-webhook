@@ -101,7 +101,7 @@
   function roomRegiePositions(){const rooms=(draft.rooms||[]).filter(r=>r.includeRegie===true),old=(draft.positions||[]).find(p=>p.unit==="Std"),fallback=+old?.quantity||+draft.measurement?.hours||0;return rooms.map((r,i)=>costing({groupId:r.id||`room-${i+1}`,groupName:r.name||`Raum ${i+1}`,text:"Regiearbeiten durch qualifizierte Facharbeiter",quantity:+r.regieHours||(rooms.length===1?fallback:0),unit:"Std",unitPrice:+draft.measurement?.hourlyRate||75}))}
   // Removed auto-generated items must stay removed even after the room is recalculated.
   function generatedPositionKey(p){return JSON.stringify([String(p?.groupId||p?.groupName||""),String(p?.text||"")])}
-  function positionSuppressed(p){return Array.isArray(draft?.removedGeneratedPositionKeys)&&draft.removedGeneratedPositionKeys.includes(generatedPositionKey(p))}
+  function positionSuppressed(p){const keys=Array.isArray(draft?.removedGeneratedPositionKeys)?draft.removedGeneratedPositionKeys:[];if(draft?.offerType==="bathroom_compact")return keys.some(key=>{try{return JSON.parse(key)?.[1]===String(p?.text||"")}catch{return false}});return keys.includes(generatedPositionKey(p))}
   function positions(){return ensureRegiePairs(basePositions()).filter(p=>!positionSuppressed(p))}
   function removeOfferPositionAt(index){
     const p=draft?.positions?.[index];
@@ -129,7 +129,119 @@
     const cover=coverPosition(),out=[],roomRegie=roomRegiePositions(),m=draft.measurement||{},selected=draft.parts||[],parts=selected.includes("Wände")&&selected.includes("Decken")?["Wände + Decken",...selected.filter(x=>x!=="Wände"&&x!=="Decken")]:selected,rooms=draft.rooms||[];const targets=rooms.length?rooms.map((r,i)=>({id:r.id||`room-${i+1}`,name:r.name||`Raum ${i+1}`,areas:oneRoomAreas(r)})):[{id:"general",name:"Allgemein",areas:{walls:m.wallArea||roomAreas().walls,ceiling:m.ceilingArea||roomAreas().ceiling}}];for(const target of targets){if(cover)out.push({...cover,groupId:target.id,groupName:target.name});for(const part of parts)for(const key of draft.steps||[]){if(roomRegie.length&&(key==="Regie"||key==="Material"))continue;const x=INTERIOR.find(y=>y.key===key);if(x){const q=key==="Regie"?(+m.hours||0):key==="Material"?0:part==="Wände + Decken"?target.areas.walls+target.areas.ceiling:part==="Wände"?target.areas.walls:part==="Decken"?target.areas.ceiling:part==="Türen"?(+m.doors||0):part==="Fenster"?(+m.windows||0):part==="Heizkörper"?(+m.radiators||0):(+m.perimeter||0);out.push(costing({groupId:target.id,groupName:target.name,text:`${part}: ${POLISHED[key]||x.text}`,quantity:+q.toFixed(2),unit:key==="Regie"?"Std":key==="Material"?"VE":x.unit,unitPrice:x.price}))}}const roomRegieForTarget=roomRegie.find(p=>p.groupId===target.id);if(roomRegieForTarget)out.push(roomRegieForTarget)}return out;
   }
   function syncPositionRoomNames(){const rooms=Array.isArray(draft?.rooms)?draft.rooms:[];const byId=new Map(rooms.filter(r=>r.id).map(r=>[String(r.id),String(r.name||'').trim()]));for(const p of draft?.positions||[]){const matching=byId.get(String(p.groupId||''));if(matching)p.groupName=matching}}
-  function syncPositions(recalculate=false){const oldPositions=draft.positions||[],custom=oldPositions.filter(p=>p.isCustom===true),key=p=>`${p.groupId||p.groupName||""}\u0000${p.text||""}`,old=new Map(oldPositions.filter(p=>!p.isCustom).map(p=>[key(p),p]));const generated=positions().filter(p=>!p.isCustom).map(p=>{const was=old.get(key(p));return was?{...p,...was,groupId:p.groupId||"",groupName:p.groupName||"",quantity:recalculate&&!was.quantityFormula?p.quantity:was.quantity}:p});const groupOrder=new Map((draft.rooms||[]).map((r,i)=>[r.id||`room-${i+1}`,i]));draft.positions=[...generated,...custom].sort((a,b)=>(groupOrder.get(a.groupId)??9999)-(groupOrder.get(b.groupId)??9999));renderPositions();renderAreaResult()}
+  function ensureBathSections(){
+    if(draft?.offerType!=="bathroom_compact")return;
+    if(!Array.isArray(draft.bathSections)||!draft.bathSections.length)
+      draft.bathSections=[{id:"bath-section-1",name:"Badezimmer"}];
+    const sections=draft.bathSections;
+    for(const position of draft.positions||[]){
+      const selected=sections.find(x=>x.id===position.groupId)||sections[0];
+      position.groupId=selected.id;
+      position.groupName=selected.name;
+    }
+    draft.collapsedGroups=draft.collapsedGroups||{};
+    for(const section of sections)
+      if(draft.collapsedGroups[section.name]==null)draft.collapsedGroups[section.name]=false;
+  }
+  function mountBathSections(){
+    const editor=document.getElementById("koffer"),positions=editor?.querySelector("#kofferPositions");
+    if(!editor||!positions)return;
+    const previous=editor.querySelector("#kofferBathSections");
+    if(draft?.offerType!=="bathroom_compact"){previous?.remove();return}
+    ensureBathSections();
+    let panel=previous;
+    if(!panel){
+      panel=document.createElement("section");
+      panel.id="kofferBathSections";panel.className="koffer-rooms";
+      const heading=[...editor.querySelectorAll("h4")].find(x=>x.textContent.trim()==="Angebotspositionen");
+      (heading||positions).before(panel);
+    }
+    const sections=draft.bathSections;
+    const fmt=n=>Number(n||0).toLocaleString("de-AT",{style:"currency",currency:"EUR"});
+    panel.innerHTML='<div class="koffer-room-head"><div><h4>Räume / Abschnitte</h4><small>Positionen je Raum getrennt, mit Zwischensumme im Angebot.</small></div><button type="button" data-bath-add>+ Raum / Abschnitt</button></div>'+
+      sections.map((section,index)=>{
+        const items=(draft.positions||[]).filter(x=>x.groupId===section.id);
+        const total=items.filter(x=>x.isAlternative!==true).reduce((sum,x)=>sum+(+x.quantity||0)*(+x.unitPrice||0),0);
+        return '<div class="koffer-bath-section" data-bath-section="'+index+'"><label><strong>'+(index+1)+'.</strong> Raumname <input data-bath-name value="'+esc(section.name)+'" maxlength="160" placeholder="z. B. Gäste-WC"></label><span>'+items.length+' Positionen · '+fmt(total)+'</span>'+(index?'<button type="button" data-bath-copy>Leistungen vom ersten Raum kopieren</button><button type="button" data-bath-remove>Raum entfernen</button>':'')+'</div>';
+      }).join("")+'<p class="koffer-note">Die Mengen der kopierten Leistungen bitte für den jeweiligen Raum anpassen. Änderungen mit „Angebotsentwurf speichern“ sichern.</p>';
+    panel.querySelector("[data-bath-add]").onclick=()=>{
+      if(sections.length>=20){alert("Maximal 20 Räume/Abschnitte.");return}
+      sections.push({id:"bath-section-"+Date.now()+"-"+sections.length,name:"Raum "+(sections.length+1)});
+      renderPositions();
+    };
+    panel.querySelectorAll("[data-bath-section]").forEach(row=>{
+      const index=+row.dataset.bathSection,section=sections[index];
+      row.querySelector("[data-bath-name]").onchange=e=>{
+        const next=e.target.value.trim();
+        if(!next||sections.some((other,i)=>i!==index&&other.name===next)){alert("Bitte einen eindeutigen Raumnamen eingeben.");e.target.value=section.name;return}
+        const old=section.name;section.name=next;
+        for(const item of draft.positions||[])if(item.groupId===section.id)item.groupName=next;
+        if(draft.collapsedGroups&&Object.prototype.hasOwnProperty.call(draft.collapsedGroups,old)){
+          draft.collapsedGroups[next]=draft.collapsedGroups[old];delete draft.collapsedGroups[old];
+        }
+        renderPositions();
+      };
+      const copy=row.querySelector("[data-bath-copy]");
+      if(copy)copy.onclick=()=>{
+        if((draft.positions||[]).some(x=>x.groupId===section.id)){alert("Dieser Raum enthält bereits Positionen. Bitte vorhandene Positionen einzeln zuordnen.");return}
+        const source=(draft.positions||[]).filter(x=>x.groupId===sections[0].id);
+        if(!source.length){alert("Im ersten Raum sind keine Leistungen vorhanden.");return}
+        if(draft.positions.length+source.length>120){alert("Maximal 120 Angebotspositionen.");return}
+        const copies=source.map(item=>{
+          const result=JSON.parse(JSON.stringify(item));
+          result.id="bath-copy-"+Date.now()+"-"+Math.random().toString(36).slice(2,8);
+          result.isCustom=true;result.groupId=section.id;result.groupName=section.name;
+          return result;
+        });
+        draft.positions.push(...copies);renderPositions();
+      };
+      const remove=row.querySelector("[data-bath-remove]");
+      if(remove)remove.onclick=()=>{
+        if((draft.positions||[]).some(x=>x.groupId===section.id)){alert("Zuerst alle Positionen aus diesem Raum verschieben oder entfernen.");return}
+        sections.splice(index,1);renderPositions();
+      };
+    });
+    positions.querySelectorAll(".koffer-pos[data-i]").forEach(card=>{
+      if(card.querySelector("[data-bath-assign]"))return;
+      const item=draft.positions[Number(card.dataset.i)];
+      if(!item)return;
+      const label=document.createElement("label");
+      label.className="koffer-bath-assign";
+      label.textContent="Raum / Abschnitt: ";
+      const select=document.createElement("select");select.dataset.bathAssign="1";
+      for(const section of sections){
+        const option=document.createElement("option");
+        option.value=section.id;option.textContent=section.name;select.append(option);
+      }
+      select.value=item.groupId;
+      select.onchange=()=>{
+        const chosen=sections.find(x=>x.id===select.value);
+        if(!chosen)return;
+        item.groupId=chosen.id;item.groupName=chosen.name;
+        draft.positions.sort((a,b)=>sections.findIndex(x=>x.id===a.groupId)-sections.findIndex(x=>x.id===b.groupId));
+        renderPositions();
+      };
+      label.append(select);
+      card.querySelector(".koffer-pos-main")?.after(label);
+    });
+  }
+  function syncPositions(recalculate=false){
+    if(draft?.offerType==="bathroom_compact"){
+      ensureBathSections();
+      const original=draft.positions||[];
+      const existing=new Map(original.filter(x=>x.isCustom!==true).map(x=>[String(x.text||""),x]));
+      const sections=draft.bathSections,first=sections[0];
+      const generated=positions().filter(x=>x.isCustom!==true).map(x=>{
+        const previous=existing.get(String(x.text||""));
+        const section=sections.find(r=>r.id===previous?.groupId)||first;
+        return {...x,...(previous||{}),groupId:section.id,groupName:section.name,
+          quantity:recalculate&&previous&&!previous.quantityFormula?x.quantity:(previous?.quantity??x.quantity)};
+      });
+      const custom=original.filter(x=>x.isCustom===true);
+      draft.positions=[...generated,...custom].sort((a,b)=>sections.findIndex(x=>x.id===a.groupId)-sections.findIndex(x=>x.id===b.groupId));
+      renderPositions();renderAreaResult();return;
+    }
+    const oldPositions=draft.positions||[],custom=oldPositions.filter(p=>p.isCustom===true),key=p=>`${p.groupId||p.groupName||""}\u0000${p.text||""}`,old=new Map(oldPositions.filter(p=>!p.isCustom).map(p=>[key(p),p]));const generated=positions().filter(p=>!p.isCustom).map(p=>{const was=old.get(key(p));return was?{...p,...was,groupId:p.groupId||"",groupName:p.groupName||"",quantity:recalculate&&!was.quantityFormula?p.quantity:was.quantity}:p});const groupOrder=new Map((draft.rooms||[]).map((r,i)=>[r.id||`room-${i+1}`,i]));draft.positions=[...generated,...custom].sort((a,b)=>(groupOrder.get(a.groupId)??9999)-(groupOrder.get(b.groupId)??9999));renderPositions();renderAreaResult()}
   function calculatedPrice(p){const labor=(+p.laborHoursPerUnit||0)*(+p.hourlyRate||0),material=(+p.materialCostPerUnit||0)*(1+(+p.materialMarkupPct||0)/100);return Math.max(0,(labor+material)*(1+(+p.adjustmentPct||0)/100))}
   function ensureRegiePairs(rows=draft?.positions||[]){
     if(!draft)return rows;
@@ -174,6 +286,7 @@
   }
   function renderPositions(){
     const h=document.getElementById("kofferPositions");if(!h)return;
+    ensureBathSections();
     window.KristaOfferNotepad?.apply(draft);
     normalizeFacadeGroups();
     ensureRegiePairs();
@@ -181,7 +294,7 @@
     const options=materialMaster.map(m=>`<option value="${esc(m.product||m.name||m.label||m.materialId||"")}" label="${esc([m.manufacturer,m.productLine,m.unit].filter(Boolean).join(" · "))}"></option>`).join("");
     const cards=(draft.positions||[]).map((raw,i,all)=>{const p=costing(raw);Object.assign(raw,p);const group=String(p.groupName||""),before=group&&String(all[i-1]?.groupName||"")!==group?`<div class="koffer-group-title">${esc(group)}</div>`:"",after=group&&String(all[i+1]?.groupName||"")!==group?`<div class="koffer-group-total"><span>Summe ${esc(group)}</span><strong>${all.filter(x=>x.groupName===group).reduce((s,x)=>s+(+x.quantity||0)*(+x.unitPrice||0),0).toLocaleString("de-AT",{style:"currency",currency:"EUR"})}</strong></div>`:"";const steps=p.workSteps.map((s,n)=>`<tr><td><input data-work-text="${n}" value="${esc(s.text||"")}" placeholder="Arbeitsschritt"></td><td><input data-work-min="${n}" type="number" min="0" step="1" value="${s.minutes||""}" placeholder="Min."></td><td><button data-remove-work="${n}" title="Entfernen">×</button></td></tr>`).join("");const mats=p.materials.map((m,n)=>`<tr><td><input data-mat-name="${n}" list="kofferMaterialMaster" value="${esc(m.name||"")}" placeholder="Material aus Stamm">${m.sourceQuote?.documentId?`<small style="display:block"><a target="_blank" rel="noopener noreferrer" href="${url("/admin/api/offer-supplier-document/"+encodeURIComponent(m.sourceQuote.documentId))}">Quelle: ${esc(m.sourceQuote.reference||m.sourceQuote.filename||"Lieferantenangebot")}</a></small>`:""}</td><td><input data-mat-price="${n}" type="number" min="0" step="0.01" value="${m.unitPrice||""}" placeholder="€/Einheit"><small>${esc(m.unit||"")}</small></td><td><input data-mat-use="${n}" type="number" min="0" step="0.001" value="${m.consumption||""}" placeholder="Verbrauch"></td><td><strong data-mat-result="${n}">€ ${((+m.unitPrice||0)*(+m.consumption||0)).toLocaleString("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></td><td><button data-remove-mat="${n}" title="Entfernen">×</button></td></tr>`).join("");return `${before}<div class="koffer-pos" data-i="${i}"><div class="koffer-pos-main"><strong>${i+1}.</strong><span>${esc(p.text)}</span><input data-f="quantity" type="number" min="0" step="0.01" value="${p.quantity||""}" placeholder="Menge"><input data-f="unit" value="${esc(p.unit)}"><input data-f="unitPrice" type="number" min="0" step="0.01" value="${p.unitPrice||""}" placeholder="€/Einheit"><button type="button" class="koffer-remove-position" data-remove-position title="Diese Position entfernen">× Entfernen</button></div><div class="koffer-facts"><span class="koffer-fact" data-fact="hours">Zeit ${p.laborHoursPerUnit.toLocaleString("de-AT")} h/Einh.</span><span class="koffer-fact" data-fact="rate">Stundensatz € ${p.hourlyRate.toLocaleString("de-AT")}${p.hourlyRateOverridden?" · abweichend":""}</span><span class="koffer-fact" data-fact="material">Material € ${p.materialCostPerUnit.toLocaleString("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2})}</span><span class="koffer-fact" data-fact="markup">Materialaufschlag ${p.materialMarkupPct.toLocaleString("de-AT")} %${p.materialMarkupOverridden?" · abweichend":""}</span><span class="koffer-fact" data-fact="adjust">Ab-/Zuschlag ${p.adjustmentPct>0?"+":""}${p.adjustmentPct.toLocaleString("de-AT")} %</span></div><details class="koffer-detail"><summary>Kalkulation dieser Position</summary><div class="koffer-detail-grid"><label>Zeit je Einheit (h)<input data-calc="laborHoursPerUnit" type="number" min="0" step="0.01" value="${p.laborHoursPerUnit||""}" readonly></label><label>Stundensatz €<input data-calc="hourlyRate" type="number" min="0" step="0.01" value="${p.hourlyRate}"></label><label>Material je Einheit €<input data-calc="materialCostPerUnit" type="number" min="0" step="0.01" value="${p.materialCostPerUnit||""}" readonly></label><label>Materialaufschlag %<input data-calc="materialMarkupPct" type="number" min="-100" step="0.1" value="${p.materialMarkupPct}"></label><label>Ab-/Zuschlag auf beides %<input data-calc="adjustmentPct" type="number" min="-100" step="0.1" value="${p.adjustmentPct}"></label></div><table class="koffer-work"><thead><tr><th>Arbeitsschritt</th><th>Minuten</th><th></th></tr></thead><tbody>${steps}</tbody></table><button class="koffer-add-step" data-add-work>+ Arbeitsschritt</button><table class="koffer-work"><thead><tr><th>Material aus Stamm</th><th>Preis je Einheit</th><th>Verbrauch</th><th>Ergebnis</th><th></th></tr></thead><tbody>${mats}</tbody></table><button class="koffer-add-step" data-add-mat>+ Material</button></details></div>${after}`}).join("");
     h.innerHTML=`<datalist id="kofferMaterialMaster">${options}</datalist>${cards||'<div class="koffer-note">Bitte gewünschte Positionen auswählen.</div>'}`;
-    queueMicrotask(()=>{enhanceGroupTotals();enhanceCollapsibleGroups();moveOfferPositionsIntoRooms();mountOfferNotepad();mountSupplierQuoteUi();refreshPositionTotals()});
+    queueMicrotask(()=>{enhanceGroupTotals();enhanceCollapsibleGroups();moveOfferPositionsIntoRooms();mountOfferNotepad();mountSupplierQuoteUi();refreshPositionTotals();mountBathSections()});
     const update=(row,p)=>{p.laborHoursPerUnit=+(p.workSteps.reduce((s,x)=>s+(+x.minutes||0),0)/60).toFixed(4);p.materialCostPerUnit=+p.materials.reduce((s,x)=>s+(+x.unitPrice||0)*(+x.consumption||0),0).toFixed(2);p.unitPrice=+calculatedPrice(p).toFixed(2);row.querySelector('[data-f="unitPrice"]').value=p.unitPrice||"";row.querySelector('[data-calc="laborHoursPerUnit"]').value=p.laborHoursPerUnit||"";row.querySelector('[data-calc="materialCostPerUnit"]').value=p.materialCostPerUnit||"";row.querySelector('[data-fact="hours"]').textContent=`Zeit ${p.laborHoursPerUnit.toLocaleString("de-AT")} h/Einh.`;row.querySelector('[data-fact="material"]').textContent=`Material € ${p.materialCostPerUnit.toLocaleString("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2})}`};
     const totalRoot=document.getElementById("koffer");if(totalRoot&&!totalRoot.dataset.totalRefreshListener){totalRoot.dataset.totalRefreshListener="1";for(const ev of ["input","change"])totalRoot.addEventListener(ev,e=>{if(e.target.closest(".koffer-pos"))queueMicrotask(refreshPositionTotals)});}
     h.querySelectorAll("[data-i]").forEach(row=>{const p=draft.positions[Number(row.dataset.i)];const deleteButton=row.querySelector("[data-remove-position]");if(deleteButton)deleteButton.onclick=e=>{e.preventDefault();e.stopPropagation();removeOfferPositionAt(Number(row.dataset.i))};row.querySelectorAll("[data-f]").forEach(input=>input.oninput=()=>{const f=input.dataset.f;p[f]=f==="unit"?input.value:Math.max(0,Number(input.value||0));if(f==="unitPrice")p.regieMaterialManual=true});row.querySelectorAll("[data-calc]").forEach(input=>{if(input.readOnly)return;input.oninput=()=>{const f=input.dataset.calc,v=Number(input.value||0);p[f]=f==="adjustmentPct"||f==="materialMarkupPct"?Math.max(-100,v):Math.max(0,v);if(f==="hourlyRate")p.hourlyRateOverridden=true;if(f==="materialMarkupPct")p.materialMarkupOverridden=true;update(row,p);row.querySelector('[data-fact="rate"]').textContent=`Stundensatz € ${p.hourlyRate.toLocaleString("de-AT")} · abweichend`;row.querySelector('[data-fact="markup"]').textContent=`Materialaufschlag ${p.materialMarkupPct.toLocaleString("de-AT")} %${p.materialMarkupOverridden?" · abweichend":""}`;row.querySelector('[data-fact="adjust"]').textContent=`Ab-/Zuschlag ${p.adjustmentPct>0?"+":""}${p.adjustmentPct.toLocaleString("de-AT")} %`}});row.querySelectorAll("[data-work-text]").forEach(x=>x.oninput=()=>p.workSteps[+x.dataset.workText].text=x.value);row.querySelectorAll("[data-work-min]").forEach(x=>x.oninput=()=>{p.workSteps[+x.dataset.workMin].minutes=Math.max(0,+x.value||0);update(row,p)});row.querySelectorAll("[data-remove-work]").forEach(x=>x.onclick=()=>{p.workSteps.splice(+x.dataset.removeWork,1);renderPositions()});row.querySelector("[data-add-work]").onclick=()=>{p.workSteps.push({text:"",minutes:0});renderPositions()};row.querySelectorAll("[data-mat-name]").forEach(x=>x.onchange=()=>{const m=p.materials[+x.dataset.matName],found=materialMaster.find(y=>String(y.name||y.label||"").toLowerCase()===x.value.trim().toLowerCase());m.name=x.value.trim();if(found){m.materialId=found.materialId||found.id||"";m.unit=found.unit||"";m.unitPrice=Number(found.purchasePrice||found.salePrice||0)}update(row,p);renderPositions()});row.querySelectorAll("[data-mat-price]").forEach(x=>x.oninput=()=>{p.materials[+x.dataset.matPrice].unitPrice=Math.max(0,+x.value||0);update(row,p);row.querySelector(`[data-mat-result="${x.dataset.matPrice}"]`).textContent=`€ ${((+x.value||0)*(+p.materials[+x.dataset.matPrice].consumption||0)).toLocaleString("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2})}`});row.querySelectorAll("[data-mat-use]").forEach(x=>x.oninput=()=>{p.materials[+x.dataset.matUse].consumption=Math.max(0,+x.value||0);update(row,p);row.querySelector(`[data-mat-result="${x.dataset.matUse}"]`).textContent=`€ ${((+x.value||0)*(+p.materials[+x.dataset.matUse].unitPrice||0)).toLocaleString("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2})}`});row.querySelectorAll("[data-remove-mat]").forEach(x=>x.onclick=()=>{p.materials.splice(+x.dataset.removeMat,1);renderPositions()});row.querySelector("[data-add-mat]").onclick=()=>{p.materials.push({materialId:"",name:"",unit:"",unitPrice:0,consumption:0});renderPositions()}})
