@@ -1040,6 +1040,7 @@ class OutgoingStore:
         ))
         data.update({
             "invoiceCount": len([x for x in invoices if x["status"] != "cancelled"]),
+            "invoiceNumbers": list(dict.fromkeys(str(x["invoice_number"]).strip() for x in invoices if x["invoice_number"])),
             "paidGross": _num(paid["gross"]),
             "currentGross": _num(billed_gross),
             "currentOpen": _num(_money(billed_gross - paid["gross"])),
