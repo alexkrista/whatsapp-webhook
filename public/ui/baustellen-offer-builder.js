@@ -162,12 +162,15 @@
       sections.map((section,index)=>{
         const items=(draft.positions||[]).filter(x=>x.groupId===section.id);
         const total=items.filter(x=>x.isAlternative!==true).reduce((sum,x)=>sum+(+x.quantity||0)*(+x.unitPrice||0),0);
-        return '<div class="koffer-bath-section" data-bath-section="'+index+'"><label><strong>'+(index+1)+'.</strong> Raumname <input data-bath-name value="'+esc(section.name)+'" maxlength="160" placeholder="z. B. Gäste-WC"></label><span>'+items.length+' Positionen · '+fmt(total)+'</span>'+(index?'<button type="button" data-bath-copy>Leistungen vom ersten Raum kopieren</button><button type="button" data-bath-remove>Raum entfernen</button>':'')+'</div>';
-      }).join("")+'<p class="koffer-note">Die Mengen der kopierten Leistungen bitte für den jeweiligen Raum anpassen. Änderungen mit „Angebotsentwurf speichern“ sichern.</p>';
+        return '<div class="koffer-bath-section" data-bath-section="'+index+'"><label><strong>'+(index+1)+'.</strong> Raumname <input data-bath-name value="'+esc(section.name)+'" maxlength="160" placeholder="z. B. Gäste-WC"></label><span>'+items.length+' Positionen · '+fmt(total)+'</span><button type="button" data-bath-new-position>+ Freie Position</button><button type="button" data-bath-regie>+ Regie</button><select data-bath-template aria-label="Position aus Stamm" style="max-width:260px"><option value="">Position aus Stamm auswählen</option></select><button type="button" data-bath-add-template>+ Stammposition</button>'+(index?'<button type="button" data-bath-copy>Leistungen kopieren (optional)</button><button type="button" data-bath-remove>Raum entfernen</button>':'')+'</div>';
+      }).join("")+'<p class="koffer-note">Neuer Raum startet ohne Positionen. Eigene Leistungen hinzufügen oder optional kopieren. Danach Angebotsentwurf speichern.</p>';
     panel.querySelector("[data-bath-add]").onclick=()=>{
       if(sections.length>=20){alert("Maximal 20 Räume/Abschnitte.");return}
-      sections.push({id:"bath-section-"+Date.now()+"-"+sections.length,name:"Raum "+(sections.length+1)});
+      const room={id:"bath-section-"+Date.now()+"-"+sections.length,name:"Raum "+(sections.length+1)};
+      sections.push(room);
       renderPositions();
+      const inputs=editor.querySelectorAll("#kofferBathSections [data-bath-name]");
+      const input=inputs[inputs.length-1];if(input){input.focus();input.select()}
     };
     panel.querySelectorAll("[data-bath-section]").forEach(row=>{
       const index=+row.dataset.bathSection,section=sections[index];
@@ -179,6 +182,54 @@
         if(draft.collapsedGroups&&Object.prototype.hasOwnProperty.call(draft.collapsedGroups,old)){
           draft.collapsedGroups[next]=draft.collapsedGroups[old];delete draft.collapsedGroups[old];
         }
+        renderPositions();
+      };
+      const addPosition=row.querySelector("[data-bath-new-position]");
+      if(addPosition)addPosition.onclick=()=>{
+        if((draft.positions||[]).length>=120){alert("Maximal 120 Angebotspositionen.");return}
+        const name=prompt("Leistungsbeschreibung für "+section.name+":");
+        if(name===null)return;
+        if(!name.trim()){alert("Bitte eine Leistungsbeschreibung eingeben.");return}
+        draft.positions.push(costing({
+          id:"bath-own-"+Date.now()+"-"+Math.random().toString(36).slice(2,8),
+          isCustom:true,groupId:section.id,groupName:section.name,
+          text:name.trim().slice(0,1000),quantity:1,unit:"m²",unitPrice:0,
+          workSteps:[],materials:[],laborHoursPerUnit:0
+        }));
+        draft.positions.sort((a,b)=>sections.findIndex(x=>x.id===a.groupId)-sections.findIndex(x=>x.id===b.groupId));
+        renderPositions();
+      };
+      const templates=row.querySelector("[data-bath-template]");
+      if(templates)for(const [i,template] of offerPositionTemplates.entries()){
+        const option=document.createElement("option");option.value=String(i);
+        option.textContent=String(template.group||"Position")+" · "+String(template.text||"").slice(0,90);
+        templates.append(option);
+      }
+      const addFromMaster=row.querySelector("[data-bath-add-template]");
+      if(addFromMaster)addFromMaster.onclick=()=>{
+        if(templates.value===""){alert("Bitte zuerst eine Stammposition auswählen.");return}
+        const template=offerPositionTemplates[Number(templates.value)];
+        if(!template)return;
+        if((draft.positions||[]).length>=120){alert("Maximal 120 Positionen.");return}
+        const item=costing({...JSON.parse(JSON.stringify(template)),
+          id:"bath-template-"+Date.now()+"-"+Math.random().toString(36).slice(2,8),
+          isCustom:true,templateId:/^op_[0-9]+_[a-f0-9]+$/.test(String(template.id||""))?template.id:"",
+          groupId:section.id,groupName:section.name,quantity:1,autoQuantityOverridden:true});
+        draft.positions.push(item);
+        draft.positions.sort((a,b)=>sections.findIndex(x=>x.id===a.groupId)-sections.findIndex(x=>x.id===b.groupId));
+        renderPositions();
+      };
+      const regie=row.querySelector("[data-bath-regie]");
+      if(regie)regie.onclick=()=>{
+        if((draft.positions||[]).length>=120){alert("Maximal 120 Positionen.");return}
+        const rate=Number(draft?.measurement?.hourlyRate)||75;
+        const item=costing({id:"bath-regie-"+Date.now()+"-"+Math.random().toString(36).slice(2,8),
+          isCustom:true,groupId:section.id,groupName:section.name,
+          text:"Regiearbeiten durch qualifizierte Facharbeiter",
+          quantity:1,unit:"Std",unitPrice:rate,laborHoursPerUnit:1,hourlyRate:rate,
+          workSteps:[],materials:[],autoQuantityOverridden:true});
+        draft.positions.push(item);
+        draft.positions.sort((a,b)=>sections.findIndex(x=>x.id===a.groupId)-sections.findIndex(x=>x.id===b.groupId));
         renderPositions();
       };
       const copy=row.querySelector("[data-bath-copy]");
@@ -223,6 +274,18 @@
       };
       label.append(select);
       card.querySelector(".koffer-pos-main")?.after(label);
+      if(item.isCustom===true){
+        const edit=document.createElement("button");
+        edit.type="button";edit.textContent="Leistungstext bearbeiten";
+        edit.className="koffer-add-step";edit.dataset.bathEditText="1";
+        edit.onclick=()=>{
+          const text=prompt("Leistungsbeschreibung:",item.text||"");
+          if(text===null)return;
+          if(!text.trim()){alert("Leistungsbeschreibung darf nicht leer sein.");return}
+          item.text=text.trim().slice(0,1000);renderPositions();
+        };
+        label.after(edit);
+      }
     });
   }
   function syncPositions(recalculate=false){
@@ -244,7 +307,7 @@
     const oldPositions=draft.positions||[],custom=oldPositions.filter(p=>p.isCustom===true),key=p=>`${p.groupId||p.groupName||""}\u0000${p.text||""}`,old=new Map(oldPositions.filter(p=>!p.isCustom).map(p=>[key(p),p]));const generated=positions().filter(p=>!p.isCustom).map(p=>{const was=old.get(key(p));return was?{...p,...was,groupId:p.groupId||"",groupName:p.groupName||"",quantity:recalculate&&!was.quantityFormula?p.quantity:was.quantity}:p});const groupOrder=new Map((draft.rooms||[]).map((r,i)=>[r.id||`room-${i+1}`,i]));draft.positions=[...generated,...custom].sort((a,b)=>(groupOrder.get(a.groupId)??9999)-(groupOrder.get(b.groupId)??9999));renderPositions();renderAreaResult()}
   function calculatedPrice(p){const labor=(+p.laborHoursPerUnit||0)*(+p.hourlyRate||0),material=(+p.materialCostPerUnit||0)*(1+(+p.materialMarkupPct||0)/100);return Math.max(0,(labor+material)*(1+(+p.adjustmentPct||0)/100))}
   function ensureRegiePairs(rows=draft?.positions||[]){
-    if(!draft)return rows;
+    if(!draft||draft.offerType==="bathroom_compact")return rows;
     const used=new Set();
     const isMaterial=p=>p&&(/^Material und Maschinen/.test(p.text||'')||p.unit==='VE');
     for(const labor of [...rows].filter(p=>p.unit==='Std')){
