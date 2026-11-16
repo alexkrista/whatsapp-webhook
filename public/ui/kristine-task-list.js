@@ -289,6 +289,20 @@ ${voicemailBlock}
     return modalList.querySelector(".task-modal-item");
   }
 
+  function financeOriginalAttachmentUrl(taskId) {
+    try {
+      const task = (typeof data !== "undefined" && Array.isArray(data?.tasks))
+        ? data.tasks.find((item) => String(item.id || "") === String(taskId || ""))
+        : null;
+      const reminder = String(task?.reminder || "");
+      const match = reminder.match(/\[FINANCE_APPROVAL\]source=KRISTINE;id=([^;]+)/);
+      if (!match) return "";
+      const invoiceId = decodeURIComponent(match[1]);
+      if (!/^kristine:[0-9]+$/.test(invoiceId)) return "";
+      return "https://pc-alex02.tail610122.ts.net/incoming/approval-document?source=KRISTINE&id=" + encodeURIComponent(invoiceId);
+    } catch { return ""; }
+  }
+
   function renderAttachmentPanel(taskId, items, error = "") {
     const host = attachmentPanelHost();
     if (!host) return null;
@@ -308,7 +322,12 @@ ${voicemailBlock}
     }
 
     if (!items.length) {
-      panel.innerHTML = '<h5>📎 Anlagen</h5><div class="krista-task-attachment-empty">Keine Anlagen mit dieser Aufgabe verknüpft.</div>';
+      const invoiceUrl = financeOriginalAttachmentUrl(taskId);
+      if (invoiceUrl) {
+        panel.innerHTML = '<h5>Originalrechnung</h5><div class="krista-task-attachment-row"><div><div class="krista-task-attachment-name">Originalrechnung aus The Brain</div><div class="krista-task-attachment-meta">Eindeutige interne Rechnungs-ID</div></div><div class="krista-task-attachment-links"><a href="' + invoiceUrl + '" target="_blank" rel="noopener noreferrer">PDF öffnen</a></div></div>';
+      } else {
+        panel.innerHTML = '<h5>Anlagen</h5><div class="krista-task-attachment-empty">Keine Anlagen mit dieser Aufgabe verknüpft.</div>';
+      }
       return panel;
     }
 
