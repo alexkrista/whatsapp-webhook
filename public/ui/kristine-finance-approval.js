@@ -2,6 +2,16 @@
 
 (function () {
   const MARKER = "[FINANCE_APPROVAL]";
+  const BRAIN_ORIGIN = "https://pc-alex02.tail610122.ts.net";
+  const reviewed = new Set();
+  const reviewKey = (meta) => [meta.source,meta.id,meta.invoice,meta.amount].join("|");
+  function requireReviewed(task,meta) {
+    if (meta.source === "KRISTINE" && reviewed.has(reviewKey(meta))) return true;
+    alert("Bitte zuerst die Originalrechnung öffnen, prüfen und in der Freigabeaufgabe die Prüfung bestätigen.");
+    if (typeof openTaskListModal === "function") openTaskListModal(task.id);
+    return false;
+  }
+
 
   function safe(value) {
     return String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -115,6 +125,7 @@
   async function approve(taskId) {
     const task = getTask(taskId); const meta = parseFinanceMeta(task);
     if (!task || !meta) return;
+    if (!requireReviewed(task,meta)) return;
     meta.decision = "approved";
     meta.mode = "";
     meta.deduction = 0;
@@ -129,6 +140,7 @@
     const task = getTask(taskId); const meta = parseFinanceMeta(task);
     if (!task || !meta) return;
     if (requireFinanceLogin()) return;
+    if (!requireReviewed(task,meta)) return;
     const gross = Number(meta.amount || 0);
     const raw = prompt(`Kürzung um …\n\nBitte entweder Prozent oder absoluten Betrag eingeben.\nBeispiele: 5%  oder  150,00\n\nRechnungsbetrag: ${money(gross, meta.currency)}`);
     if (raw === null) return;
@@ -218,6 +230,30 @@
       if (actions) host.insertBefore(panel, actions); else host.appendChild(panel);
     }
     panel.innerHTML = `<div class="krista-finance-panel-head"><strong>💶 Rechnungsfreigabe</strong><span class="krista-finance-state ${safe(meta.decision)}">${safe(decisionLabel(meta))}</span></div><div class="krista-finance-grid"><span>Rechnung</span><strong>${safe(meta.invoice || meta.doc || "–")}</strong><span>Rechnungsbetrag</span><strong>${safe(money(meta.amount, meta.currency))}</strong>${meta.decision === "reduced" ? `<span>Abzug</span><strong>${safe(money(meta.deduction, meta.currency))}</strong><span>Freigabebetrag / Überweisung</span><strong>${safe(money(meta.approved, meta.currency))}</strong>` : ""}${meta.reason ? `<span>Grund</span><strong>${safe(meta.reason)}</strong>` : ""}</div>`;
+    const supported = meta.source === "KRISTINE" && /^kristine:[0-9]+$/.test(meta.id);
+    const invoiceLink = supported
+      ? BRAIN_ORIGIN + "/incoming/approval-document?source=KRISTINE&id=" + encodeURIComponent(meta.id)
+      : "";
+    const checkPanel = document.createElement("div");
+    checkPanel.className = "krista-finance-review";
+    if (invoiceLink) {
+      const link = document.createElement("a");
+      link.href = invoiceLink; link.target = "_blank"; link.rel = "noopener noreferrer";
+      link.textContent = "Originalrechnung als PDF öffnen";
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = reviewed.has(reviewKey(meta));
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) reviewed.add(reviewKey(meta));
+        else reviewed.delete(reviewKey(meta));
+      });
+      label.append(checkbox,document.createTextNode(" Ich habe diese Originalrechnung geöffnet und geprüft."));
+      checkPanel.append(link,label);
+    } else {
+      checkPanel.textContent = "Keine eindeutige Rechnungs-ID vorhanden – Freigabe gesperrt. Bitte Rechnungseingang kontrollieren.";
+    }
+    panel.append(checkPanel);
     const actions = host.querySelector(":scope > .actions");
     if (actions) {
       actions.querySelectorAll('button[onclick*="markTaskDone"]').forEach((button) => button.remove());
@@ -237,6 +273,10 @@
       .krista-finance-amount{display:inline-flex;align-items:center;margin-left:8px;font-size:16px;line-height:1.15;font-weight:950;color:#17241c;letter-spacing:.01em}.krista-finance-pay{font-size:14px;line-height:1.15;font-weight:900;margin-left:7px;color:#27713d}
       .krista-finance-compact,.krista-finance-modal-actions{display:flex;gap:5px;flex-wrap:wrap}
       .krista-finance-approved{background:#27713d!important;border-color:#27713d!important;color:#fff!important}.krista-finance-reduced{background:#315d91!important;border-color:#315d91!important;color:#fff!important}.krista-finance-blocked{background:#9d2525!important;border-color:#9d2525!important;color:#fff!important}
+      .krista-finance-review{margin-top:15px;padding:10px;border:1px solid #d7dfe8;border-radius:8px;background:white;display:grid;gap:10px;font-size:13px}
+      .krista-finance-review a{font-weight:800;color:#165b85;text-decoration:underline}
+      .krista-finance-review label{display:flex;align-items:center;gap:8px;line-height:1.4;font-weight:650}
+      .krista-finance-review input{width:19px;height:19px}
       .krista-finance-panel{margin-top:14px;padding:14px;border:1px solid #d7dfe8;border-radius:12px;background:#f7faff}.krista-finance-panel-head{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.krista-finance-grid{display:grid;grid-template-columns:minmax(150px,.8fr) minmax(180px,1.2fr);gap:7px 14px;font-size:13px}.krista-finance-grid span{color:#666}.krista-finance-grid strong{text-align:right}
       @media(max-width:800px){.krista-finance-compact{width:100%}.krista-finance-compact button{flex:1}.krista-finance-grid{grid-template-columns:1fr}.krista-finance-grid strong{text-align:left}}
     `;

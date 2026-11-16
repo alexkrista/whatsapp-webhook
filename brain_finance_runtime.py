@@ -170,7 +170,7 @@ def install(ns):
     page=str(ns.get("MOBILE_PAGE") or ""); app=ns.get("app")
     if not page or app is None:return
     allowed=ns.get("MOBILE_ALLOWED_PATHS")
-    paths=("/incoming/open-items","/incoming/open-items/override","/incoming/payment-meta","/incoming/creditor-details","/incoming/payment-open-items","/incoming/payment-batch/prepare","/incoming/payment-batch/xml","/incoming/payment-foreign/preview","/incoming/payment-foreign/konfipay-context","/incoming/payment-foreign/konfipay-preview","/incoming/payment-foreign/konfipay-stage","/incoming/payment-batches","/incoming/payment-batches/xml","/incoming/payment-approvals/sync","/incoming/payments","/incoming/revolut/items","/incoming/revolut")
+    paths=("/incoming/open-items","/incoming/open-items/override","/incoming/payment-meta","/incoming/creditor-details","/incoming/payment-open-items","/incoming/payment-batch/prepare","/incoming/payment-batch/xml","/incoming/payment-foreign/preview","/incoming/payment-foreign/konfipay-context","/incoming/payment-foreign/konfipay-preview","/incoming/payment-foreign/konfipay-stage","/incoming/payment-batches","/incoming/payment-batches/xml","/incoming/payment-approvals/sync","/incoming/approval-document","/incoming/payments","/incoming/revolut/items","/incoming/revolut")
     if isinstance(allowed,set):
         for p in paths:allowed.add(p)
     store=FinanceStore(ns)
@@ -582,6 +582,26 @@ def install(ns):
                 items=[x for x in store.items(True) if norm_method(x.get("paymentMethod")) in {"revolut_business","revolut"}]; opened=[x for x in items if norm_status(x.get("paymentStatus"))!="paid"]
                 return jsonify(ok=True,count=len(items),openCount=len(opened),openTotal=round(sum(float(x.get("amount") or 0) for x in opened),2),items=items)
             except Exception as e:return jsonify(ok=False,error=str(e)),500
+        @app.get("/incoming/approval-document")
+        def brain_incoming_approval_document():
+            # Resolve by internal invoice identity, never by supplier/amount/number.
+            from flask import redirect
+            from pathlib import Path
+            source=str(request.args.get("source") or "").strip()
+            sid=str(request.args.get("id") or "").strip()
+            if source != "KRISTINE" or not re.fullmatch(r"kristine:[0-9]+",sid):
+                return jsonify(ok=False,error="Ungültige Rechnungskennung."),400
+            try:
+                found=[row for row in store.kristine(True) if str(row.get("id") or "")==sid]
+                if len(found)!=1:
+                    return jsonify(ok=False,error="Rechnung nicht eindeutig gefunden."),404
+                path=str(found[0].get("path") or "").strip()
+                if not path or not Path(path).is_file():
+                    return jsonify(ok=False,error="Originalrechnung fehlt im Rechnungseingang."),404
+                return redirect("/pdf?path="+quote(path,safe=""),code=302)
+            except Exception:
+                return jsonify(ok=False,error="Originalrechnung konnte nicht geöffnet werden."),500
+
         @app.get("/incoming/payments")
         def brain_incoming_payments_page():
             response=Response(payments_page(),mimetype="text/html")
