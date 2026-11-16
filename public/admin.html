@@ -54,7 +54,7 @@
       <button id="reload" class="reload-icon" title="Aktualisieren" aria-label="Aktualisieren">↻</button>
       <button class="kristine-link" onclick="openNewJob()">+ Neue Baustelle</button>
       <select id="sortJobs" class="toolbar-select" title="Baustellen sortieren"><option value="newest">Neueste zuerst</option><option value="oldest">Älteste zuerst</option><option value="jobAsc">Nummer aufsteigend</option><option value="jobDesc">Nummer absteigend</option><option value="nameAsc">Name A–Z</option><option value="nameDesc">Name Z–A</option></select>
-      <button class="rapport-primary" onclick="openRapportLauncher()">📋 Tagesrapport</button><button class="kristine-link" onclick="openKristine()">🤖 Chefzentrale</button><button class="secondary" onclick="openEmployees()">👷 Mitarbeiter</button><button class="secondary" onclick="openVehicles()">🚐 Fahrzeuge</button><button class="secondary" onclick="openIdeas()">💡 Ideen</button><button class="secondary" onclick="openCompany()">⚙️ Betrieb</button>
+      <button class="rapport-primary" onclick="openRapportLauncher()">📋 Tagesrapport</button><button class="kristine-link" onclick="openKristine()">🤖 Chefzentrale</button><button class="secondary" onclick="openEmployees()">👷 Mitarbeiter</button><button class="secondary" onclick="openVehicles()">🚐 Fahrzeuge</button><button class="secondary" onclick="openIdeas()">💡 Ideen</button><button class="secondary" onclick="location.href=tokenJoin('/admin/company-documents')">Firmenunterlagen</button><button class="secondary" onclick="openCompany()">⚙️ Betrieb</button>
     </div>
     <div class="hint">Tageserfassung, Mitarbeiter-Stammdaten und Baustellenakte in einem System.</div>
     <div id="app" class="loading">Lade Baustellen …</div>

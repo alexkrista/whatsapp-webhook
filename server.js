@@ -4960,6 +4960,15 @@ registerDayClose(app, {
 });
 
 console.log("âœ… KRISTINE Tagesabschluss registriert");
+require("./company-documents").registerCompanyDocuments(app, {
+ dataDir: DATA_DIR, requireAdmin,
+ sendMail: async ({to,subject,text,attachments}) => {
+ if(!SMTP_HOST||!SMTP_USER||!SMTP_PASS||!MAIL_FROM)throw Error("E-Mail-Versand ist nicht eingerichtet.");
+ const info=await makeMailer().sendMail({from:MAIL_FROM,to,subject,text,attachments});
+ if(!info.accepted?.length)throw Error("E-Mail wurde vom Mailserver nicht angenommen.");
+ return info;
+ }
+});
 // ===================== Medienmigration =====================
 registerMediaMigration(app, {
   dataDir: DATA_DIR,
