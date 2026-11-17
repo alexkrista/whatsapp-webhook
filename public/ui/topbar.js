@@ -253,7 +253,7 @@
   function loadKrisadminHome() {
     const path = window.location.pathname.toLowerCase();
     if (path.includes("/admin") && !path.includes("/admin/paint") && !path.includes("/admin/akte") && !path.includes("/admin/pdf") && !path.includes("/admin/download")) {
-      loadScriptOnce("/public/ui/krisadmin-home.js?v=20260919-formularvorlagen-1", "data-krista-krisadmin-home");
+      loadScriptOnce("/public/ui/krisadmin-home.js?v=20261117-company-documents", "data-krista-krisadmin-home");
     }
   }
 
