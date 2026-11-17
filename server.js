@@ -1434,6 +1434,8 @@ app.get("/health", (req, res) =>
   res.json({
     ok: true,
     time: new Date().toISOString(),
+    automatic_worktime_enabled: false,
+    manual_stamping_notice: require("./manual-stamping-notice").getStatus(),
     openai_key: !!OPENAI_API_KEY,
     transcribe_model: OPENAI_TRANSCRIBE_MODEL,
     text_model: OPENAI_TEXT_MODEL,

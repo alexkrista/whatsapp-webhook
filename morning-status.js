@@ -1075,62 +1075,8 @@ async function runSixFortyFive(
   }
 
   async function runWorktimePrompt(phase, date = localIsoDate(), force = false) {
-    const finishAt = automaticFinishWindow(date).from;
-    const config = {
-      lunch:{key:"lunchPrompt",types:["start","weiter","up"],at:"12:00",eventType:"mittag",mode:"lunch",reply:"🍽️ Mittag wurde automatisch um 12:00 Uhr gebucht.\n\nFalls du noch nicht Mittag machst, drücke „Nein“. Dann bitte später selbst „Mittag“ stempeln.",buttons:["Nein"]},
-      resume:{key:"resumePrompt",types:["mittag"],at:"12:30",eventType:"weiter",mode:"working",reply:"▶️ Mittagspause beendet. „Weiter“ wurde automatisch um 12:30 Uhr gebucht.",buttons:[]},
-      finish:{key:"finishPrompt",types:["start","weiter","up"],at:finishAt,eventType:"ende",mode:"finished_day",reply:`🏁 Feierabend wurde automatisch um ${finishAt} Uhr gebucht.\n\nFalls du weiterarbeitest, drücke „Nein“. Dann bitte später selbst „Ende“ stempeln.`,buttons:["Nein"]},
-    }[phase];
-    if (!config) throw new Error("Unbekannte Arbeitszeit-Erinnerung");
-    const state = await loadState();
-    if (!force && state.scheduler[config.key] === date) return {skipped:true};
-    const employeeStates = await readJson(files.states, {});
-    const events = Array.isArray(state.events) ? state.events : [];
-    const notifications = [];
-    let booked = 0;
-    for (const employee of productionEmployees(state.employees)) {
-      const id = String(employee.id || employee.employeeId || "");
-      const last = events.filter(row => String(row.employeeId) === id && String(row.date) === date)
-        .filter(row => ["start","weiter","up","pause","mittag","ende","fertig","stop","stopp"].includes(String(row.type || "").toLowerCase()))
-        .sort((a,b) => hmMinutes(a.at) - hmMinutes(b.at) || String(a.createdAt || "").localeCompare(String(b.createdAt || ""))).at(-1);
-      if (!config.types.includes(String(last?.type || "").toLowerCase())) continue;
-      if (hmMinutes(last?.at) > hmMinutes(config.at)) continue;
-      if (phase === "resume" && !(last?.source === "automatic_worktime" && String(last?.at || "") === "12:00")) continue;
-      const now = new Date().toISOString();
-      const event = {
-        employeeId:id,
-        employeeName:displayName(employee),
-        date,
-        type:config.eventType,
-        at:config.at,
-        jobId:last?.jobId || null,
-        jobName:last?.jobName || "",
-        createdAt:now,
-        source:"automatic_worktime",
-        automatic:true,
-        automaticPhase:phase,
-      };
-      events.push(event);
-      const previous = employeeStates[id] || {employeeId:id,employeeName:displayName(employee),timeline:[]};
-      const next = {...previous,employeeId:id,employeeName:displayName(employee),mode:config.mode};
-      next.timeline = Array.isArray(previous.timeline) ? [...previous.timeline] : [];
-      next.timeline.push({at:now,time:config.at,type:`automatic_${phase}`,detail:phase === "lunch" ? "Mittag automatisch gebucht" : phase === "resume" ? "Weiter automatisch gebucht" : "Feierabend automatisch gebucht",jobId:event.jobId,jobName:event.jobName,source:"automatic_worktime"});
-      next.timeline = next.timeline.slice(-200);
-      if (["lunch","finish"].includes(phase)) next.automaticWorktimePrompt = {phase,date,eventAt:config.at,createdAt:now};
-      else delete next.automaticWorktimePrompt;
-      employeeStates[id] = next;
-      booked += 1;
-      const to = normalizePhone(employee.phone);
-      if (to) notifications.push({employee,to});
-    }
-    if (booked) await Promise.all([writeJson(files.events, events.slice(-20000)), writeJson(files.states, employeeStates)]);
-    let sent = 0;
-    for (const notification of notifications) {
-      try { await sendWhatsApp({phoneNumberId,to:notification.to,reply:config.reply,buttons:config.buttons}); sent += 1; }
-      catch (error) { logger.error(`${config.key} fehlgeschlagen`, displayName(notification.employee), error); }
-    }
-    await saveRun(config.key,date,state.scheduler);
-    return {sent,booked};
+    // Manual stamping only, requested 2026-11-17. Also blocks forced/test calls.
+    return {skipped:true,reason:"manual_time_stamping",booked:0,sent:0};
   }
 
 async function runSevenOClock(
@@ -1427,10 +1373,6 @@ async function runSevenOClock(
         await runEightOClock(date);
       }
 
-      if (inWindow(hm, "12:00", "12:14")) await runWorktimePrompt("lunch", date);
-      if (inWindow(hm, "12:30", "12:44")) await runWorktimePrompt("resume", date);
-      const finishWindow = automaticFinishWindow(date);
-      if (inWindow(hm, finishWindow.from, finishWindow.to)) await runWorktimePrompt("finish", date);
 
       // Montag–Donnerstag: Planung für den nächsten Tag.
       if (weekday >= 1 && weekday <= 4 && inWindow(hm, "15:00", "15:29")) {
@@ -1472,9 +1414,6 @@ async function runSevenOClock(
         "06:45 Morgenbegrüßung · nur Produktion",
         "07:00 Startprüfung · nur Produktion",
         "08:00 Chefstatus · nur Produktion",
-        "12:00 Mittag automatisch buchen · Nein hebt auf",
-        "12:30 Weiter nur nach unverändertem Auto-Mittag",
-        "Mo–Do 17:00 / Fr 14:15 Feierabend automatisch buchen · Nein hebt auf",
         "Mo–Do 15:00 Planung morgen · nur Produktion",
         "Mo–Do 15:30 Nachfassung · nur Produktion",
         "Fr 11:00 Montagseinteilung · nur Produktion",
@@ -1482,11 +1421,16 @@ async function runSevenOClock(
     }
   );
 
+  // One-time announcement explicitly requested by Alexander; durable per-recipient guard.
+  require("./manual-stamping-notice").notify({dataDir,readEmployees,sendWhatsApp,phoneNumberId,logger})
+    .catch(error=>logger.error("MANUAL_STAMPING_NOTICE_ERROR",error.message));
+
   async function getStatus() {
     const state = await loadState();
     return {
       ok: true,
       timezone: TZ,
+      automaticWorktimeEnabled: false,
       now: {
         date: localIsoDate(),
         time: localHm(),
