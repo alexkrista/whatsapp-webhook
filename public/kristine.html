@@ -432,7 +432,7 @@ label{display:block;font-size:12px;color:#666;margin:0 0 4px}input,select,textar
       <button type="button" class="secondary" onclick="addTimeEditorRow('lunch')">+ Mittag</button>
       <button type="button" class="secondary" onclick="addTimeEditorRow('pause')">+ Pause</button>
       <button type="button" class="secondary" onclick="addTimeEditorRow('up')">+ Unproduktiv</button>
-      <button type="button" class="green" onclick="saveTimeEditor()">Änderungen speichern</button>
+      <button id="timeEditorSave" type="button" class="green" onclick="saveTimeEditor()">Änderungen speichern</button>
     </div>
     <div id="timeEditorLinkNotice" class="notice" style="margin-top:12px"><strong>Automatisch verknüpft:</strong> Fotos, Videos, Material und Regie folgen immer dem geänderten Zeitblock. Der Tagesrapport wird anschließend neu aufgebaut.</div><input id="moveLinkedEntries" type="hidden" value="1">
     <div id="employeeActionNote" class="task-done-note" style="margin-top:10px"></div>
@@ -1017,7 +1017,7 @@ function seedDemo(){
   renderWeek();
 }
 function clearPlanning(){if(confirm('Planung wirklich leeren?')){data.assignments=[];renderWeek()}}
-async function loadSilent(){const r=await api('/kristine/api/bootstrap');data=r;renderControl();renderTasks();renderKristool()}
+async function loadSilent(opts={}){const r=await api('/kristine/api/bootstrap',opts);data=r;renderControl();renderTasks();renderKristool()}
 function statusLabel(mode){
   const labels={idle:'Noch nicht gestartet',working:'Arbeitet',pause:'Pause',lunch:'Mittagspause',finished_site:'Baustelle fertig',finished_day:'Feierabend'};
   return labels[mode]||'Offen';
@@ -1104,8 +1104,10 @@ let selectedControlEmployeeId='';
 let timeEditorSegments=[];
 let timeEditorCopiedFrom=null;
 let timeEditorMonthClosed=false;
+let timeEditorSaving=false;
+let timeEditorSession=0;
 const timeEditorJobGroups=new Map();
-function closeEmployeeActionModal(){document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';timeEditorSegments=[];timeEditorCopiedFrom=null;timeEditorMonthClosed=false;timeEditorJobGroups.clear();}
+function closeEmployeeActionModal(){timeEditorSession++;document.getElementById('employeeActionBackdrop')?.classList.remove('open');selectedControlEmployeeId='';timeEditorSegments=[];timeEditorCopiedFrom=null;timeEditorMonthClosed=false;timeEditorJobGroups.clear();}
 function currentViennaHM(){return new Intl.DateTimeFormat('de-AT',{timeZone:'Europe/Vienna',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date())}
 const JOB_OPTION_GROUPS=[
   {key:'running',label:'1. Laufend'},
@@ -1270,6 +1272,7 @@ async function copyTimeEditorFromEmployee(){
   }catch(error){employeeActionNote.textContent='Fehler: '+error.message}
 }
 async function openEmployeeActionModal(employeeId){
+  timeEditorSession++;
   const employee=masterEmployees.find(e=>String(e.id)===String(employeeId));selectedControlEmployeeId=String(employeeId);
   employeeActionTitle.textContent=`${employee?.name||employeeId} · Tagesbuchungen`;
   timeEditorCopiedFrom=null;employeeActionInfo.innerHTML='Lädt Zeitabschnitte …';employeeActionNote.textContent='';employeeActionBackdrop.classList.add('open');
@@ -1291,7 +1294,7 @@ async function openEmployeeActionModal(employeeId){
   }catch(error){employeeActionInfo.textContent='Fehler: '+error.message}
 }
 async function saveTimeEditor(){
-  if(!selectedControlEmployeeId)return;
+  if(timeEditorSaving||!selectedControlEmployeeId)return;
   if(timeEditorMonthClosed){employeeActionNote.textContent="Monat abgeschlossen. Baustellenstunden bitte in der Baustelle ändern.";return;}
   const employee=masterEmployees.find(e=>String(e.id)===String(selectedControlEmployeeId));
   const date=selectedWorkDate();
@@ -1310,18 +1313,43 @@ async function saveTimeEditor(){
     const ok=confirm(`${employee?.name||'Der Mitarbeiter'} arbeitet nach dieser Änderung weiter?\n\nOK = Ja, Zeit läuft weiter\nAbbrechen = zurück zur Bearbeitung`);
     if(!ok){employeeActionNote.textContent='Noch nicht gespeichert – bitte Endzeit eintragen oder „Arbeitet weiter“ bestätigen.';return}
   }
+  const saveEmployeeId=String(selectedControlEmployeeId),saveSession=timeEditorSession;
+  const currentEditor=()=>saveSession===timeEditorSession&&String(selectedControlEmployeeId)===saveEmployeeId&&selectedWorkDate()===date&&employeeActionBackdrop.classList.contains('open');
+  const button=document.getElementById('timeEditorSave'),oldLabel=button?.textContent;
+  let saved=false;
+  timeEditorSaving=true;
+  if(button){button.disabled=true;button.textContent='Speichert …'}
   employeeActionNote.textContent='Speichert …';
+  const waitNotice=setTimeout(()=>{if(currentEditor()&&!saved)employeeActionNote.textContent='Die Speicherbestätigung dauert länger. Bitte nicht erneut speichern; die Anfrage läuft noch.'},8000);
   try{
-    const result=await api(`/kristine/api/segments/${encodeURIComponent(selectedControlEmployeeId)}/${encodeURIComponent(date)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeName:employee?.name||'',segments:timeEditorSegments,moveLinked:true,copiedFrom:timeEditorCopiedFrom})});
-    await loadSilent();timeEditorSegments=(result.segments||[]).map(x=>({...x}));timeEditorJobGroups.clear();timeEditorCopiedFrom=null;renderTimeEditor();populateTimeCopyEmployees();
-    if(continues){
-      employeeActionNote.textContent=`✓ ${result.segments.length} Abschnitt(e) gespeichert · ${employee?.name||'Mitarbeiter'} arbeitet weiter. Kein Tagesabschluss ausgelöst.${result.movedLinkedEntries?` ${result.movedLinkedEntries} Foto-/Material-/Regieeintrag(e) mitverschoben.`:''}`;
-      return;
+    const result=await api(`/kristine/api/segments/${encodeURIComponent(saveEmployeeId)}/${encodeURIComponent(date)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({employeeName:employee?.name||'',segments:timeEditorSegments,moveLinked:true,copiedFrom:timeEditorCopiedFrom})});
+    if(!result?.ok)throw Error(result?.error||'Keine gültige Speicherbestätigung erhalten.');
+    saved=true;
+    const savedNote=`✓ ${result.segments.length} Abschnitt(e) gespeichert${continues?` – ${employee?.name||'Mitarbeiter'} arbeitet weiter. Kein Tagesabschluss ausgelöst.`:''}${result.movedLinkedEntries?` – ${result.movedLinkedEntries} Foto-/Material-/Regieeintrag(e) mitverschoben.`:''}`;
+    if(currentEditor()){
+      timeEditorSegments=(result.segments||[]).map(x=>({...x}));timeEditorJobGroups.clear();timeEditorCopiedFrom=null;renderTimeEditor();populateTimeCopyEmployees();
+      employeeActionNote.textContent=savedNote;
     }
-    employeeActionNote.textContent=`✓ ${result.segments.length} Abschnitt(e) gespeichert${result.movedLinkedEntries?` · ${result.movedLinkedEntries} Foto-/Material-/Regieeintrag(e) mitverschoben.`:''}`;
-    if(confirm(`Zeiten von ${employee?.name||'dem Mitarbeiter'} wurden geändert.\n\nNeuen Tagesabschluss jetzt zur Bestätigung senden?`))await sendEmployeeDayEndCheck(true);
-  }catch(error){employeeActionNote.textContent='Fehler: '+error.message}
+    // Persistence is confirmed already. Refresh failure must never report a failed save.
+    refreshTimeEditorOverview(saveEmployeeId,date,savedNote);
+    if(currentEditor()&&!continues&&confirm(`Zeiten von ${employee?.name||'dem Mitarbeiter'} wurden geändert.
+
+Neuen Tagesabschluss jetzt zur Bestätigung senden?`))await sendEmployeeDayEndCheck(true);
+  }catch(error){
+    if(currentEditor())employeeActionNote.textContent=saved?'✓ Gespeichert. Die Ansicht konnte nicht vollständig aktualisiert werden: '+error.message:'Keine Speicherbestätigung erhalten: '+error.message+' Bitte die Tagesbuchungen neu öffnen und prüfen, bevor du erneut speicherst.';
+  }finally{
+    clearTimeout(waitNotice);timeEditorSaving=false;
+    if(button){button.disabled=false;button.textContent=oldLabel||'Änderungen speichern'}
+  }
 }
+async function refreshTimeEditorOverview(employeeId,date,savedNote){
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);
+  try{await loadSilent({signal:controller.signal})}
+  catch(error){
+    if(String(selectedControlEmployeeId)===employeeId&&selectedWorkDate()===date&&employeeActionNote.textContent===savedNote)employeeActionNote.textContent=savedNote+' Die Übersicht konnte noch nicht aktualisiert werden. Deine Änderungen sind gespeichert.';
+  }finally{clearTimeout(timeout)}
+}
+
 async function sendEmployeeDayEndCheck(silent=false){
   if(!selectedControlEmployeeId)return;
   try{
