@@ -206,6 +206,8 @@ class SettlementLedger:
                 if account == "alex":
                     rows.extend(self.bank_alex(c))
                     rows.extend(self.revolut_alex())
+                    from brain_invoice_payment_details import private_invoice_entries
+                    rows.extend(private_invoice_entries(self.ns))
                 rows.sort(key=lambda row: (row["date"], str(row["id"])))
                 balances = {"private": 0, "wage": 0, "clearing": 0}
                 foreign = {}

@@ -209,7 +209,7 @@ class FinanceStore(_BaseFinanceStore):
                 SELECT
                     id, doc_id, supplier_name, supplier_invoice_number, invoice_date,
                     COALESCE(NULLIF(net_due_date,''),NULLIF(due_date,''),invoice_date) AS due_date_effective,
-                    gross_amount, currency, iban, swift, account_holder,
+                    gross_amount, document_type, currency, iban, swift, account_holder,
                     payment_state, workflow_status, pdf_path,
                     COALESCE(skonto_enabled,0) AS skonto_enabled,
                     skonto_percent,
@@ -231,7 +231,8 @@ class FinanceStore(_BaseFinanceStore):
             if st == "paid" and not include_resolved:
                 continue
             percent = float(r["skonto_percent"]) if r["skonto_percent"] is not None else None
-            gross = float(r["gross_amount"] or 0)
+            from brain_invoice_payment_details import signed_amount
+            gross = signed_amount(r["gross_amount"],r["document_type"])
             out.append(dict(
                 id=sid,
                 docId=str(r["doc_id"] or ""),
