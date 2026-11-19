@@ -9,7 +9,7 @@ async function harness(t,rows=all,date='2026-10-15'){
  w.fetch=async(raw,options={})=>{const url=new URL(raw,w.location.href);let result={};
  if(options.method==='POST'){const body=JSON.parse(options.body);posts.push({path:url.pathname,body});result={report:{id:'saved-'+body.segment?.jobId,photos:[],materials:[],status:body.draft?'draft':'prepared'}}}
  else if(url.pathname.includes('/segments/'))result={segments:rows};
- else if(url.pathname.endsWith('/bootstrap'))result={states:{E:{mode:'working',activeJobOverride:{jobId:'C',jobName:'Baustelle C'}}},employees:[{id:'E',name:'Clemens'}]};
+ else if((url.pathname.endsWith('/bootstrap')||url.pathname.includes('/employee-context/')))result={states:{E:{mode:'working',activeJobOverride:{jobId:'C',jobName:'Baustelle C'}}},employees:[{id:'E',name:'Clemens'}]};
  else if(url.pathname.includes('/team-candidates/'))result={candidates:[]};
  else if(url.pathname.endsWith('/drafts'))result={drafts:[]};
  else if(url.pathname.endsWith('/materials'))result={materials:[]};
