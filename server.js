@@ -4401,10 +4401,10 @@ const DEFAULT_WORKTIME_MODELS = [
     active: true,
     systemProtected: true,
     payrollTargetHoursWeekday: 7.8,
-    description: "Planung nach Modellstunden. Winter: Dezember bis MÃ¤rz, Freitag frei. Sommer: April bis November, Freitag 07:00â€“14:15. Monatlicher Stundenzettel: Montag bis Freitag immer 7,8 Sollstunden.",
+    description: "Planung nach Modellstunden. Winter: Jänner bis MÃ¤rz, Freitag frei. Sommer: April bis Dezember, Freitag 07:00â€“14:15. Monatlicher Stundenzettel: Montag bis Freitag immer 7,8 Sollstunden.",
     seasons: [
       {
-        id: "winter", name: "Winter (Dezemberâ€“MÃ¤rz)", months: [12,1,2,3],
+        id: "winter", name: "Winter (Jänner–März)", months: [1,2,3],
         weekdays: {
           "1": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
           "2": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
@@ -4414,7 +4414,7 @@ const DEFAULT_WORKTIME_MODELS = [
         }
       },
       {
-        id: "summer", name: "Sommer (Aprilâ€“November)", months: [4,5,6,7,8,9,10,11],
+        id: "summer", name: "Sommer (April–Dezember)", months: [4,5,6,7,8,9,10,11,12],
         weekdays: {
           "1": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
           "2": { from: "07:00", to: "17:00", lunchBreakMinutes: 30, otherBreakMinutes: 15, targetHours: 9.25, payrollTargetHours: 7.8 },
