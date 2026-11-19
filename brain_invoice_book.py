@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from brain_invoice_payment_details import signed_amount
 from brain_finance_source import norm_method, norm_status, winworker_method
 from brain_finance_source_v2 import FinanceStore
 
@@ -177,7 +178,7 @@ class InvoiceBook:
             safe_limit = max(1, min(20000, int(limit or 5000)))
             rows = con.execute("""
                 SELECT id,doc_id,supplier_name,supplier_invoice_number,invoice_date,
-                       gross_amount,currency,iban,swift,account_holder,payment_state,
+                       gross_amount,document_type,currency,iban,swift,account_holder,payment_state,
                        payment_status,payment_method,pdf_path
                 FROM incoming_invoices
             """ + clause + " ORDER BY invoice_date DESC,id DESC LIMIT ?", args + [safe_limit]).fetchall()
@@ -195,7 +196,7 @@ class InvoiceBook:
             out.append({
                 "source": "KRISTINE", "id": sid, "docId": str(raw["doc_id"] or ""),
                 "supplier": str(raw["supplier_name"] or ""), "invoiceNumber": str(raw["supplier_invoice_number"] or ""),
-                "invoiceDate": str(raw["invoice_date"] or ""), "amount": float(raw["gross_amount"] or 0),
+                "invoiceDate": str(raw["invoice_date"] or ""), "documentType": str(raw["document_type"] or "Rechnung"), "amount": signed_amount(raw["gross_amount"],raw["document_type"]),
                 "currency": str(raw["currency"] or "EUR"), "paymentStatus": status,
                 "paymentMethod": method, "sourcePaymentStatus": source_status,
                 "sourcePaymentLabel": str(raw["payment_status"] or raw["payment_state"] or ""),
@@ -368,7 +369,10 @@ class InvoiceBook:
     def history(self, source, source_id):
         con = self.db()
         try:
-            return [dict(row) for row in con.execute("SELECT * FROM brain_invoice_status_history WHERE source=? AND source_id=? ORDER BY changed_at DESC,id DESC LIMIT 100", (source, source_id)).fetchall()]
+            events = [dict(row) for row in con.execute("SELECT * FROM brain_invoice_status_history WHERE source=? AND source_id=? ORDER BY changed_at DESC,id DESC LIMIT 100", (source, source_id)).fetchall()]
+            from brain_invoice_payment_details import payment_events
+            events.extend(payment_events(self.ns,source,source_id))
+            return sorted(events,key=lambda row:str(row.get("changed_at") or ""),reverse=True)
         finally:
             con.close()
 

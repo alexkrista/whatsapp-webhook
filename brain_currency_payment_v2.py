@@ -12,7 +12,7 @@ COMMON_CURRENCIES = (
     "EUR", "USD", "CHF", "GBP", "CAD", "AUD", "JPY", "SEK", "NOK", "DKK",
     "PLN", "CZK", "HUF", "RON", "BGN", "CNY", "HKD", "SGD", "NZD", "TRY",
 )
-PAYMENT_METHODS = {"unknown", "transfer", "direct_debit", "revolut_business", "revolut", "cash"}
+PAYMENT_METHODS = {"unknown", "transfer", "direct_debit", "revolut_business", "revolut", "cash", "alex_private"}
 
 
 def _currency(value):
@@ -168,7 +168,7 @@ def install(ns):
                 source_id = f"kristine:{int(invoice_id)}"
                 now = datetime.now().isoformat(timespec="seconds")
                 old = con.execute("SELECT * FROM brain_payment_meta WHERE source='KRISTINE' AND source_id=?", (source_id,)).fetchone()
-                status = str(old["payment_status"] or "open") if old else "open"
+                status = "paid" if method == "alex_private" else (str(old["payment_status"] or "open") if old else "open")
                 pid = str(old["payment_id"] or "") if old else ""
                 note = str(old["note"] or "") if old else ""
                 if method != "transfer" and status == "sepa_submitted":
@@ -386,7 +386,7 @@ def install(ns):
   currencyCodes.forEach(code=>{if(![...captureCurrency.options].some(o=>String(o.value||o.textContent).toUpperCase()===code)){const o=document.createElement('option');o.value=code;o.textContent=code;captureCurrency.appendChild(o)}});
   const currencyWrap=captureCurrency.parentElement;
   const paymentWrap=document.createElement('div');paymentWrap.className='capture-payment-method-wrap';
-  paymentWrap.innerHTML='<div class="formlabel">Zahlungsweg</div><select id="capturePaymentMethod"><option value="unknown">Noch offen</option><option value="transfer">Überweisung / SEPA</option><option value="revolut_business">Revolut Business</option><option value="revolut">Revolut privat / Kreditkarte</option><option value="direct_debit">Einzug / Lastschrift</option><option value="cash">Bar / Kassa</option></select>';
+  paymentWrap.innerHTML='<div class="formlabel">Zahlungsweg</div><select id="capturePaymentMethod"><option value="unknown">Noch offen</option><option value="transfer">Überweisung / SEPA</option><option value="revolut_business">Revolut Business</option><option value="revolut">Revolut privat / Kreditkarte</option><option value="direct_debit">Einzug / Lastschrift</option><option value="alex_private">Alex privat bezahlt</option><option value="cash">Bar / Kassa</option></select>';
   currencyWrap.insertAdjacentElement('afterend',paymentWrap);
   // BIC is rendered in the server-side form directly after invoice IBAN.
   // It must remain visible even before currency/edit JavaScript runs.

@@ -4,7 +4,7 @@ import hashlib
 import json
 from datetime import datetime
 
-METHODS={"unknown","transfer","direct_debit","revolut_business","revolut","revolut_any","cash"}
+METHODS={"unknown","transfer","direct_debit","revolut_business","revolut","revolut_any","cash","alex_private"}
 STATUSES={"open","sepa_submitted","paid"}
 OPEN_ITEMS_CUTOFF="2025-11-26"
 
@@ -93,6 +93,7 @@ class FinanceStore:
             old=c.execute("SELECT payment_method,payment_status,payment_id,note FROM brain_payment_meta WHERE source=? AND source_id=?",(source,source_id)).fetchone()
             m=norm_method(method if method is not None else (old["payment_method"] if old else "unknown")); s=norm_status(status if status is not None else (old["payment_status"] if old else "open"))
             n=str(note if note is not None else (old["note"] if old else "") or "").strip()[:1000]; pid=str(old["payment_id"] or "") if old else ""
+            if m=="alex_private": s="paid"
             if m=="transfer" and not pid: pid=payment_id(source,source_id)
             if m!="transfer" and s=="sepa_submitted": s="open"
             c.execute("INSERT INTO brain_payment_meta(source,source_id,payment_method,payment_status,payment_id,note,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(source,source_id) DO UPDATE SET payment_method=excluded.payment_method,payment_status=excluded.payment_status,payment_id=excluded.payment_id,note=excluded.note,updated_at=excluded.updated_at",(source,source_id,m,s,pid,n,datetime.now().isoformat(timespec="seconds")))
