@@ -1014,6 +1014,43 @@ function registerRegieAssistant(app, options) {
     attachmentQueue = operation.catch(() => {});
     try { await operation; } catch (error) { res.status(400).json({ ok: false, error: String(error.message || error) }); }
   });
+
+  // Explicit project-wide pricing scope; financial snapshots are retained for audit.
+  async function projectPriceState(jobId) {
+    const reports=await readJson(REPORTS,[]), docs=typeof readDocumentation==="function"?await readDocumentation(jobId):[];
+    const locked=r=>r.billingStatus==="billed"||Boolean(r.billedAt||r.invoiceId||r.invoiceNumber)||docs.some(d=>(d.id==="regie-office-"+r.id||d.regieReportId===r.id)&&(d.billingStatus==="billed"||d.invoiceId||d.invoiceNumber));
+    const project=reports.filter(r=>String(r.jobId)===jobId&&!isDelivery(r));
+    const eligible=project.filter(r=>!locked(r));
+    const fingerprint=crypto.createHash("sha256").update(JSON.stringify(eligible)).digest("hex");
+    return {reports,eligible,lockedCount:project.length-eligible.length,fingerprint};
+  }
+  app.get("/kristine/api/regie-project/:jobId/pricing",async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{const state=await projectPriceState(clean(req.params.jobId,100));res.json({ok:true,count:state.eligible.length,lockedCount:state.lockedCount,fingerprint:state.fingerprint});}
+    catch(error){res.status(500).json({ok:false,error:String(error.message||error)});}
+  });
+  app.post("/kristine/api/regie-project/:jobId/pricing",async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{
+      const jobId=clean(req.params.jobId,100),body=req.body||{},rate=Number(body.hourlyRate),markup=Number(body.materialMarkup);
+      if(!jobId||!["future","all"].includes(body.scope)||!Number.isFinite(rate)||rate<0||rate>10000||!Number.isFinite(markup)||markup<0||markup>10000)return res.status(400).json({ok:false,error:"Ungültige Preisangabe oder Auswahl."});
+      const state=await projectPriceState(jobId);
+      if(body.scope==="all"&&body.fingerprint!==state.fingerprint)return res.status(409).json({ok:false,error:"Berichte wurden inzwischen geändert. Bitte die Auswahl erneut öffnen."});
+      const now=new Date().toISOString(),changed=[];
+      if(body.scope==="all")for(const report of state.eligible){
+        if(num(report.hourlyRate)===rate&&(report.employees||[]).every(row=>row.hourlyRate==null||num(row.hourlyRate)===rate))continue;
+        report.pricingHistory=[...(report.pricingHistory||[]),{at:now,reason:"project_hourly_rate",hourlyRate:report.hourlyRate,employees:JSON.parse(JSON.stringify(report.employees||[])),totals:report.totals}];
+        report.hourlyRate=rate;report.employees=(report.employees||[]).map(row=>({...row,hourlyRate:null}));report.totals=calculateTotals(report);report.updatedAt=now;changed.push(report);
+      }
+      if(changed.length)await writeJson(REPORTS,state.reports);
+      await writeJobMeta(jobId,{regieHourlyRate:rate,regieMaterialMarkup:markup});
+      const failures=[];
+      for(const report of changed){try{await storeInDayRegie(report);await storeInJobFile(report);}catch(error){failures.push(report.id);console.error("REGIE_PRICING_SYNC",report.id,error.message);}}
+      if(typeof appendJobHistory==="function")try{await appendJobHistory(jobId,{type:"regie_pricing_changed",detail:`Stundensatz ${rate} EUR; ${changed.length} bestehende Berichte angepasst`,data:{scope:body.scope,hourlyRate:rate,reportIds:changed.map(r=>r.id)}});}catch(error){console.error("REGIE_PRICING_HISTORY",error.message);}
+      res.json({ok:true,updatedCount:changed.length,lockedCount:state.lockedCount,warning:failures.length?"Preise gespeichert; einzelne Übersichten konnten nicht aktualisiert werden.":""});
+    }catch(error){res.status(500).json({ok:false,error:String(error.message||error)});}
+  });
+
   app.post("/kristine/api/regie-reports/save", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try { const report = await persistReport(req.body || {}, req.body?.finish === true); res.status(201).json({ ok: true, report }); }
