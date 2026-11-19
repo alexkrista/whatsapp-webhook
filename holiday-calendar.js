@@ -15,4 +15,9 @@ function mergeHolidayRows(existing,incoming,deletedDates=[]){
    byDate.set(String(row.date),{date:String(row.date),name:String(row.name||"Feiertag").trim().slice(0,120)||"Feiertag"});
  return [...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
 }
-module.exports={mergeHolidayRows,annualCompanyHolidays};
+function mergeCompanyVacationRows(existing,incoming,deletedRanges=[]){
+ const key=row=>String(row.from)+"|"+String(row.to),deleted=new Set(deletedRanges.map(key)),byRange=new Map();
+ for(const row of [...existing,...incoming])if(!deleted.has(key(row)))byRange.set(key(row),row);
+ return [...byRange.values()].sort((a,b)=>a.from.localeCompare(b.from)||a.to.localeCompare(b.to));
+}
+module.exports={mergeHolidayRows,annualCompanyHolidays,mergeCompanyVacationRows};
