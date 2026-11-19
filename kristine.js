@@ -594,28 +594,9 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     // KRISTOOL braucht für Diäten/Entsendung die echte Baustellenadresse.
     // Die Planung enthält sie nicht immer. Deshalb nur für die Ausgabe des Bootstrap
     // mit dem Baustellenstamm anreichern – assignments.json selbst bleibt unverändert.
-    const enrichedAssignments = [];
-    for (const assignment of assignments || []) {
-      const row = { ...assignment };
-      const jobId = String(row.jobId || "").trim();
-      if (jobId && typeof readJobMeta === "function") {
-        try {
-          const jobMeta = await readJobMeta(jobId) || {};
-          const masterAddress = String(
-            jobMeta.address ||
-            [
-              [jobMeta.street, jobMeta.houseNumber].filter(Boolean).join(" "),
-              [jobMeta.postalCode, jobMeta.city].filter(Boolean).join(" ")
-            ].filter(Boolean).join(", ")
-          ).trim();
-          if (masterAddress) row.address = masterAddress;
-          if (jobMeta.city) row.city = String(jobMeta.city);
-          if (jobMeta.country) row.country = String(jobMeta.country);
-          if (jobMeta.countryCode) row.countryCode = String(jobMeta.countryCode);
-        } catch {}
-      }
-      enrichedAssignments.push(row);
-    }
+    // Resolve each job once per bootstrap, with bounded parallel reads.
+    const enrichedAssignments = await require("./assignment-addresses")
+      .enrichAssignmentAddresses(assignments, readJobMeta);
 
     const projectTimeEvents = projectEventsForBootstrap(timeEvents, projectTimeArchive);
     return { assignments: enrichedAssignments, states: visibleStates, tasks, timeEvents, projectTimeEvents, projectTimeArchive, employees, gpsImport: gpsImportSummary(latestGps) };
