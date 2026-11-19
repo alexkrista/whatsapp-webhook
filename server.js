@@ -4587,13 +4587,25 @@ app.put("/kristine/api/schedule-models", async (req, res) => {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
+let holidayWriteQueue = Promise.resolve();
+function updateStoredHolidays(update) {
+  const operation = holidayWriteQueue.then(async () => {
+    const existing = cleanHolidayRows(await readJsonArrayFile(holidaysPath()));
+    const holidays = cleanHolidayRows(update(existing));
+    await writeJsonArrayFile(holidaysPath(), holidays);
+    return holidays;
+  });
+  holidayWriteQueue = operation.catch(() => {});
+  return operation;
+}
 app.get("/kristine/api/holidays", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
     let holidays = cleanHolidayRows(await readJsonArrayFile(holidaysPath()));
-    if (!holidays.length) {
-      holidays = austrianHolidays(new Date().getFullYear());
-      await writeJsonArrayFile(holidaysPath(), holidays);
+    const { mergeHolidayRows } = require("./holiday-calendar");
+    const merged = mergeHolidayRows(holidays.length ? holidays : austrianHolidays(new Date().getFullYear()), []);
+    if (JSON.stringify(merged) !== JSON.stringify(holidays)) {
+      holidays = await updateStoredHolidays(existing => mergeHolidayRows(existing.length ? existing : merged, []));
     }
     res.json({ ok: true, holidays });
   } catch (e) {
@@ -4603,8 +4615,11 @@ app.get("/kristine/api/holidays", async (req, res) => {
 app.put("/kristine/api/holidays", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
-    const holidays = cleanHolidayRows(req.body?.holidays);
-    await writeJsonArrayFile(holidaysPath(), holidays);
+    if (!Array.isArray(req.body?.holidays)) return res.status(400).json({ ok:false, error:"Feiertagsliste fehlt." });
+    const { mergeHolidayRows } = require("./holiday-calendar");
+    const incoming = cleanHolidayRows(req.body.holidays);
+    const deleted = Array.isArray(req.body.deletedDates) ? req.body.deletedDates.filter(validDateISO) : [];
+    const holidays = await updateStoredHolidays(existing => mergeHolidayRows(existing, incoming, deleted));
     res.json({ ok: true, holidays });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -4614,10 +4629,9 @@ app.post("/kristine/api/holidays/reload-austrian", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
     const year = Math.min(2100, Math.max(2020, Number(req.body?.year || new Date().getFullYear())));
-    const existing = cleanHolidayRows(await readJsonArrayFile(holidaysPath()));
     const generated = austrianHolidays(year);
-    const holidays = cleanHolidayRows([...existing.filter(h => !h.date.startsWith(`${year}-`)), ...generated]);
-    await writeJsonArrayFile(holidaysPath(), holidays);
+    const { mergeHolidayRows } = require("./holiday-calendar");
+    const holidays = await updateStoredHolidays(existing => mergeHolidayRows(generated, existing));
     res.json({ ok: true, holidays });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
