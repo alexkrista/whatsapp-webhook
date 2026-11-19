@@ -1653,6 +1653,27 @@ const open = taskId
   materialSummaryTimer.unref?.();
 
 
+  app.get("/kristine/api/employee-context/:employeeId/:date", async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    await startupReady;
+    try{
+      const employeeId=String(req.params.employeeId||""),date=String(req.params.date||"");
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return res.status(400).json({ok:false,error:"Datum prüfen."});
+      const [states,events,employees]=await Promise.all([readJson(STATES,{}),readJson(TIME_EVENTS,[]),typeof readEmployees==="function"?readEmployees():[]]);
+      const employee=(employees||[]).find(e=>String(e.id||e.employeeId)===employeeId);
+      if(!employee)return res.status(404).json({ok:false,error:"Mitarbeiter nicht gefunden."});
+      const today=localDateISO();
+      const own=(events||[]).filter(e=>String(e.employeeId)===employeeId);
+      const todayEvents=own.filter(e=>e.date===today&&e.source!=="employee_finished_job_afterentry"&&["start","weiter","up","pause","mittag","ende","fertig","stop","stopp"].includes(String(e.type||"").toLowerCase())).sort((a,b)=>String(a.createdAt||"").localeCompare(String(b.createdAt||""))||String(a.at||"").localeCompare(String(b.at||"")));
+      const last=String(todayEvents.at(-1)?.type||"").toLowerCase();
+      const mode=["start","weiter","up"].includes(last)?"working":last==="pause"?"pause":last==="mittag"?"lunch":["ende","fertig","stop","stopp"].includes(last)?"finished_day":"idle";
+      const state={employeeId,employeeName:employee.nickname||employee.name||employeeId,mode};
+      if(states[employeeId]?.activeJobOverride?.date===today)state.activeJobOverride=states[employeeId].activeJobOverride;
+      res.setHeader("Cache-Control","no-store");
+      res.json({ok:true,today,employees:[{id:employeeId,name:employee.name||employeeId}],states:{[employeeId]:state},timeEvents:own.filter(e=>e.date===date)});
+    }catch(error){res.status(500).json({ok:false,error:String(error.message||error)})}
+  });
+
   app.get("/kristine/api/bootstrap", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     await startupReady;

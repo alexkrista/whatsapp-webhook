@@ -1198,6 +1198,17 @@ function registerRegieAssistant(app, options) {
     if (!fs.existsSync(absolute)) return res.status(404).send("Datei nicht gefunden");
     res.type(file.type || path.extname(file.name)).sendFile(absolute);
   });
+  app.get("/kristine/regie-report/:id/review.pdf", async (req,res)=>{
+    try{
+      const report=(await readJson(REPORTS,[])).find(row=>row.id===safeId(req.params.id)&&row.status!=="deleted");
+      if(!report)return res.status(404).send("Regiebericht nicht gefunden");
+      const review=require("./regie-review-pdf");
+      if(!review.authorized(report,req.query?.key)&&!requireAdmin(req,res))return;
+      res.setHeader("Cache-Control","private, no-store");
+      res.setHeader("Content-Disposition",'inline; filename="Regiebericht_'+safeId(report.reportNumber)+'_ohne_Preise.pdf"');
+      res.type("application/pdf").send(await review.createReviewPdf(report));
+    }catch(error){res.status(500).json({ok:false,error:"Kontroll-PDF konnte nicht erstellt werden."})}
+  });
   app.get("/kristine/regie-report/:id/print", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const report = (await readJson(REPORTS, [])).find(row => row.id === safeId(req.params.id));
@@ -1216,7 +1227,7 @@ function registerRegieAssistant(app, options) {
       if (!jobId) return res.status(400).json({ ok: false, error: "Baustelle fehlt" });
       const requestedId = safeId(body.id);
       const alreadyIssued = requestedId && reports.find(report => report.id === requestedId && report.status !== "draft");
-      if (alreadyIssued) return res.json({ ok: true, report: alreadyIssued, message: "Regiebericht wurde bereits ausgestellt." });
+      if (alreadyIssued) return res.json({ ok: true, submitted:true, report: {...alreadyIssued,reviewPdfUrl:require("./regie-review-pdf").reviewUrl(alreadyIssued)}, message: "Regiebericht wurde bereits ausgestellt." });
       const existingIndex = reports.findIndex(report => report.status === "draft" && (
         (requestedId && report.id === requestedId) ||
         (!requestedId && String(report.jobId) === jobId && String(report.date) === String(body.date) && String(report.createdBy?.id) === String(body.createdBy?.id))
@@ -1262,20 +1273,27 @@ function registerRegieAssistant(app, options) {
       report.photos = report.attachments.filter(file => String(file.type || "").startsWith("image/"));
       report.totals = calculateTotals(report);
       report.hoursCheck=await checkHours(report,reports);
-      if (!draft && report.hoursCheck.blocked) return res.status(409).json({ok:false,error:report.hoursCheck.warnings[0],hoursCheck:report.hoursCheck});
+      if (!draft && report.hoursCheck.blocked) return res.status(409).json({ok:false,submitted:false,draftSaved:Boolean(existing),error:report.hoursCheck.warnings[0],hoursCheck:report.hoursCheck,report:existing?{...existing,reviewPdfUrl:require("./regie-review-pdf").reviewUrl(existing)}:null});
       if (existingIndex >= 0) reports[existingIndex] = report; else reports.push(report);
       if (!draft) for (const person of report.people) {
         if (String(person.id) === String(report.createdBy?.id) || confirmations.some(item => item.reportId === report.id && String(item.employeeId) === String(person.id))) continue;
         confirmations.push({ id: `confirm_${report.id}_${person.id}`, reportId: report.id, employeeId: person.id, employeeName: person.name, status: "open", createdAt: now });
       }
-      await Promise.all([
-        writeJson(REPORTS, reports.slice(-10000)),
+      // A stored report must never be presented as unsent because a derived view failed.
+      await writeJson(REPORTS, reports.slice(-10000));
+      const syncResults=await Promise.allSettled([
         writeJson(CONFIRMATIONS, confirmations.slice(-20000)),
         storeRegiePhotos(report, body.uploads),
         storeInDayRegie(report),
         storeInJobFile(report),
       ]);
-      if (!draft) await ensureRegiePrecheckTask(report);
+      const syncFailed=syncResults.some(result=>result.status==="rejected");
+      if(syncFailed)console.error("REGIE_SAVED_SYNC_INCOMPLETE",{reportId:report.id,failed:syncResults.map((result,index)=>result.status==="rejected"?index:null).filter(index=>index!==null)});
+      let officeWarning=syncFailed?"Der Bericht ist gespeichert. Die Aktualisierung der Baustellenakte ist noch unvollständig; bitte im Büro prüfen.":"";
+      if (!draft) try{await ensureRegiePrecheckTask(report)}catch(error){
+        officeWarning="Der Bericht ist gespeichert und ausgestellt. Die Büro-Benachrichtigung konnte nicht bestätigt werden.";
+        console.error("REGIE_PRECHECK_NOTIFICATION_FAILED",{reportId:report.id,error:String(error.message||error)});
+      }
       if (typeof appendJobHistory === "function") await appendJobHistory(jobId, {
         type: draft ? "regie_report_draft_saved" : "regie_report_issued",
         title: draft ? `Regiebericht ${report.reportNumber} als Entwurf gespeichert` : `Regiebericht ${report.reportNumber} ausgestellt`,
@@ -1283,7 +1301,7 @@ function registerRegieAssistant(app, options) {
         source: "KGO",
         data: { reportId: report.id, processingStatus: report.processingStatus, billingStatus: "open" },
       }).catch(() => {});
-      res.json({ ok: true, report, message: draft ? "Regiebericht ist gespeichert und kann später fertig gemacht werden." : "Regiebericht ist ausgestellt und liegt bei Bettina zur Vorprüfung." });
+      res.json({ ok: true, submitted:!draft, officeWarning, report:{...report,reviewPdfUrl:require("./regie-review-pdf").reviewUrl(report)}, message: draft ? "Regiebericht ist gespeichert und kann später fertig gemacht werden." : "Regiebericht ist ausgestellt und liegt bei Bettina zur Vorprüfung." });
     } catch (error) { res.status(500).json({ ok: false, error: String(error.message || error) }); }
   });
   app.get("/kristine/api/regie/confirmations", async (req, res) => { const employeeId = clean(req.query.employeeId, 100); const rows = await readJson(CONFIRMATIONS, []); res.json({ ok: true, items: rows.filter(row => row.employeeId === employeeId && row.status === "open") }); });
