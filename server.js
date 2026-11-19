@@ -4646,11 +4646,22 @@ app.get("/kristine/api/company-vacations", async (req, res) => {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
+let companyVacationWriteQueue = Promise.resolve();
 app.put("/kristine/api/company-vacations", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
-    const vacations = cleanCompanyVacationRows(req.body?.vacations);
-    await writeJsonArrayFile(companyVacationsPath(), vacations);
+    if (!Array.isArray(req.body?.vacations)) return res.status(400).json({ok:false,error:"Betriebsurlaubsliste fehlt."});
+    const incoming = cleanCompanyVacationRows(req.body.vacations);
+    const deleted = cleanCompanyVacationRows(req.body.deletedRanges);
+    const { mergeCompanyVacationRows } = require("./holiday-calendar");
+    const operation = companyVacationWriteQueue.then(async () => {
+      const existing = cleanCompanyVacationRows(await readJsonArrayFile(companyVacationsPath()));
+      const vacations = mergeCompanyVacationRows(existing,incoming,deleted);
+      await writeJsonArrayFile(companyVacationsPath(), vacations);
+      return vacations;
+    });
+    companyVacationWriteQueue = operation.catch(() => {});
+    const vacations = await operation;
     res.json({ ok: true, vacations });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
