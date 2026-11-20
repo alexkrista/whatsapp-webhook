@@ -4,7 +4,7 @@ const fs=require("node:fs/promises"),path=require("node:path");
 const B=require("./public/ui/regie-billing-state");
 const n=x=>Number.isFinite(Number(x))?Number(x):0,round=x=>Math.round((x+Number.EPSILON)*100)/100;
 const key=x=>String(x||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]/g,"");
-const canonical=x=>({"edimock":"Edmund Mock","mandi":"Manuel Faes","mandifaes":"Manuel Faes","maxkrista":"Maximilian Krista","cathringrabherr":"Cathrin Anna Grabherr","annacathringrabherr":"Cathrin Anna Grabherr"})[key(x)]||x;
+const canonical=x=>({"edi":"Edmund Mock","edimock":"Edmund Mock","mandi":"Manuel Faes","mandifaes":"Manuel Faes","maxkrista":"Maximilian Krista","cathringrabherr":"Cathrin Anna Grabherr","annacathringrabherr":"Cathrin Anna Grabherr"})[key(x)]||x;
 function missingHoursPlan({jobId,rows=[],reports=[],documents=[],employees=[],throughDate=""}){
  const master=employees.map(e=>({...e,name:canonical(e.name||e.employeeName)}));
  const person=p=>{const name=canonical(p.name||p.employeeName||""),id=String(p.employeeId||p.id||"");const found=master.find(e=>id&&String(e.id)===id)||master.find(e=>key(e.name)===key(name));return {id:String(found?.id||id),name:found?.name||name}};
@@ -48,7 +48,7 @@ async function recordedRows({dataDir,job,bootstrap,now=new Date()}){
  }
  const ww=H.combineWw(found);wwByMember.set(String(job.jobId),ww);
  const engine=H.createEngine({jobs:[job],bootstrap,wwByMember,now}),fused=engine.singleFusion(job),kr=engine.kristineFor(job),rows=[];
- for(const [date,people] of kr.dayPeople||[])if(!fused.legacyCutover||date>=fused.legacyCutover)for(const p of people.values())rows.push({date,name:p.name,hours:p.hours});
+ for(const [date,people] of kr.dayPeople||[])if(!fused.legacyCutover||date>=fused.legacyCutover)for(const p of people.values())rows.push({date,employeeId:p.employeeId,name:p.name,hours:p.hours});
  for(const r of ww.rows)if(fused.legacyCutover?r.date<fused.legacyCutover:!fused.excluded.has(r.key))rows.push({date:r.date,name:r.employeeName,hours:r.hours});
  return {rows,missingProjects};
 }
