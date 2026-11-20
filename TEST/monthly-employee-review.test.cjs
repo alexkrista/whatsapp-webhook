@@ -22,6 +22,12 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
  const g=await days("g");assert.equal(g.find(d=>d.date==="2026-10-06").targetMinutes,150);assert.equal(g.find(d=>d.date==="2026-10-05").targetMinutes,0);assert.equal(policy.workMinutes(g.find(d=>d.date==="2026-10-06").segments),150);
  const j=await days("j");assert.equal(j.find(d=>d.date==="2026-10-05").targetMinutes,480);assert.equal(j.find(d=>d.date==="2026-10-06").targetMinutes,240);assert.equal(j.find(d=>d.date==="2026-10-08").targetMinutes,0);
  const b=await days("b");assert.equal(b.find(d=>d.date==="2026-10-06").segments[0].from,"07:30");assert.equal(policy.workMinutes(b.find(d=>d.date==="2026-10-06").segments),270);
+ const workBlock={id:"morning",type:"work",from:"07:00",to:"12:00",jobId:"123"};
+ const withPause=policy.withMorningPause([workBlock]);
+ assert.deepEqual(withPause.map(s=>[s.type,s.from,s.to]),[["work","07:00","09:00"],["pause","09:00","09:15"],["work","09:15","12:00"]]);
+ assert.equal(policy.workMinutes(withPause),285);
+ assert.deepEqual(policy.withMorningPause(withPause),withPause);
+ assert.equal(policy.workMinutes(b.find(d=>d.date==="2026-10-06").segments),270,"office bookings keep their full duration");
  assert.equal(policy.modelFor(models,employees[5]).id,"krista-standard");assert.equal(policy.modelFor(models,{...employees[0],worktimeModelId:"office-judith"}).id,"office-judith","explicit dedicated assignment wins");
  const makeReport=rows=>({employeeId:"a",name:"Alex",days:rows.map(d=>({date:d.date,actualMinutes:d.segments.filter(s=>["up","work"].includes(s.type)).reduce((sum,s)=>sum+policy.minute(s.to)-policy.minute(s.from),0)})),totals:{actualMinutes:rows.reduce((sum,d)=>sum+d.segments.filter(s=>["up","work"].includes(s.type)).reduce((n,s)=>n+policy.minute(s.to)-policy.minute(s.from),0),0)}});
  let res=await call("post","/kristine/api/month-close",{body:{month:"2026-10",people:[makeReport(a)]}});assert.equal(res.statusCode,200,JSON.stringify(res.body));

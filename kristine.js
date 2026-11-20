@@ -2871,7 +2871,8 @@ const open = taskId
     const absence=employeeAbsenceForDay(context.assignments,employee,date);
     const holiday=context.holidays.some(h=>String(h.date)===date);
     const release=dayControlReleaseForEmployee(context.releases,employee,date);
-    let segments=original,source="Buchungen",automatic=false;
+    const office=schedule.model?.officeModel||String(schedule.model?.id||"").startsWith("office-");
+    let segments=office?original:payrollModel.withMorningPause(original),source="Buchungen",automatic=false;
     if(schedule.fixedSegments!==null&&employeeBelongsToDay(employee,date)){
       segments=schedule.fixedSegments;automatic=true;source="Fixe Lohnzeit · "+schedule.model.name;
       if(absence||holiday){
