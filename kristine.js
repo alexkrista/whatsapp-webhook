@@ -2240,14 +2240,10 @@ const open = taskId
     return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
   }
 
-  function buildEditableSegments(events, employeeId, date, state, {useActualStamps=false}={}) {
+  function buildEditableSegments(events, employeeId, date, state) {
     const rows = events
       .filter((row) => String(row.employeeId) === String(employeeId) && String(row.date) === String(date))
-      .map((row, index) => {
-        const actual=useActualStamps?minutesFromHM(row.actualAt):null;
-        const at=actual===null?row.at:hmFromMinutes(actual);
-        return {...row,at,_index:index,_minutes:minutesFromHM(at)};
-      })
+      .map((row, index) => ({ ...row, _index: index, _minutes: minutesFromHM(row.at) }))
       .filter((row) => row._minutes !== null)
       .sort((a, b) => a._minutes - b._minutes || String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || a._index - b._index);
 
@@ -2871,7 +2867,7 @@ const open = taskId
     const employeeId=String(employee.id||employee.employeeId),schedule=payrollModel.schedule(context.models,employee,date);
     const closed=context.closures.find(r=>r.employeeId===employeeId&&r.month===date.slice(0,7));
     const correction=context.corrections.find(r=>r.employeeId===employeeId&&r.date===date);
-    const original=buildEditableSegments(context.events,employeeId,date,context.states[employeeId]||{},{useActualStamps:schedule.model?.id==="office-alex"});
+    const original=buildEditableSegments(context.events,employeeId,date,context.states[employeeId]||{});
     const absence=employeeAbsenceForDay(context.assignments,employee,date);
     const holiday=context.holidays.find(h=>String(h.date)===date);
     const release=dayControlReleaseForEmployee(context.releases,employee,date);

@@ -17,10 +17,12 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
  const days=async id=>(await call("get","/kristine/api/monthly-days/:employeeId",{params:{employeeId:id},query:{from:"2026-10-01",to:"2026-10-31"}})).body.days;
  try{
  await instance.startupReady;
- let a=await days("a");assert.equal(a.find(d=>d.date==="2026-10-05").targetMinutes,396);assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-05").segments),400);assert.deepEqual(a.find(d=>d.date==="2026-10-05").segments.map(s=>[s.type,s.from,s.to]),[["up","05:54","12:34"]]);assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-26").segments),0,"holiday is paid, never worked");
+ let a=await days("a");assert.equal(a.find(d=>d.date==="2026-10-05").targetMinutes,396);assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-05").segments),396);assert.deepEqual(a.find(d=>d.date==="2026-10-05").segments.map(s=>[s.type,s.from,s.to]),[["up","07:00","13:36"]]);assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-26").segments),0,"holiday is paid, never worked");
  const october=Array.from({length:31},(_,i)=>"2026-10-"+String(i+1).padStart(2,"0"));
  const monthlyTarget=e=>october.reduce((n,date)=>n+policy.schedule(models,e,date).targetMinutes,0);
  assert.equal(monthlyTarget(employees[0]),145*60+12);
+ assert.equal(monthlyTarget(employees[4]),73*60+20);
+ assert.equal((await days("b")).find(d=>d.date==="2026-10-26").targetMinutes,200);
  assert.equal(monthlyTarget(employees[2]),22*60+30);
  assert.equal(monthlyTarget(employees[3]),88*60);
  for(const personnelNumber of ["20","39"]){
