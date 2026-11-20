@@ -48,7 +48,7 @@
     const usableArchive=archive.filter(row=>!livePersonDays.has(`${String(row.employeeId)}|${String(row.date).slice(0,10)}`)).filter(row=>(row?.segments||[]).some(segment=>String(segment?.type||"")==="work"&&String(segment?.jobId||segment?.jobName||"").trim()));
     const groups=new Map(),archivedPersonDays=new Set(usableArchive.map(row=>`${String(row?.employeeId||"")}|${String(row?.date||"").slice(0,10)}`));
 
-    const addDuration=({employeeId,date,jobId,name,fink,duration})=>{
+    const addDuration=({employeeId,date,jobId,name,fink,duration,from,to})=>{
       if(!employeeId||!date||!jobId||duration<=0||duration>18)return;
       const personIdentity=identity(fink,name,employeeId),current=liveByJob.get(jobId)||{totalHours:0,segments:0,days:new Map(),dayPeople:new Map()};
       current.totalHours+=duration;current.segments++;current.days.set(date,num(current.days.get(date))+duration);liveByJob.set(jobId,current);
@@ -56,8 +56,8 @@
       const people=peopleByJob.get(jobId),person=people.get(employeeId)||{employeeId,identity:personIdentity,finkNumber:fink,name,hours:0,days:new Set()};
       person.hours+=duration;person.days.add(date);people.set(employeeId,person);
       if(!current.dayPeople.has(date))current.dayPeople.set(date,new Map());
-      const dayPeople=current.dayPeople.get(date),dayPerson=dayPeople.get(personIdentity)||{employeeId,identity:personIdentity,finkNumber:fink,name,hours:0};
-      dayPerson.hours+=duration;dayPeople.set(personIdentity,dayPerson);
+      const dayPeople=current.dayPeople.get(date),dayPerson=dayPeople.get(personIdentity)||{employeeId,identity:personIdentity,finkNumber:fink,name,hours:0,intervals:[]};
+      dayPerson.hours+=duration;dayPerson.intervals.push({from,to});dayPeople.set(personIdentity,dayPerson);
     };
 
     events.forEach((event,index)=>{
@@ -90,7 +90,7 @@
 
         const employee=employees.get(employeeId)||{};
         const name=String(row.employeeName||employee.nickname||employee.name||employee.employeeName||employeeId);
-        addDuration({employeeId,date,jobId,name,fink:finkNumber(employee,row),duration});
+        addDuration({employeeId,date,jobId,name,fink:finkNumber(employee,row),duration,from:start,to:end});
       }
     }
     for(const released of usableArchive){
@@ -99,7 +99,7 @@
         if(String(segment?.type||"")!=="work")continue;
         const from=hmMinutes(segment?.from),to=hmMinutes(segment?.to),jobId=String(segment?.jobId||"").trim();
         if(from===null||to===null||to<=from)continue;
-        addDuration({employeeId,date,jobId,name,fink,duration:(to-from)/60});
+        addDuration({employeeId,date,jobId,name,fink,duration:(to-from)/60,from,to});
       }
     }
     for(const current of liveByJob.values()){
