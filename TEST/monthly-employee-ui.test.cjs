@@ -13,6 +13,15 @@ const html='<div id="monthlyReportModal"></div><button id="openKriszeitPdf"></bu
  if(url.startsWith("/kristine/api/segments/")){const date=url.split("/").at(-1),body=JSON.parse(options.body);saved.push(body);days.get(date).segments=body.segments;return{ok:true,segments:body.segments}}
  throw Error("Unexpected "+url)};
  for(const file of ["monthly-report.js","monthly-employee-review.js"])vm.runInContext(fs.readFileSync(require.resolve("../public/kristool-preview/"+file),"utf8"),context);
+ const blocks=w.KrisMonthly.compactBlocks([
+   {type:"work",from:"07:00",to:"08:30"},{type:"work",from:"08:30",to:"09:00"},
+   {type:"pause",from:"09:00",to:"09:15"},{type:"work",from:"09:15",to:"12:00"},
+   {type:"lunch",from:"12:00",to:"12:30"},{type:"work",from:"12:30",to:"17:00"}
+ ]);
+ assert.equal(JSON.stringify(Array.from(blocks,b=>[b.from,b.to,b.durationMinutes,b.label])),JSON.stringify([
+   ["07:00","12:00",285,"Arbeit"],["09:00","09:15",15,"Pause (Abzug)"],
+   ["12:00","12:30",30,"Mittag"],["12:30","17:00",270,"Arbeit"]
+ ]));
  const settle=async()=>{for(let i=0;i<15;i++)await new Promise(r=>setImmediate(r))};
  w.document.querySelector("[data-person-review]").click();await settle();
  const modal=w.document.getElementById("monthlyEmployeeModal");assert.equal(modal.hidden,false);assert.match(modal.textContent,/07:30–17:30/);assert.match(modal.textContent,/Büro/);
