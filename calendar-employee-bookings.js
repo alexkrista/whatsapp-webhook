@@ -56,9 +56,12 @@ function deriveCalendarAssignments({assignments=[],employees=[],models=[],holida
   }
  }
  return [...raw.map(row=>{
-  if(row.date<EFFECTIVE_FROM||closedMonths.some(c=>String(c.employeeId)===String(row.employeeId)&&c.month===row.date.slice(0,7))||!["urlaub","feiertag"].includes(absenceType(row)))return row;
+  if(row.date<EFFECTIVE_FROM||closedMonths.some(c=>String(c.employeeId)===String(row.employeeId)&&c.month===row.date.slice(0,7)))return row;
+  const kind=absenceType(row),protectedHoliday=holidayMap.has(row.date)&&["urlaub","za"].includes(kind);
+  if(!protectedHoliday&&!["urlaub","feiertag"].includes(kind))return row;
   const employee=employees.find(e=>String(e.id||e.employeeId)===String(row.employeeId)),schedule=employee&&payrollSchedule(models,employee,row.date);
-  return schedule?{...row,calendarMinutes:schedule.minutes,calendarModelName:schedule.modelName}:row;
+  const safe=protectedHoliday?{...row,cardType:"feiertag",jobId:"__feiertag__",jobName:"Feiertag",note:String(holidayMap.get(row.date)||"Feiertag")}:row;
+  return schedule?{...safe,calendarMinutes:schedule.minutes,calendarModelName:schedule.modelName}:safe;
  }),...generated];
 }
 async function read(file,fallback){try{return JSON.parse(await fs.readFile(file,"utf8"))}catch(e){if(e.code!=="ENOENT")throw e;return fallback}}
