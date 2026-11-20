@@ -23,7 +23,7 @@ const leitstandFunction=(name,next)=>leitstandSource.slice(leitstandSource.index
 for(const closed of [false,true])test(`Leitstand daily release keeps projects editable until monthly close: closed=${closed}`,async()=>{
   const dom=new JSDOM(leitstandSource),d=dom.window.document;
   const row={id:"one",type:"work",from:"07:00",to:"12:00",jobId:"26080",jobName:"Jansen"};
-  const ctx=vm.createContext({document:d,masterEmployees:[{id:"clemens",name:"Clemens Krista"}],masterJobs:[{jobId:"26080",name:"Jansen"}],data:{states:{}},selectedControlEmployeeId:"",timeEditorMonthClosed:false,timeEditorSegments:[],timeEditorJobGroups:new Map(),timeEditorCopiedFrom:null,
+  const ctx=vm.createContext({document:d,masterEmployees:[{id:"clemens",name:"Clemens Krista"}],masterJobs:[{jobId:"26080",name:"Jansen"}],data:{states:{}},selectedControlEmployeeId:"",timeEditorSession:0,timeEditorMonthClosed:false,timeEditorSegments:[],timeEditorJobGroups:new Map(),timeEditorCopiedFrom:null,
     selectedWorkDate:()=>"2026-10-13",api:async()=>({released:true,monthClosed:closed,segments:[row]}),esc:String,statusLabel:()=>"Feierabend",populateTimeCopyEmployees:()=>{},jobOptionGroup:()=>"running",JOB_OPTION_GROUPS:[{key:"running",label:"Laufend"}],jobOptions:()=>'<option value="26080" selected>Jansen</option>',hmToMinutes:v=>{if(!v)return null;const [h,m]=v.split(":").map(Number);return h*60+m},durationText:n=>`${n} min`});
   for(const id of ["employeeActionTitle","employeeActionInfo","employeeActionNote","employeeActionBackdrop","timeEditorTable"])ctx[id]=d.getElementById(id);
   vm.runInContext(leitstandFunction("timeEditorContextCell","\nfunction renderTimeEditor"),ctx);

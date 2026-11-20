@@ -25,6 +25,9 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   const DAY_RELEASES = path.join(ROOT, "day-releases.json");
   const DAY_CONTROLS = path.join(ROOT, "day-controls.json");
   const WORKTIME_MODELS = path.join(dataDir, "_system", "worktime-models.json");
+  const payrollModel = require("./monthly-payroll-model");
+  const PAYROLL_CORRECTIONS = path.join(ROOT,"monthly-payroll-corrections.json");
+  const MONTH_REOPENINGS = path.join(ROOT,"month-reopenings.json");
   const MONTH_CLOSURES = path.join(ROOT, "month-closures.json");
   const PROJECT_TIME_ARCHIVE = path.join(ROOT, "project-time-archive.json");
   const MATERIAL_REQUESTS = path.join(ROOT, "material-requests.json");
@@ -62,7 +65,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
       if (file === TASKS) return require("./krisdrive-daily-review").mergeTasks(dataDir, await require("./customer-portal-access").mergePortalTasks(dataDir, Array.isArray(value) ? value : []));
       return [TIME_EVENTS, PROJECT_TIME_ARCHIVE, DAY_CORRECTIONS].includes(file) ? normalizeOfficeTimeData(value) : value;
     } catch (error) {
-      if ([MONTH_CLOSURES,TIME_EVENTS].includes(file) && error.code !== "ENOENT") throw error;
+      if ([MONTH_CLOSURES,TIME_EVENTS,PAYROLL_CORRECTIONS,MONTH_REOPENINGS].includes(file) && error.code !== "ENOENT") throw error;
       if (file === TASKS) return require("./krisdrive-daily-review").mergeTasks(dataDir, await require("./customer-portal-access").mergePortalTasks(dataDir, []));
       return fallback;
     }
@@ -85,7 +88,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
     const previousPortalTasks = file === TASKS ? await readJson(TASKS, []) : null;
     if ([TIME_EVENTS, PROJECT_TIME_ARCHIVE, DAY_CORRECTIONS].includes(file)) value = normalizeOfficeTimeData(value);
     const customerPointChanges = file === TASKS ? require("./customer-portal-points").recordPortalTaskChanges(dataDir, previousPortalTasks, value) : [];
-    if (file === MONTH_CLOSURES) {
+    if ([MONTH_CLOSURES,PAYROLL_CORRECTIONS,MONTH_REOPENINGS].includes(file)) {
       const temporary = `${file}.tmp`;
       await fsp.writeFile(temporary,JSON.stringify(value,null,2),"utf8");
       await fsp.rename(temporary,file);
@@ -2851,6 +2854,107 @@ const open = taskId
     }
   });
 
+
+  async function monthlyContext() {
+    const [employees,models,events,states,releases,assignments,corrections,closures,holidays,reopenings] = await Promise.all([
+      typeof readEmployees==="function"?readEmployees():[],readJson(WORKTIME_MODELS,[]),readJson(TIME_EVENTS,[]),
+      readJson(STATES,{}),readJson(DAY_RELEASES,[]),readJson(ASSIGNMENTS,[]),readJson(PAYROLL_CORRECTIONS,[]),
+      readJson(MONTH_CLOSURES,[]),readJson(path.join(dataDir,"_system","holidays.json"),[]),readJson(MONTH_REOPENINGS,[])
+    ]);
+    return {employees,models,events,states,releases,assignments,corrections,closures,holidays,reopenings};
+  }
+  function monthlyDay(context,employee,date) {
+    const employeeId=String(employee.id||employee.employeeId),schedule=payrollModel.schedule(context.models,employee,date);
+    const closed=context.closures.find(r=>r.employeeId===employeeId&&r.month===date.slice(0,7));
+    const correction=context.corrections.find(r=>r.employeeId===employeeId&&r.date===date);
+    const original=buildEditableSegments(context.events,employeeId,date,context.states[employeeId]||{});
+    const absence=employeeAbsenceForDay(context.assignments,employee,date);
+    const holiday=context.holidays.some(h=>String(h.date)===date);
+    const release=dayControlReleaseForEmployee(context.releases,employee,date);
+    let segments=original,source="Buchungen",automatic=false;
+    if(schedule.fixedSegments!==null&&employeeBelongsToDay(employee,date)){
+      segments=schedule.fixedSegments;automatic=true;source="Fixe Lohnzeit · "+schedule.model.name;
+      if(absence||holiday){
+        const type=holiday?"feiertag":assignmentAbsenceType(absence);
+        const code={urlaub:"900",krank:"901",feiertag:"904",za:"930",arzt:"902",sonderurlaub:"911"}[type]||"";
+        const label={urlaub:"Urlaub",krank:"Krank",feiertag:"Feiertag",za:"Zeitausgleich",arzt:"Arzt",sonderurlaub:"Sonderurlaub"}[type]||String(absence?.jobName||"Abwesenheit");
+        const from=segments[0]?.from||"07:00",start=minutesFromHM(from),minutes=schedule.targetMinutes;
+        segments=minutes>0?[{id:"absence_"+date,type:"up",from,to:payrollModel.hm(start+minutes),reason:label,absenceType:type,unproductiveCategory:type==="urlaub"?"vacation":type==="krank"?"sick":"other",unproductiveCode:code}]:[];
+        source=label+" · "+schedule.model.name;
+      }
+    }
+    if(correction){segments=correction.segments;source="Lohnzeit korrigiert";automatic=true}
+    if(closed){segments=closed.days.find(d=>d.date===date)?.segments||[];source="Abgeschlossen";automatic=true}
+    const targetMinutes=closed?.report?.days?.find(d=>d.date===date)?.targetMinutes??(employeeBelongsToDay(employee,date)?schedule.targetMinutes:0);
+    return {date,employeeId,segments,originalSegments:original,released:automatic||Boolean(release?.released&&!release.returned),monthClosed:Boolean(closed),closedAt:closed?.closedAt||null,targetMinutes,modelName:closed?.report?.modelLabel||schedule.model?.name||"Zeitmodell",modelId:schedule.model?.id||"",payrollFixed:schedule.fixedSegments!==null||context.reopenings.some(r=>r.employeeId===employeeId&&r.month===date.slice(0,7)),payrollAutomatic:automatic,source,workingMinutes:payrollModel.workMinutes(segments),correction:correction?{history:correction.history,reason:correction.reason}:null};
+  }
+  app.get("/kristine/api/monthly-days/:employeeId",async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    await startupReady;
+    try{
+      const from=String(req.query?.from||""),to=String(req.query?.to||"");
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(from)||!/^\d{4}-\d{2}-\d{2}$/.test(to)||from>to||(new Date(to)-new Date(from))/86400000>370)return res.status(400).json({ok:false,error:"Zeitraum prüfen (maximal 12 Monate)."});
+      const context=await monthlyContext(),employee=context.employees.find(e=>String(e.id||e.employeeId)===String(req.params.employeeId));
+      if(!employee)return res.status(404).json({ok:false,error:"Mitarbeiter nicht gefunden."});
+      const days=[];
+      for(let d=new Date(from+"T12:00:00Z");d<=new Date(to+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+1))days.push(monthlyDay(context,employee,d.toISOString().slice(0,10)));
+      res.json({ok:true,days});
+    }catch(error){res.status(500).json({ok:false,error:String(error.message||error)})}
+  });
+  app.put("/kristine/api/monthly-payroll/:employeeId/:date",serializedTimeMutation(async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    await startupReady;
+    try{
+      const employeeId=String(req.params.employeeId),date=String(req.params.date);
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||date>=localDateISO())return res.status(400).json({ok:false,error:"Nur vergangene Tage bearbeiten."});
+      if(await closedMonthFor(employeeId,date))return res.status(409).json({ok:false,error:"Monat abgeschlossen – Stunden gesperrt. Zuerst ausdrücklich mit Begründung wieder öffnen."});
+      const context=await monthlyContext(),employee=context.employees.find(e=>String(e.id||e.employeeId)===employeeId);
+      if(!employee)return res.status(404).json({ok:false,error:"Mitarbeiter nicht gefunden."});
+      if(payrollModel.schedule(context.models,employee,date).fixedSegments===null&&!context.reopenings.some(r=>r.employeeId===employeeId&&r.month===date.slice(0,7)))return res.status(400).json({ok:false,error:"Dieses Modell verwendet tatsächliche Zeitbuchungen."});
+      const reason=String(req.body?.reason||"").trim().slice(0,300),by=String(req.body?.correctedBy||"Bettina / Büro").slice(0,120);
+      if(reason.length<5)return res.status(400).json({ok:false,error:"Bitte einen nachvollziehbaren Änderungsgrund eingeben."});
+      if(!Array.isArray(req.body?.segments))return res.status(400).json({ok:false,error:"Zeitblöcke fehlen."});
+      const segments=req.body.segments.map((r,i)=>({id:String(r.id||"payroll_"+Date.now()+"_"+i),type:r.type,from:String(r.from||""),to:String(r.to||""),reason:String(r.reason||"").slice(0,140),unproductiveCategory:String(r.unproductiveCategory||"").slice(0,40),unproductiveCode:String(r.unproductiveCode||"").slice(0,12),absenceType:String(r.absenceType||"").slice(0,40),jobId:"",jobName:""})).sort((a,b)=>String(a.from).localeCompare(String(b.from)));
+      for(let i=0;i<segments.length;i++){
+        const r=segments[i],a=payrollModel.minute(r.from),b=payrollModel.minute(r.to);
+        if(!["work","up","lunch","pause"].includes(r.type)||a===null||b===null||b<=a||(i&&payrollModel.minute(segments[i-1].to)>a))return res.status(400).json({ok:false,error:"Zeitblöcke sind ungültig oder überschneiden sich."});
+      }
+      let row=context.corrections.find(r=>r.employeeId===employeeId&&r.date===date);
+      const before=monthlyDay(context,employee,date).segments,now=new Date().toISOString();
+      if(!row){row={employeeId,date,history:[]};context.corrections.push(row)}
+      row.history.push({at:now,by,reason,before,after:segments});Object.assign(row,{segments,reason,updatedAt:now,updatedBy:by});
+      await writeJson(PAYROLL_CORRECTIONS,context.corrections);
+      res.json({ok:true,segments,history:row.history});
+    }catch(error){res.status(500).json({ok:false,error:String(error.message||error)})}
+  }));
+
+
+  app.post("/kristine/api/month-reopen",serializedTimeMutation(async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    await startupReady;
+    try{
+      const employeeId=String(req.body?.employeeId||""),month=String(req.body?.month||""),
+        reason=String(req.body?.reason||"").trim().slice(0,500),reviewer=String(req.body?.reviewer||"").trim().slice(0,120);
+      if(!employeeId||!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)||reason.length<5||!reviewer||req.body?.acknowledge!==true)return res.status(400).json({ok:false,error:"Wiederöffnung ausdrücklich bestätigen und mit Name sowie nachvollziehbarer Begründung protokollieren."});
+      const closures=await readJson(MONTH_CLOSURES,[]),closed=closures.find(r=>r.employeeId===employeeId&&r.month===month);
+      if(!closed)return res.status(409).json({ok:false,error:"Dieser Mitarbeiter-Monat ist nicht abgeschlossen."});
+      const history=await readJson(MONTH_REOPENINGS,[]),corrections=await readJson(PAYROLL_CORRECTIONS,[]),now=new Date().toISOString();
+      const audit={id:"reopen_"+Date.now(),employeeId,month,reason,reviewer,reopenedAt:now,previousClosure:closed};
+      history.push(audit);
+      // Seed only fixed payroll times. Subsequent payroll corrections never rewrite project history.
+      for(const day of closed.days||[]){
+        const segments=day.segments||[],existing=corrections.find(r=>r.employeeId===employeeId&&r.date===day.date);
+        if(existing)Object.assign(existing,{segments,reason,updatedAt:now,updatedBy:reviewer});
+        else corrections.push({employeeId,date:day.date,segments,reason,updatedAt:now,updatedBy:reviewer,history:[]});
+      }
+      await writeJson(MONTH_REOPENINGS,history);
+      await writeJson(PAYROLL_CORRECTIONS,corrections);
+      // Unlock last: any earlier failure keeps the original closure in force.
+      await writeJson(MONTH_CLOSURES,closures.filter(r=>r!==closed));
+      res.json({ok:true,employeeId,month,reopenedAt:now});
+    }catch(error){res.status(500).json({ok:false,error:String(error.message||error)})}
+  }));
+
   app.get("/kristine/api/month-closures", async (req,res) => {
     if (!requireAdmin(req,res)) return;
     const closures = await readJson(MONTH_CLOSURES,[]);
@@ -2873,6 +2977,7 @@ const open = taskId
         readJson(MONTH_CLOSURES,[]),readJson(TIME_EVENTS,[]),readJson(STATES,{}),readJson(DAY_RELEASES,[]),
         typeof readEmployees === "function" ? readEmployees() : [],readJson(ASSIGNMENTS,[])
       ]);
+      const payrollContext=await monthlyContext();
       const created = [], pendingProjects = [];
       for (const person of people) {
         const employeeId = String(person.employeeId || "");
@@ -2882,13 +2987,14 @@ const open = taskId
         const days = [];
         for (let d = new Date(`${from}T12:00:00Z`); d <= end; d.setUTCDate(d.getUTCDate()+1)) {
           const date = d.toISOString().slice(0,10);
-          const segments = buildEditableSegments(events,employeeId,date,states[employeeId] || {});
-          if (segments.length && (!dayControlReleaseForEmployee(releases,employee,date)?.released || dayControlReleaseForEmployee(releases,employee,date)?.returned)) {
+          const payrollDay=monthlyDay(payrollContext,employee,date);
+          const segments=payrollDay.segments;
+          if (!payrollDay.payrollAutomatic && segments.length && (!dayControlReleaseForEmployee(releases,employee,date)?.released || dayControlReleaseForEmployee(releases,employee,date)?.returned)) {
             return res.status(409).json({ok:false,error:`${employee.name || employeeId}: ${date} ist noch nicht freigegeben.`});
           }
           if (segments.some(row => !row.to || minutesFromHM(row.to) <= minutesFromHM(row.from))) return res.status(409).json({ok:false,error:`${employee.name || employeeId}: ${date} enthält offene oder ungültige Zeiten.`});
           const employeeName = String(employee.name || employeeId);
-          pendingProjects.push({employeeId,employeeName,date,segments,source:"month_close"});
+          if(!payrollContext.reopenings.some(r=>r.employeeId===employeeId&&r.month===month))pendingProjects.push({employeeId,employeeName,date,segments:buildEditableSegments(events,employeeId,date,states[employeeId]||{}),source:"month_close"});
           const frozenEvents = eventsForEmployeeSegments({employeeId,employeeName,date,segments});
           days.push({employeeId,date,events:frozenEvents,segments:buildEditableSegments(frozenEvents,employeeId,date,{})});
         }
@@ -2923,7 +3029,7 @@ const open = taskId
     try {
       const closures = await readJson(MONTH_CLOSURES,[]);
       const people = (Array.isArray(req.body?.people) ? req.body.people : []).map(person =>
-        closures.find(row => row.employeeId === String(person.employeeId) && row.from === req.body?.from && row.to === req.body?.to)?.report || person);
+        (()=>{const fixed=closures.find(row=>row.employeeId===String(person.employeeId)&&row.from===req.body?.from&&row.to===req.body?.to);return fixed?{...fixed.report,monthClosed:true}:person})());
       if (!people.length) return res.status(400).json({ ok:false, error:"Mindestens einen Mitarbeiter auswählen." });
       const pdf = await createKriszeitMonthlyPdf({
         company: "Farben Krista GmbH & Co KG, 6820 Frastanz",
@@ -3202,6 +3308,7 @@ const open = taskId
       const employeeName = String(req.body?.employeeName || employeeId).trim();
       const closed = await closedMonthFor(employeeId,date);
       const projectScope = req.query?.scope === "project" || req.body?.scope === "project";
+      if(!closed&&!projectScope&&(await readJson(MONTH_REOPENINGS,[])).some(r=>r.employeeId===employeeId&&r.month===date.slice(0,7)))return res.status(409).json({ok:false,error:"Dieser Monat wurde für eine Lohnkorrektur wieder geöffnet. Bitte die Einzelansicht in Monatskontrolle verwenden; Baustellenzeiten bleiben getrennt."});
       if (closed && !projectScope) return res.status(409).json({ok:false,error:"Der Monat ist abgeschlossen. Änderungen sind nur noch in der Baustelle möglich."});
       const correctionReason = String(req.body?.reason || "").trim().slice(0, 160);
       const correctionNote = String(req.body?.note || "").trim().slice(0, 500);
