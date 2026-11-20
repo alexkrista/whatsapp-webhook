@@ -9,15 +9,25 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
  const alex=[row([1,2,3,4,5],"07:00","15:48",{lunchFrom:"12:00",lunchTo:"14:00",activityLabel:"Baustelle ≥ 120 km"})];
  const models=[model("krista-standard",[row([1,2,3,4],"07:00","16:15"),row([5],"07:00","14:15")]),model("office-alex",alex,alex),model("office-dunja",[row([1,4],"08:00","12:00")]),model("office-geri",[row([2,4],"14:30","17:00")],[row([2,4],"14:30","17:00",{activityLabel:"Werkstatt",activityCode:"913"})]),model("office-judith",[row([1,5],"08:00","17:30",{lunchFrom:"12:00",lunchTo:"13:30"}),row([2],"08:00","12:00")],[row([1,5],"08:00","17:30",{lunchFrom:"12:00",lunchTo:"13:30",activityLabel:"Büro"}),row([2],"08:00","12:00",{activityLabel:"Büro"})]),model("office-bettina",[row([1,2,3,4,5],"08:00","11:12")])];
  await fsp.writeFile(path.join(root,"_system","worktime-models.json"),JSON.stringify(models));await fsp.writeFile(path.join(root,"_system","holidays.json"),JSON.stringify([{date:"2026-10-26",name:"Nationalfeiertag"}]));
- await fsp.writeFile(path.join(dir,"time-events.json"),JSON.stringify([{employeeId:"b",date:"2026-10-06",type:"up",at:"07:30",reason:"Büro"},{employeeId:"b",date:"2026-10-06",type:"ende",at:"12:00"},{employeeId:"d",date:"2026-10-05",type:"up",at:"08:00",reason:"Büro"},{employeeId:"d",date:"2026-10-05",type:"ende",at:"12:00"}]));
- await fsp.writeFile(path.join(dir,"day-releases.json"),JSON.stringify([{employeeId:"b",date:"2026-10-06",released:true},{employeeId:"d",date:"2026-10-05",released:true}]));
+ await fsp.writeFile(path.join(dir,"time-events.json"),JSON.stringify([{employeeId:"a",date:"2026-10-05",type:"up",at:"07:00",actualAt:"05:54",reason:"Büro"},{employeeId:"a",date:"2026-10-05",type:"ende",at:"12:34"},{employeeId:"b",date:"2026-10-06",type:"up",at:"07:30",reason:"Büro"},{employeeId:"b",date:"2026-10-06",type:"ende",at:"12:00"},{employeeId:"d",date:"2026-10-05",type:"up",at:"08:00",reason:"Büro"},{employeeId:"d",date:"2026-10-05",type:"ende",at:"12:00"}]));
+ await fsp.writeFile(path.join(dir,"day-releases.json"),JSON.stringify([{employeeId:"a",date:"2026-10-05",released:true},{employeeId:"b",date:"2026-10-06",released:true},{employeeId:"d",date:"2026-10-05",released:true}]));
  const routes=new Map(),app={};for(const method of ["get","post","put","patch","delete"])app[method]=(url,fn)=>routes.set(method+" "+url,fn);
  let authorized=true;const instance=registerKristine(app,{dataDir:root,publicDir:root,requireAdmin:(req,res)=>{if(!authorized)res.status(403).json({error:"forbidden"});return authorized},readEmployees:async()=>employees});
  const call=async(method,url,{params={},query={},body={}}={})=>{const res={statusCode:200,status(n){this.statusCode=n;return this},json(b){this.body=b;return this}};await routes.get(method+" "+url)({params,query,body},res);return res};
  const days=async id=>(await call("get","/kristine/api/monthly-days/:employeeId",{params:{employeeId:id},query:{from:"2026-10-01",to:"2026-10-31"}})).body.days;
  try{
  await instance.startupReady;
- let a=await days("a");assert.equal(a.find(d=>d.date==="2026-10-05").targetMinutes,408);assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-05").segments),408);assert.deepEqual(a.find(d=>d.date==="2026-10-05").segments.map(s=>[s.type,s.from,s.to]),[["up","07:00","12:00"],["lunch","12:00","14:00"],["up","14:00","15:48"]]);assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-26").segments),0,"holiday is paid, never worked");
+ let a=await days("a");assert.equal(a.find(d=>d.date==="2026-10-05").targetMinutes,396);assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-05").segments),400);assert.deepEqual(a.find(d=>d.date==="2026-10-05").segments.map(s=>[s.type,s.from,s.to]),[["up","05:54","12:34"]]);assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-26").segments),0,"holiday is paid, never worked");
+ const october=Array.from({length:31},(_,i)=>"2026-10-"+String(i+1).padStart(2,"0"));
+ const monthlyTarget=e=>october.reduce((n,date)=>n+policy.schedule(models,e,date).targetMinutes,0);
+ assert.equal(monthlyTarget(employees[0]),145*60+12);
+ assert.equal(monthlyTarget(employees[2]),22*60+30);
+ assert.equal(monthlyTarget(employees[3]),88*60);
+ for(const personnelNumber of ["20","39"]){
+   const employee={personnelNumber,worktimeModelId:"krista-standard"};
+   assert.equal(monthlyTarget(employee),173*60);
+   assert.equal(policy.schedule(models,employee,"2026-10-01").contractOvertimeWeekMinutes,60);
+ }
  const holiday=(await days("p")).find(d=>d.date==="2026-10-26");
  assert.equal(holiday.released,true);
  assert.equal(holiday.segments[0].unproductiveCode,"904");

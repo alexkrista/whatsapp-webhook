@@ -25,7 +25,7 @@
     for(const segment of segments){
       const {type,from,to}=segment;
       const durationMinutes=from&&to?Math.max(0,mins(to)-mins(from)):0;
-      const block={type,from,to,durationMinutes,label:type==="work"?"Arbeit":type==="pause"?"Pause (Abzug)":type==="lunch"?"Mittag":String(segment.reason||"Unproduktiv")};
+      const block={type,from:segment.durationOnly?"":from,to:segment.durationOnly?"":to,durationMinutes,label:type==="work"?"Arbeit":type==="pause"?"Pause (Abzug)":type==="lunch"?"Mittag":String(segment.reason||"Unproduktiv")};
       if(work&&end!==from)flush();
       if(type==="work"){
         if(work){work.to=to;work.durationMinutes+=durationMinutes;}

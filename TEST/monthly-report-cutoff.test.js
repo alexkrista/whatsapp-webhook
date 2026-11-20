@@ -9,5 +9,5 @@ assert.match(code,/Stand bis \$\{through\} · freigegebene Stunden \+ fixe Model
 assert.match(code,/zaBalancesThrough/,"ZA-alt-Stand muss ebenfalls auf gestern begrenzt sein");
 assert.match(code,/Geplanter Urlaub · nächste 6 Monate/,"Urlaubsvorschau für sechs Monate fehlt");
 assert.match(code,/data-person-pdf/,"Einzel-PDF je Mitarbeiter fehlt");
-assert.match(html,/monthly-report\.js\?v=10/,"Browser-Cacheversion wurde nicht angehoben");
+assert.match(html,/monthly-report\.js\?v=11/,"Browser-Cacheversion wurde nicht angehoben");
 console.log("OK: Monatsübersicht und Einzel-PDF enden gestern und verwenden nur freigegebene Stunden");
