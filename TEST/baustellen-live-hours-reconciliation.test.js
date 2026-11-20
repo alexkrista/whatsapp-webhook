@@ -10,7 +10,7 @@ const sources=fs.readFileSync(path.join(root,"public","ui","baustellen-sources.j
 const topbar=fs.readFileSync(path.join(root,"public","ui","topbar.js"),"utf8");
 const baustellen=fs.readFileSync(path.join(root,"public","baustellen.html"),"utf8");
 const leitstand=fs.readFileSync(path.join(root,"public","kristine.html"),"utf8");
-assert.match(topbar,/baustellen-live-hours\.js\?v=20261006-hours-loading-1/);
+assert.match(topbar,/baustellen-live-hours\.js\?v=20261120-project-hours-detail/);
 assert.match(baustellen,/topbar\.js\?v=\d{8}-[\w-]+/);
 assert.match(leitstand,/timeEditorMonthClosed=Boolean\(result\.monthClosed\)/);
 assert.match(leitstand,/Produktiv · ohne Baustellenbezug/);

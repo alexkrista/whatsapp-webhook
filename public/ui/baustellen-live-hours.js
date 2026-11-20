@@ -204,7 +204,15 @@
     const card=[...shell.querySelectorAll(".bc-card")].find(c=>/Menschen\s*&\s*Baustellenwissen/i.test(c.querySelector("h3")?.textContent||""));
     const host=card?.querySelector(".bc-people-row"),people=fusedPeople(id),sub=card?.querySelector(".bc-sub");
     if(sub)sub.textContent=`${hours(fused.kristine)} KRISTINE + ${hours(fused.ww)} WW = ${hours(fused.total)}`;
-    if(host&&people.length)host.innerHTML=people.map(p=>`<div class="bc-person"><strong>${escapeHtml(p.name)}</strong><span>${hours(p.hours)}</span><small>${p.days.size} Tag(e) · ${escapeHtml([...p.sources].join(" + "))}</small></div>`).join("");
+    if(host&&people.length)renderPersonCards(host,id,people);
+  }
+
+  function renderPersonCards(host,id,people){
+    const signature=JSON.stringify([id,people.map(p=>[p.name,p.hours,[...p.days],[...p.sources]])]);
+    if(host.dataset.hoursSignature===signature&&host.querySelector("[data-project-person]"))return;
+    host.dataset.hoursSignature=signature;
+    host.innerHTML=people.map((p,index)=>`<button type="button" class="bc-person" style="text-align:left;cursor:pointer;font:inherit" data-project-person="${index}"><strong>${escapeHtml(p.name)}</strong><span>${hours(p.hours)}</span><small>${p.days.size} Tag(e) · ${escapeHtml([...p.sources].join(" + "))}</small></button>`).join("")+'<button type="button" class="bc-person" style="cursor:pointer" data-project-person="all">Gesamte Baustelle</button>';
+    host.querySelectorAll("[data-project-person]").forEach(button=>button.onclick=()=>openProjectHours(id,people[button.dataset.projectPerson]?.name));
   }
 
   function memberHourSummary(j,head=j){
@@ -253,13 +261,58 @@
   function queuePatch(){if(patchQueued||patching)return;patchQueued=true;setTimeout(()=>{patchQueued=false;patchAll()},80)}
 
   function personDayHours(jobId){
-    const j=job(jobId),out=new Map(),add=(date,name,hours,source)=>{const canonical=canonicalPersonName(name),key=`${date}|${nameKey(canonical)}`,current=out.get(key)||{date,name:canonical,hours:0,source};current.hours+=num(hours);current.source=current.source===source?source:"WW + KRISTINE";out.set(key,current)};
+    const j=job(jobId),out=new Map(),add=(date,name,hours,source,intervals=[])=>{const canonical=canonicalPersonName(name),key=`${date}|${nameKey(canonical)}`,current=out.get(key)||{date,name:canonical,hours:0,source,intervals:[],missingTimes:false};current.hours+=num(hours);current.intervals.push(...intervals);current.missingTimes ||= !intervals.length;current.source=current.source===source?source:"WW + KRISTINE";out.set(key,current)};
     for(const member of D.members(j,jobs)){
       const single=D.single(member),fused=singleFusion(single,j),ww=wwByMember.get(String(member.jobId))||wwByJob.get(String(member.jobId)),kr=kristineFor(single),cutover=fused.legacyCutover||"";
-      for(const [date,people] of kr?.dayPeople||[])if(!cutover||date>=cutover)for(const person of people.values())add(date,person.name,person.hours,"KRISTINE");
+      for(const [date,people] of kr?.dayPeople||[])if(!cutover||date>=cutover)for(const person of people.values())add(date,person.name,person.hours,"KRISTINE",person.intervals);
       for(const row of ww?.rows||[])if(cutover?row.date<cutover:!fused.excluded.has(row.key))add(row.date,row.employeeName,row.hours,"WinWorker");
     }
     return [...out.values()];
+  }
+
+  function openProjectHours(id, person) {
+    const rows=personDayHours(id).filter(row=>!person||row.name===person)
+      .sort((a,b)=>a.date.localeCompare(b.date)||a.name.localeCompare(b.name,"de"));
+    const months=[...new Set(rows.map(row=>row.date.slice(0,7)).filter(month=>/^\d{4}-\d{2}$/.test(month)))];
+    const label=month=>new Intl.DateTimeFormat("de-AT",{month:"long",year:"numeric",timeZone:"UTC"}).format(new Date(month+"-01T00:00:00Z"));
+    const fmt=value=>new Intl.NumberFormat("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2}).format(value)+" h";
+    const sum=items=>items.reduce((total,row)=>total+row.hours,0);
+    const time=value=>String(Math.floor(value/60)).padStart(2,"0")+":"+String(Math.floor(value%60)).padStart(2,"0");
+    const dialog=document.createElement("dialog");
+    dialog.setAttribute("aria-labelledby","project-hours-title");
+    dialog.style.cssText="width:min(940px,94vw);max-height:85vh;border:1px solid #ddd7cb;border-radius:14px;padding:20px;color:#262923;background:#fff";
+    dialog.innerHTML='<form method="dialog" style="float:right"><button>Schlie&szlig;en</button></form><h2 id="project-hours-title"></h2><label>Zeitraum <select><option value="">Gesamte Zeit</option></select></label><div style="overflow:auto;margin-top:12px" data-hours-table></div>';
+    dialog.querySelector("h2").textContent=(person||"Gesamte Baustelle")+" \u00b7 "+(job(id)?.name||id);
+    const select=dialog.querySelector("select");
+    months.forEach(month=>select.add(new Option(label(month),month)));
+    const total=person?sum(rows):hoursSummary(id).total;
+    function render(){
+      const selected=select.value?rows.filter(row=>row.date.startsWith(select.value)):rows;
+      const groups=new Map();
+      for(const row of selected){
+        const month=row.date.slice(0,7);
+        if(!groups.has(month))groups.set(month,[]);
+        groups.get(month).push(row);
+      }
+      const columnCount=person?3:4;
+      const body=[...groups].map(([month,items])=>{
+        const entries=items.map(row=>{
+          const times=[...row.intervals].sort((a,b)=>a.from-b.from).map(interval=>time(interval.from)+"\u2013"+time(interval.to));
+          if(row.missingTimes)times.push("Uhrzeiten fehlen ("+escapeHtml(row.source)+")");
+          return `<tr><td>${dateLabel(row.date)}</td>${person?"":"<td>"+escapeHtml(row.name)+"</td>"}<td>${times.join("<br>")}</td><td>${fmt(row.hours)}</td></tr>`;
+        }).join("");
+        const monthName=months.includes(month)?label(month):"Ohne Datum";
+        return `<tbody>${entries}<tr><th colspan="${columnCount-1}" scope="row">Summe ${monthName}</th><td><strong>${fmt(sum(items))}</strong></td></tr></tbody>`;
+      }).join("");
+      const remainder=!person&&Math.abs(total-sum(rows))>=.01?
+        `<p>Abweichung zur Summe der Tagesbuchungen: ${fmt(total-sum(rows))}</p>`:"";
+      dialog.querySelector("[data-hours-table]").innerHTML=`<table class="bk-table" style="width:100%"><thead><tr><th>Tag</th>${person?"":"<th>Mitarbeiter</th>"}<th>Von \u2013 Bis</th><th>Std.</th></tr></thead>${body||`<tbody><tr><td colspan="${columnCount}">Keine Tagesbuchungen vorhanden.</td></tr></tbody>`}<tfoot><tr><th colspan="${columnCount-1}" scope="row">Summe gesamt</th><td><strong>${fmt(total)}</strong></td></tr></tfoot></table>${remainder}`;
+    }
+    select.onchange=render;
+    dialog.addEventListener("close",()=>dialog.remove(),{once:true});
+    render();
+    document.body.append(dialog);
+    dialog.showModal();
   }
 
   function localIsoDay(value){

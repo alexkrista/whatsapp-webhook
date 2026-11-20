@@ -230,8 +230,8 @@
     loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20261023-renumber-1", "data-krista-baustellen-cockpit");
     loadScriptOnce("/public/ui/baustellen-chronik.js?v=20261008-color-concept-1", "data-krista-baustellen-chronik");
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260903-valid-dates", "data-krista-baustellen-intelligence");
-    loadScriptOnce("/public/ui/baustellen-hours-core.js?v=20261006-hours-loading-1", "data-krista-baustellen-hours-core");
-    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20261006-hours-loading-1", "data-krista-baustellen-live-hours");
+    loadScriptOnce("/public/ui/baustellen-hours-core.js?v=20261120-project-hours-detail", "data-krista-baustellen-hours-core");
+    loadScriptOnce("/public/ui/baustellen-live-hours.js?v=20261120-project-hours-detail", "data-krista-baustellen-live-hours");
     loadScriptOnce("/public/ui/baustellen-foto-gallery.js?v=20260912-photo-share-1", "data-krista-baustellen-foto-gallery");
     loadScriptOnce("/public/ui/baustellen-ww-import.js?v=20260913-hours-cache-1", "data-krista-baustellen-ww-import");
     loadScriptOnce("/public/ui/baustellen-collection.js?v=20260913-sammelmappe-1", "data-krista-baustellen-collection");
