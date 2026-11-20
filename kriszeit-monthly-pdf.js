@@ -33,7 +33,7 @@ async function createKriszeitMonthlyPdf(payload = {}) {
   const generated = new Date().toLocaleString("de-AT");
 
   for (const person of people) {
-    const page = pdf.addPage(A4);
+    let page = pdf.addPage(A4);
     const width = page.getWidth();
     const left = 44;
     const right = width - 44;
@@ -41,7 +41,7 @@ async function createKriszeitMonthlyPdf(payload = {}) {
     const text = (value, x, yy, size = 7, font = regular, color = ink) => page.drawText(clean(value), { x, y: yy, size, font, color });
     const rule = (yy, thickness = 0.45) => page.drawLine({ start: { x: left, y: yy }, end: { x: right, y: yy }, thickness, color: ink });
 
-    text("PZE Monatsübersicht UNKONTROLLIERT", left, y, 9, bold);
+    text(person.monthClosed?"PZE Monatsübersicht ABGESCHLOSSEN":"PZE Monatsübersicht UNKONTROLLIERT", left, y, 9, bold);
     text(clean(payload.company || "Farben Krista GmbH & Co KG, 6820 Frastanz"), 365, y, 7.5, regular);
     rule(y - 4, 0.55);
     y -= 27;
@@ -60,8 +60,16 @@ async function createKriszeitMonthlyPdf(payload = {}) {
     y -= 14;
 
     const days = Array.isArray(person.days) ? person.days : [];
-    let weekly = { actual: 0, target: 0, balance: 0, vacation: 0 };
+    function ensureSpace(height){
+      if(y-height>60)return;
+      page=pdf.addPage(A4);y=803;
+      text((person.name||person.employeeId||"Mitarbeiter")+" - Fortsetzung",left,y,10,bold);
+      y-=20;columns.forEach(([label,x])=>text(label,x,y,6.4,bold));rule(y-3);y-=14;
+    }
+    let weekly = { actual: 0, target: 0, balance: 0, vacation: 0, work:0 };
     const drawWeek = label => {
+      ensureSpace(22);
+      if(weekly.work>3000)page.drawRectangle({x:left,y:y-4,width:right-left,height:13,color:rgb(1,0.88,0.84)});
       rule(y + 6, 0.45);
       text(label, left, y, 6.7, bold);
       if (weekly.actual) text(hm(weekly.actual), 277, y, 6.7, bold);
@@ -70,13 +78,15 @@ async function createKriszeitMonthlyPdf(payload = {}) {
       if (weekly.vacation) text(decimal(weekly.vacation * 60), 427, y, 6.7, bold);
       rule(y - 3, 0.45);
       y -= 14;
-      weekly = { actual: 0, target: 0, balance: 0, vacation: 0 };
+      weekly = { actual: 0, target: 0, balance: 0, vacation: 0, work:0 };
     };
 
     for (const day of days) {
       const blocks = Array.isArray(day.printBlocks) ? day.printBlocks : (Array.isArray(day.blocks) ? day.blocks : []);
       const rowCount = Math.max(1, blocks.length);
       const firstBlock = blocks[0] || {};
+      ensureSpace(18);
+      if(Number(day.workingMinutes||0)>600)page.drawRectangle({x:left,y:y-4,width:right-left,height:13,color:rgb(1,0.88,0.84)});
       text(`${day.weekday || ""}   ${deDate(day.date)}`, left, y, 6.8);
       text(day.tp || "", 97, y, 6.6);
       if (firstBlock.from) text(firstBlock.from, 118, y, 6.7);
@@ -95,12 +105,14 @@ async function createKriszeitMonthlyPdf(payload = {}) {
       if (day.specialLeave) text(String(day.specialLeave).replace(".", ","), 543, y, 6.7);
       y -= 10;
       for (let index = 1; index < rowCount; index += 1) {
+        ensureSpace(12);
         const block = blocks[index];
         text(block.from || "", 118, y, 6.7);
         text(block.to || "", 151, y, 6.7);
         if (block.durationMinutes) text(hm(block.durationMinutes), 183, y, 6.7);
         y -= 10;
       }
+      weekly.work=day.fullWeekMinutes===undefined?weekly.work+Number(day.workingMinutes||0):Number(day.fullWeekMinutes);
       weekly.actual += Number(day.payrollMinutes || 0);
       weekly.target += Number(day.targetMinutes || 0);
       weekly.balance += Number(day.payrollMinutes || 0) - Number(day.targetMinutes || 0);
@@ -108,6 +120,7 @@ async function createKriszeitMonthlyPdf(payload = {}) {
       if (day.weekday === "So" || day === days[days.length - 1]) drawWeek(`KW ${day.week || ""}`);
     }
 
+    ensureSpace(125);
     const totals = person.totals || {};
     y -= 3;
     rule(y + 6, 0.55);
@@ -129,7 +142,8 @@ async function createKriszeitMonthlyPdf(payload = {}) {
     [["B intern",277],["B extern",313],["Anw",349],["AnsprU",382],["M Z10%",422],["M Z50%",461],["V Z50%",500]].forEach(([label,x])=>text(label,x,y,6.3));
     rule(y - 3, 0.4);
 
-    text("Unkontrollierte / nicht freigegebene Stunden", 205, 105, 8.5, bold);
+    text(person.monthClosed?"Abgeschlossen - Stunden gesperrt":"Freigegebene Stunden und fixe Modell-Lohnzeiten",left,105,8,bold);
+    text("Rot: Arbeit > 10 Std./Tag oder > 50 Std./KW (gesamte KW inkl. Monatsrand).",left,90,7,regular);
     rule(32, 0.45);
     text(`${generated} / kriszeit-monatsuebersicht`, left, 20, 6.5, regular, grey);
     text(`- ${pdf.getPageCount()} -`, 289, 20, 6.5, regular, grey);
