@@ -164,11 +164,15 @@ function registerDailyReport(app, {
     const modelId = String(master.worktimeModelId || "krista-standard");
     const model = worktimeModels.find((item) => String(item?.id) === modelId) || worktimeModels[0] || null;
     const schedule = scheduleForDate(model, date);
-    const percent = Math.min(100, Math.max(0, Number(master.employmentPercent ?? 100))) / 100;
+    const percent = model?.configured===true||model?.officeModel||String(model?.id)!=="krista-standard"?1:Math.min(100, Math.max(0, Number(master.employmentPercent ?? 100))) / 100;
     return Math.max(0, Math.round(Number(schedule?.payrollTargetHours || 0) * percent * 60));
   }
 
   function assignmentPlanCategory(record) {
+    const explicit=String(record?.cardType||"");
+    if(explicit==="za")return "other";
+    if(explicit==="urlaub")return "vacation";
+    if(explicit==="feiertag")return "holiday";
     const text = [record?.jobId, record?.jobName, record?.note, record?.type, record?.category]
       .filter(Boolean).join(" ").toLowerCase();
     const absence = absenceType(text);
@@ -339,7 +343,7 @@ function registerDailyReport(app, {
     const explicitFullDay = record.fullDay === true || record.allDay === true || record.isFullDay === true;
     const absenceAlwaysFullDay = ["vacation", "sick", "holiday"].includes(type);
     const looksLikeFullDay = explicitFullDay || absenceAlwaysFullDay || (Number.isFinite(hours) && hours >= 7);
-    const minutes = looksLikeFullDay
+    const minutes = Number.isFinite(record.calendarMinutes) ? record.calendarMinutes : looksLikeFullDay
       ? payrollMinutes
       : Number.isFinite(minutesRaw) && minutesRaw > 0
         ? minutesRaw
@@ -761,7 +765,7 @@ function registerDailyReport(app, {
     const timeEvents = asArray(timeEventsRaw);
     const reviewEntries = asArray(reviewEntriesRaw);
     const absences = flattenRecords(absencesRaw);
-    const assignments = flattenRecords(assignmentsRaw);
+    const assignments = await require("./calendar-employee-bookings").assignmentsForCalendar(dataDir,flattenRecords(assignmentsRaw),{employees:[...flattenRecords(employeeMasterRaw),...flattenRecords(systemEmployeeMasterRaw)],from:date,to:date});
     const worktimeModels = asArray(worktimeModelsRaw);
     const employeeMaster = [
       ...flattenRecords(employeeMasterRaw),

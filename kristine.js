@@ -58,6 +58,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
         const keys = new Set(days.map(row => `${row.employeeId}|${row.date}`));
         value = [...value.filter(row => !keys.has(`${row.employeeId}|${row.date}`)), ...days.flatMap(row => row.events || [])];
       }
+      if (file === ASSIGNMENTS) return require("./calendar-employee-bookings").assignmentsForCalendar(dataDir,Array.isArray(value)?value:[],{employees:typeof readEmployees==="function"?await readEmployees():[]});
       if (file === TASKS) return require("./krisdrive-daily-review").mergeTasks(dataDir, await require("./customer-portal-access").mergePortalTasks(dataDir, Array.isArray(value) ? value : []));
       return [TIME_EVENTS, PROJECT_TIME_ARCHIVE, DAY_CORRECTIONS].includes(file) ? normalizeOfficeTimeData(value) : value;
     } catch (error) {
@@ -1790,6 +1791,8 @@ const open = taskId
   }
 
   function assignmentAbsenceType(assignment) {
+    const explicit=String(assignment?.cardType||assignment?.assignmentType||assignment?.type||"").toLowerCase();
+    if(["urlaub","za","feiertag","krank","sonderurlaub","arzt","schulung"].includes(explicit))return explicit;
     const raw=[
       assignment?.cardType, assignment?.assignmentType, assignment?.type,
       assignment?.category, assignment?.status, assignment?.reason,
@@ -2065,10 +2068,40 @@ const open = taskId
     }
   });
 
+  app.post("/kristine/api/calendar-bookings/:employeeId/:date",serializedTimeMutation(async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{
+      const employeeId=String(req.params.employeeId||""),date=String(req.params.date||""),type=String(req.body?.type||"");
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!["urlaub","za","auto","none"].includes(type))return res.status(400).json({ok:false,error:"Buchungsart oder Datum prüfen."});
+      if(await closedMonthFor(employeeId,date))return res.status(409).json({ok:false,error:"Der Monat ist abgeschlossen."});
+      const helper=require("./calendar-employee-bookings"),employees=typeof readEmployees==="function"?await readEmployees():[],context=await helper.calendarContext(dataDir,{employees});
+      if(context.releases.some(row=>String(row.employeeId)===employeeId&&row.date===date&&row.released===true&&row.returned!==true))return res.status(409).json({ok:false,error:"Der Tag ist freigegeben. Zuerst in der Zeitkontrolle zurückgeben."});
+      if(context.timeEvents.some(row=>String(row.employeeId)===employeeId&&row.date===date&&["start","weiter","up"].includes(row.type)))return res.status(409).json({ok:false,error:"Für diesen Tag sind Zeiten erfasst. Bitte in der Zeitkontrolle bearbeiten."});
+      const rows=await readJson(ASSIGNMENTS,[]),current=rows.find(row=>row.source===helper.SOURCE&&String(row.employeeId)===employeeId&&row.date===date);
+      const previous=context.overrides.find(row=>String(row.employeeId)===employeeId&&row.date===date);
+      if(!current&&!previous)return res.status(409).json({ok:false,error:"Kalenderbelegung hat sich geändert. Planung neu laden."});
+      if(current?.cardType==="feiertag")return res.status(400).json({ok:false,error:"Feiertag bleibt ohne Urlaubs- oder ZA-Abzug."});
+      const remaining=context.overrides.filter(row=>!(String(row.employeeId)===employeeId&&row.date===date));
+      if(type!=="auto")remaining.push({employeeId,date,type,updatedAt:new Date().toISOString(),changedBy:String(req.body?.changedBy||"Büro").slice(0,100),history:[...(previous?.history||[]),{at:new Date().toISOString(),from:previous?.type||current?.cardType||"auto",to:type}].slice(-100)});
+      await writeJson(path.join(ROOT,"calendar-booking-overrides.json"),remaining);
+      await appendEvent({type:"calendar_booking_changed",detail:employeeId+" "+date+" "+type,source:"office"});
+      res.json({ok:true,assignments:await readJson(ASSIGNMENTS,[])});
+    }catch(error){res.status(500).json({ok:false,error:String(error.message||error)})}
+  }));
+  app.get("/kristine/api/calendar-bookings/summary",async(req,res)=>{
+    if(!requireAdmin(req,res))return;
+    try{
+      const year=Number(req.query.year||new Date().getFullYear());
+      if(!Number.isInteger(year)||year<2026||year>2100)return res.status(400).json({ok:false,error:"Jahr prüfen."});
+      const from=year+"-01-01",to=year+"-12-31",helper=require("./calendar-employee-bookings"),employees=typeof readEmployees==="function"?await readEmployees():[];
+      const assignments=await helper.assignmentsForCalendar(dataDir,await readJson(ASSIGNMENTS,[]),{employees,from,to});
+      res.json({ok:true,year,status:"planned",employees:employees.filter(e=>e.active!==false&&e.archived!==true).map(e=>({employeeId:String(e.id),employeeName:e.name,...helper.totals(assignments,e.id,from,to)}))});
+    }catch(error){res.status(500).json({ok:false,error:String(error.message||error)})}
+  });
   app.put("/kristine/api/assignments", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
-      const rows = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
+      const rows = Array.isArray(req.body?.assignments) ? req.body.assignments.filter(row=>row.source!=="company_calendar") : [];
       const employeeMaster = typeof readEmployees === "function" ? await readEmployees().catch(()=>[]) : [];
       const clean = rows.map((a, index) => {
         const master=findEmployeeMaster(employeeMaster,a)||{};
@@ -2113,7 +2146,7 @@ const open = taskId
         }
       }
       await appendEvent({ type: "planning_saved", detail: `${clean.length} Einteilungen gespeichert`, source: "office" });
-      res.json({ ok: true, assignments: clean });
+      res.json({ ok: true, assignments: await readJson(ASSIGNMENTS,[]) });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
@@ -2269,12 +2302,13 @@ const open = taskId
   function employeeTimeKind(segment) {
     if(segment?.type !== "up") return productiveKind(segment);
     const detail = unproductiveDetails(segment);
+    if (["900","904","930"].includes(detail.code)) return "unproductive";
     return detail.category || detail.code === "022" ? "unproductive" : "productive";
   }
 
   function employeeEventType(segment) {
     const detail = unproductiveDetails(segment);
-    return segment?.type === "up" && !detail.category && detail.code !== "022" ? "start" : eventTypeForSegment(segment);
+    return segment?.type === "up" && !detail.category && !["022","900","904","930"].includes(detail.code) ? "start" : eventTypeForSegment(segment);
   }
 
   function segmentsAtRelease({ release, correction, currentSegments }) {
@@ -2590,7 +2624,7 @@ const open = taskId
     const code=String(segment?.unproductiveCode||"");
     if(code==="930"||/zeitausgleich|(^|[^a-z])za([^a-z]|$)/.test(text))return "za";
     if(code==="900"||/(^|[^a-z])urlaub([^a-z]|$)/.test(text))return "vacation";
-    return code==="901"||code==="911"||/sonderurlaub|krank/.test(text)?"absence":"work";
+    return code==="901"||code==="911"||code==="904"||/sonderurlaub|krank/.test(text)?"absence":"work";
   }
 
   function dayControlSegmentLabel(segment, kind) {
@@ -2628,7 +2662,7 @@ const open = taskId
     const parsed=new Date(`${date}T12:00:00`);
     if(!model||Number.isNaN(parsed.getTime()))return null;
     const weekday=parsed.getDay()===0?7:parsed.getDay();
-    const factor=Math.max(0,Number(employee?.employmentPercent??employee?.employmentPercentage??employee?.workPercent??100)||0)/100;
+    const factor=model.configured===true||model.officeModel||String(model.id)!=="krista-standard"?1:Math.max(0,Number(employee?.employmentPercent??employee?.employmentPercentage??employee?.workPercent??100)||0)/100;
     const targetRow=(model?.blocks?.finkTarget?.rows||[]).find(row=>(row?.days||[]).map(Number).includes(weekday));
     let targetMinutes=targetRow?dayControlNetRowMinutes(targetRow):0;
     let from=String(targetRow?.from||"");
@@ -2689,14 +2723,14 @@ const open = taskId
       let segments=buildEditableSegments(events,employeeId,date,states[employeeId]||{});
       const plannedAbsence=employeeAbsenceForDay(assignments,employee,date);
       const recordedFullDayType=(segments||[]).map(segment=>dayControlSegmentKind(segment)).find(kind=>kind==="vacation"||kind==="za")||"";
-      const fullDayType=["urlaub","za"].includes(String(plannedAbsence?.type||""))
+      const fullDayType=["urlaub","za","feiertag"].includes(String(plannedAbsence?.type||""))
         ? String(plannedAbsence.type)
         : recordedFullDayType==="vacation"?"urlaub":recordedFullDayType;
       const payrollSchedule=fullDayType?dayControlPayrollSchedule(worktimeModels,employee,date):null;
       let scheduleWarning="";
       if(fullDayType&&payrollSchedule){
-        const label=fullDayType==="za"?"ZA · Zeitausgleich":"Urlaub";
-        segments=[{type:"up",from:payrollSchedule.from,to:payrollSchedule.to,reason:label,absenceType:fullDayType,unproductiveCode:fullDayType==="za"?"930":"900"}];
+        const label=fullDayType==="feiertag"?"Feiertag":fullDayType==="za"?"ZA · Zeitausgleich":"Urlaub";
+        segments=[{type:"up",from:payrollSchedule.from,to:payrollSchedule.to,reason:label,absenceType:fullDayType,unproductiveCode:fullDayType==="za"?"930":fullDayType==="feiertag"?"904":"900"}];
       }else if(fullDayType){
         segments=[];
         scheduleWarning=`${fullDayType==="za"?"ZA":"Urlaub"}: Im Zeitmodell fehlen Sollstunden für diesen Tag.`;
