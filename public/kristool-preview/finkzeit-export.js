@@ -55,7 +55,7 @@ async function buildFinkRows(from,to) {
         }
       } else {
         const absence=assignmentAbsence(e.id||e.employeeId,date);
-        if(absence) rows.push([nr,fname(e.name||e.employeeName),fdate(date),"07:00","14:48","7,80",absence[0],absence[1]]);
+        if(absence){const planned=(state.bootstrap?.assignments||[]).find(a=>String(a.employeeId)===String(e.id||e.employeeId)&&a.date===date&&Number.isFinite(a.calendarMinutes));const from=planned?.from||"07:00",to=planned?String(Math.floor((fmins(from)+planned.calendarMinutes)/60)).padStart(2,"0")+":"+String((fmins(from)+planned.calendarMinutes)%60).padStart(2,"0"):"14:48",hours=planned?Number(planned.calendarMinutes/60).toFixed(2).replace(".",","):"7,80";rows.push([nr,fname(e.name||e.employeeName),fdate(date),from,to,hours,absence[0],absence[1]])}
       }
     }
   }
