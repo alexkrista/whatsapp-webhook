@@ -92,7 +92,7 @@ async function createKriszeitMonthlyPdf(payload = {}) {
       if (firstBlock.from) text(firstBlock.from, 118, y, 6.7);
       if (firstBlock.to) text(firstBlock.to, 151, y, 6.7);
       if (firstBlock.durationMinutes) text(hm(firstBlock.durationMinutes), 183, y, 6.7);
-      if (day.label) text(day.label, 220, y, 6.7);
+      if(day.label||firstBlock.label)text(String(day.label||firstBlock.label).slice(0,13),220,y,6.7);
       if (day.payrollMinutes) text(hm(day.payrollMinutes), 277, y, 6.7);
       if (day.targetMinutes) text(hm(day.targetMinutes), 313, y, 6.7);
       if (day.targetMinutes || day.payrollMinutes) text(signedDecimal(Number(day.payrollMinutes||0)-Number(day.targetMinutes||0)), 341, y, 6.7);
@@ -110,6 +110,7 @@ async function createKriszeitMonthlyPdf(payload = {}) {
         text(block.from || "", 118, y, 6.7);
         text(block.to || "", 151, y, 6.7);
         if (block.durationMinutes) text(hm(block.durationMinutes), 183, y, 6.7);
+        if(block.label)text(String(block.label).slice(0,13),220,y,6.7);
         y -= 10;
       }
       weekly.work=day.fullWeekMinutes===undefined?weekly.work+Number(day.workingMinutes||0):Number(day.fullWeekMinutes);
