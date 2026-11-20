@@ -1,7 +1,7 @@
 "use strict";
 
 (function(){
-  const VERSION="20261023-live-invoices-1";
+  const VERSION="20261120-cloud-regie-fallback-1";
   const BRAIN_URL="https://pc-alex02.tail610122.ts.net";
   const token=new URLSearchParams(location.search).get("token")||"";
   const tokenUrl=p=>{const u=new URL(p,location.origin);if(token&&u.origin===location.origin)u.searchParams.set("token",token);return u.pathname+u.search+u.hash};
@@ -244,6 +244,68 @@
     return (`${through?'Stand bis '+through:''}${through&&built?' · ':''}${built?'berechnet '+built:''}`||'Gespeicherter Abrechnungsstand')+invoiceNote;
   }
 
+  // KRISTINE-Projektakten enthalten auch Regieberichte, wenn eine Baustelle
+  // keine eindeutige WinWorker-Projektnummer hat (z.B. 26096).
+  // Niemals eine nicht gelesene Quelle als "0 offene Berichte" interpretieren.
+  function pickCloudRegieReports(items,cutoff){
+    if(!Array.isArray(items))throw new Error("Projekt-Dokumentation unvollständig");
+    const reports=items.filter(item=>item?.type==="regie_report")
+      .filter(item=>{
+        const day=String(item.reportDate||item.date||"").slice(0,10);
+        return !cutoff||!day||day<=cutoff;
+      })
+      .filter(item=>{
+        const net=Number(item.totalNet),hours=Number(item.totalHours);
+        return !!String(item.reportNumber||item.sourceId||"") &&
+          Number.isFinite(net)&&net>=0 && Number.isFinite(hours)&&hours>=0;
+      });
+    return window.KristaRegieBilling?.dedupeReports?.(reports)||reports;
+  }
+  const cloudRegieCache=new Map();
+  let cloudRegiePending=false;
+  async function hydrateCloudRegie(jobs){
+    if(cloudRegiePending||!billingReady)return;
+    const now=Date.now(),ttl=3*60*1000;
+    const wanted=(jobs||[]).filter(j=>{
+      const id=String(j.jobId||"");
+      const inUse=["Auftrag","Laufend","Fertig – nicht abgerechnet"].includes(String(j.status||""));
+      const existing=reportsByJob[id]||[];
+      const hasHours=num(calc(j).actualHours)>0||num(baustellenHours?.byJob?.[id]?.total)>0;
+      return id&&inUse&&!closedCollectionMembers.has(id)&&!existing.length&&
+        (hasHours||contract(j)>0);
+    }).slice(0,100);
+    if(!wanted.length)return;
+    cloudRegiePending=true;
+    let offset=0,changed=false;
+    try{
+      await Promise.all(Array.from({length:Math.min(4,wanted.length)},async()=>{
+        while(offset<wanted.length){
+          const j=wanted[offset++],id=String(j.jobId),cached=cloudRegieCache.get(id);
+          try{
+            let reports;
+            if(cached&&now-cached.at<ttl){
+              reports=cached.reports;
+            }else{
+              const result=await api('/admin/api/job/'+encodeURIComponent(id)+'/documentation');
+              if(result.ok===false)throw new Error(result.error||"Dokumentation nicht lesbar");
+              reports=pickCloudRegieReports(result.items,billingThroughDate);
+              cloudRegieCache.set(id,{at:Date.now(),reports});
+            }
+            if(reports.length&&!(reportsByJob[id]||[]).length){
+              reportsByJob[id]=reports;
+              changed=true;
+            }
+          }catch(error){
+            console.warn("Tower KRISTINE-Regieberichte "+id,error?.message||error);
+          }
+        }
+      }));
+    }finally{
+      cloudRegiePending=false;
+      if(changed)renderBillable(lastJobs);
+    }
+  }
+
   function applyBillingSnapshot(snapshot){
     billingReady=!!snapshot?.ready;
     snapshotMonth=String(snapshot?.month||"");
@@ -322,7 +384,7 @@
     wrap.innerHTML=`<div class="ts-head"><div><h2>Heute wichtig</h2><p>Aufgaben, Angebote, Abrechnungen und Auftragsfreigaben auf einen Blick.</p></div><span class="ts-count">${openTasks.length+offers.length+orders.length+rows.length} Signale</span></div><div class="ts-grid">${pane('Aufgaben','tasks',openTasks.map(taskItem))}${pane('Angebote','offers',[...offers.map(workflowItem),...offerSignals.map(signalItem)])}${pane('Abrechnungen','billing',billing.map(signalItem))}${pane('Aufträge','orders',[...orders.map(workflowItem),...orderSignals.map(signalItem)])}</div><div class="ts-footer"><a href="${tokenUrl('/kristine/baustellen')}">Alle Baustellen öffnen →</a></div>`;wrap.dataset.ready='1'
   }
 
-  async function load(){if(loading)return;loading=true;try{const [j,b,w]=await Promise.all([api('/admin/api/jobs'),api('/kristine/api/bootstrap').catch(()=>({})),api('/kristool/api/workflows').catch(()=>({workflows:[]}))]);const jobs=j.jobs||[],boot=b||{};lastJobs=jobs;baustellenHours=j.baustellenHours||null;closedCollectionMembers=new Set((j.collections||[]).filter(collection=>String(collection?.status||'')==='Geschlossen').flatMap(collection=>collection?.collectionMemberJobIds||[]).map(String));buildLiveMap(boot);const kpi=patchKpis(j.baustellenHours,boot);render(signals(jobs,boot),w.workflows||[],boot.tasks||[]);if(retryTimer){clearTimeout(retryTimer);retryTimer=null}window.__kristaTowerHours={live:kpi.totalOpen,source:"baustellen",updatedAt:j.baustellenHours?.calculatedAt};billingPending=!billingReady;renderBillable(jobs);try{const snapshot=await brainApi('/tower/billing-snapshot',20000);applyBillingSnapshot(snapshot)}catch(error){if(!billingReady)billingReady=false;console.warn('Tower Abrechnungsstand',error)}finally{billingPending=false}try{const year=currentMonth().slice(0,4),book=await brainApi('/outgoing/invoice-book/items?year='+year,30000);mergeLiveInvoiceBook(book.items,year,jobs)}catch(error){console.warn('Tower aktuelles Rechnungsbuch',error)}renderBillable(jobs)}catch(e){console.warn('Tower Baustellen-Signale',e);renderPending('Verbindung wird erneut hergestellt …');billingPending=false;if(!retryTimer)retryTimer=setTimeout(()=>{retryTimer=null;load()},5000)}finally{loading=false;if(!selectedMonthLoaded&&!monthPending&&!monthError)refreshWorkedMonth()}}
+  async function load(){if(loading)return;loading=true;try{const [j,b,w]=await Promise.all([api('/admin/api/jobs'),api('/kristine/api/bootstrap').catch(()=>({})),api('/kristool/api/workflows').catch(()=>({workflows:[]}))]);const jobs=j.jobs||[],boot=b||{};lastJobs=jobs;baustellenHours=j.baustellenHours||null;closedCollectionMembers=new Set((j.collections||[]).filter(collection=>String(collection?.status||'')==='Geschlossen').flatMap(collection=>collection?.collectionMemberJobIds||[]).map(String));buildLiveMap(boot);const kpi=patchKpis(j.baustellenHours,boot);render(signals(jobs,boot),w.workflows||[],boot.tasks||[]);if(retryTimer){clearTimeout(retryTimer);retryTimer=null}window.__kristaTowerHours={live:kpi.totalOpen,source:"baustellen",updatedAt:j.baustellenHours?.calculatedAt};billingPending=!billingReady;renderBillable(jobs);try{const snapshot=await brainApi('/tower/billing-snapshot',20000);applyBillingSnapshot(snapshot)}catch(error){if(!billingReady)billingReady=false;console.warn('Tower Abrechnungsstand',error)}finally{billingPending=false}try{const year=currentMonth().slice(0,4),book=await brainApi('/outgoing/invoice-book/items?year='+year,30000);mergeLiveInvoiceBook(book.items,year,jobs)}catch(error){console.warn('Tower aktuelles Rechnungsbuch',error)}renderBillable(jobs);hydrateCloudRegie(jobs).catch(error=>console.warn('Tower Projektakten-Abgleich',error));}catch(e){console.warn('Tower Baustellen-Signale',e);renderPending('Verbindung wird erneut hergestellt …');billingPending=false;if(!retryTimer)retryTimer=setTimeout(()=>{retryTimer=null;load()},5000)}finally{loading=false;if(!selectedMonthLoaded&&!monthPending&&!monthError)refreshWorkedMonth()}}
   function init(){installCss();renderPending();renderBillable([]);load();timer=setInterval(load,60000);window.addEventListener('beforeunload',()=>{if(timer)clearInterval(timer);if(retryTimer)clearTimeout(retryTimer)},{once:true});window.TowerBaustellenSignals={version:VERSION,reload:load,debug:()=>window.__kristaTowerHours||null}}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();
