@@ -28,4 +28,18 @@ function schedule(models,e,date){
  return {model,targetMinutes,fixedSegments:fixed?.enabled===true?fixedRows.flatMap((r,i)=>split(r,"fixed_"+date+"_"+i)):null};
 }
 function workMinutes(segments){return segments.filter(s=>["work","up"].includes(s.type)&&!["900","901","902","903","904","911","930","945","946"].includes(String(s.unproductiveCode||""))&&!/urlaub|krank|feiertag|zeitausgleich/i.test(s.reason||"")).reduce((n,s)=>n+Math.max(0,(minute(s.to)??0)-(minute(s.from)??0)),0)}
-module.exports={minute,hm,modelFor,schedule,split,net,workMinutes};
+function withMorningPause(segments){
+ const start=9*60,end=start+15;
+ return segments.flatMap(segment=>{
+  if(segment.type!=="work")return [segment];
+  const from=minute(segment.from),to=minute(segment.to);
+  if(from===null||to===null||to<=start||from>=end)return [segment];
+  const pauseFrom=Math.max(from,start),pauseTo=Math.min(to,end);
+  const result=[];
+  if(from<pauseFrom)result.push({...segment,to:hm(pauseFrom)});
+  result.push({id:segment.id+"_morning_pause",type:"pause",from:hm(pauseFrom),to:hm(pauseTo)});
+  if(pauseTo<to)result.push({...segment,id:segment.id+"_after_morning_pause",from:hm(pauseTo)});
+  return result;
+ });
+}
+module.exports={withMorningPause,minute,hm,modelFor,schedule,split,net,workMinutes};
