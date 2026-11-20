@@ -26,6 +26,7 @@ function registerKristine(app, { dataDir, requireAdmin, publicDir, markJobRunnin
   const DAY_CONTROLS = path.join(ROOT, "day-controls.json");
   const WORKTIME_MODELS = path.join(dataDir, "_system", "worktime-models.json");
   const payrollModel = require("./monthly-payroll-model");
+  const {vacationEntitlement}=require("./vacation-entitlement");
   const PAYROLL_CORRECTIONS = path.join(ROOT,"monthly-payroll-corrections.json");
   const MONTH_REOPENINGS = path.join(ROOT,"month-reopenings.json");
   const MONTH_CLOSURES = path.join(ROOT, "month-closures.json");
@@ -2902,7 +2903,7 @@ const open = taskId
       if(!employee)return res.status(404).json({ok:false,error:"Mitarbeiter nicht gefunden."});
       const days=[];
       for(let d=new Date(from+"T12:00:00Z");d<=new Date(to+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+1))days.push(monthlyDay(context,employee,d.toISOString().slice(0,10)));
-      res.json({ok:true,days});
+      res.json({ok:true,days,vacationEntitlement:vacationEntitlement(employee,to)});
     }catch(error){res.status(500).json({ok:false,error:String(error.message||error)})}
   });
   app.put("/kristine/api/monthly-payroll/:employeeId/:date",serializedTimeMutation(async(req,res)=>{

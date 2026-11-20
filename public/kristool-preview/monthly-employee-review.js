@@ -27,7 +27,7 @@
     const c=current;
     const data=await request(`/kristine/api/monthly-days/${encodeURIComponent(c.id)}?from=${c.from}&to=${c.to}`);
     if(c!==current)return;
-    c.days=data.days;c.drafts={};c.closed=c.days.some(d=>d.date>=c.from&&d.date<=c.to&&d.monthClosed);
+    c.days=data.days;c.vacationEntitlement=data.vacationEntitlement;c.drafts={};c.closed=c.days.some(d=>d.date>=c.from&&d.date<=c.to&&d.monthClosed);
     await window.KrisMonthly.refreshClosures(c.from.slice(0,7));
     c.person=await window.KrisMonthly.buildPerson(c.employee,c.from,c.to,c.za);
     render();
@@ -49,7 +49,9 @@
     status.innerHTML=c.closed?'<strong>Monat abgeschlossen – Stunden gesperrt.</strong> Abschluss und PDF bleiben unverändert. Änderungen erfordern eine ausdrückliche Wiederöffnung mit Begründung. <button class="btn secondary" type="button" data-review-reopen>Abgeschlossenen Monat wieder öffnen</button>':'<strong>Offener Monat.</strong> Rot markiert: mehr als 10 Arbeitsstunden pro Tag bzw. mehr als 50 pro Kalenderwoche. Pausen und bezahlte Abwesenheiten zählen dafür nicht als Arbeit. Die Wochensummen enthalten die angezeigten Tage.';
     const byDate=new Map(person.days.map(d=>[d.date,d])),days=c.days.filter(d=>d.date>=c.from&&d.date<=c.to),weeks=new Map();
 
-    let html='<div class="employee-review-summary"><strong>Stunden: '+hm(person.totals.actualMinutes)+' ('+decimal(person.totals.actualMinutes)+' Std.)</strong><span>Soll: '+hm(person.totals.targetMinutes)+'</span><span>Saldo: '+decimal(person.totals.balanceMinutes)+' Std.</span></div><div class="review-scroll"><table class="employee-review-table"><thead><tr><th>Tag</th><th>Arbeitszeiten Von–Bis · Dauer</th><th>Stunden</th><th>Soll</th><th>Saldo</th><th>Kontrolle</th></tr></thead><tbody>';
+    const vacation=c.vacationEntitlement;
+    const vacationSummary=vacation?'<span>Urlaubsanspruch (5-Tage-Woche): '+vacation.annualDays+' Tage/Jahr · '+vacation.monthlyDays.toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2})+' Tage/Monat</span>':'';
+    let html='<div class="employee-review-summary"><strong>Stunden: '+hm(person.totals.actualMinutes)+' ('+decimal(person.totals.actualMinutes)+' Std.)</strong><span>Soll: '+hm(person.totals.targetMinutes)+'</span><span>Saldo: '+decimal(person.totals.balanceMinutes)+' Std.</span>'+vacationSummary+'</div><div class="review-scroll"><table class="employee-review-table"><thead><tr><th>Tag</th><th>Arbeitszeiten Von–Bis · Dauer</th><th>Stunden</th><th>Soll</th><th>Saldo</th><th>Kontrolle</th></tr></thead><tbody>';
     days.forEach((d,index)=>{
       const r=byDate.get(d.date)||{},segments=c.drafts[d.date]?.segments||d.segments,working=work(segments),paid=total(segments),shown=c.drafts[d.date]?paid:r.actualMinutes??paid;
       const key=monday(d.date),week=weeks.get(key)||{first:d.date,credited:0,worked:0};

@@ -18,6 +18,12 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
  try{
  await instance.startupReady;
  let a=await days("a");assert.equal(a.find(d=>d.date==="2026-10-05").targetMinutes,396);assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-05").segments),396);assert.deepEqual(a.find(d=>d.date==="2026-10-05").segments.map(s=>[s.type,s.from,s.to]),[["up","07:00","13:36"]]);assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-26").segments),0,"holiday is paid, never worked");
+ const {vacationEntitlement}=require("../vacation-entitlement");
+ const hired={employmentStart:"2006-11-20",vacationPriorServiceMonths:84,vacationPriorServiceConfirmed:true};
+ assert.equal(vacationEntitlement(hired,"2026-11-19").monthlyDays,25/12);
+ assert.equal(vacationEntitlement(hired,"2026-11-20").monthlyDays,2.5);
+ assert.equal(vacationEntitlement({...hired,vacationPriorServiceConfirmed:false},"2026-11-20").annualDays,25);
+ assert.equal(vacationEntitlement({},"2026-11-20"),null);
  const october=Array.from({length:31},(_,i)=>"2026-10-"+String(i+1).padStart(2,"0"));
  const monthlyTarget=e=>october.reduce((n,date)=>n+policy.schedule(models,e,date).targetMinutes,0);
  assert.equal(monthlyTarget(employees[0]),145*60+12);
