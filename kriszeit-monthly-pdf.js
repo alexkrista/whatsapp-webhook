@@ -97,7 +97,7 @@ async function createKriszeitMonthlyPdf(payload = {}) {
       if (day.targetMinutes) text(hm(day.targetMinutes), 313, y, 6.7);
       if (day.targetMinutes || day.payrollMinutes) text(signedDecimal(Number(day.payrollMinutes||0)-Number(day.targetMinutes||0)), 341, y, 6.7);
       if (day.yearLeave) text(String(day.yearLeave).replace(".", ","), 369, y, 6.7);
-      if (day.holiday) text(String(day.holiday).replace(".", ","), 408, y, 6.7);
+      if (day.holiday) text(hm(day.targetMinutes), 408, y, 6.7);
       if (day.vacation) text(String(day.vacation).replace(".", ","), 430, y, 6.7);
       if (day.doctor) text(String(day.doctor).replace(".", ","), 458, y, 6.7);
       if (day.sick) text(String(day.sick).replace(".", ","), 481, y, 6.7);

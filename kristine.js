@@ -2869,20 +2869,23 @@ const open = taskId
     const correction=context.corrections.find(r=>r.employeeId===employeeId&&r.date===date);
     const original=buildEditableSegments(context.events,employeeId,date,context.states[employeeId]||{});
     const absence=employeeAbsenceForDay(context.assignments,employee,date);
-    const holiday=context.holidays.some(h=>String(h.date)===date);
+    const holiday=context.holidays.find(h=>String(h.date)===date);
     const release=dayControlReleaseForEmployee(context.releases,employee,date);
     const office=schedule.model?.officeModel||String(schedule.model?.id||"").startsWith("office-");
     let segments=office?original:payrollModel.withMorningPause(original),source="Buchungen",automatic=false;
     if(schedule.fixedSegments!==null&&employeeBelongsToDay(employee,date)){
       segments=schedule.fixedSegments;automatic=true;source="Fixe Lohnzeit · "+schedule.model.name;
-      if(absence||holiday){
-        const type=holiday?"feiertag":assignmentAbsenceType(absence);
-        const code={urlaub:"900",krank:"901",feiertag:"904",za:"930",arzt:"902",sonderurlaub:"911"}[type]||"";
-        const label={urlaub:"Urlaub",krank:"Krank",feiertag:"Feiertag",za:"Zeitausgleich",arzt:"Arzt",sonderurlaub:"Sonderurlaub"}[type]||String(absence?.jobName||"Abwesenheit");
-        const from=segments[0]?.from||"07:00",start=minutesFromHM(from),minutes=schedule.targetMinutes;
-        segments=minutes>0?[{id:"absence_"+date,type:"up",from,to:payrollModel.hm(start+minutes),reason:label,absenceType:type,unproductiveCategory:type==="urlaub"?"vacation":type==="krank"?"sick":"other",unproductiveCode:code}]:[];
-        source=label+" · "+schedule.model.name;
-      }
+    }
+    const type=holiday?"feiertag":absence?assignmentAbsenceType(absence):"";
+    const paidOrZa=["feiertag","urlaub","za"].includes(type);
+    const hasWork=segments.some(segment=>segment.type==="work");
+    if(employeeBelongsToDay(employee,date)&&type&&((schedule.fixedSegments!==null)||(paidOrZa&&!hasWork))){
+      automatic=true;
+      const code={urlaub:"900",krank:"901",feiertag:"904",za:"930",arzt:"902",sonderurlaub:"911"}[type]||"";
+      const label=holiday?.name||{urlaub:"Urlaub",krank:"Krank",feiertag:"Feiertag",za:"Zeitausgleich",arzt:"Arzt",sonderurlaub:"Sonderurlaub"}[type]||String(absence?.jobName||"Abwesenheit");
+      const from=segments[0]?.from||"07:00",start=minutesFromHM(from),minutes=schedule.targetMinutes;
+      segments=minutes>0?[{id:"absence_"+date,type:"up",from,to:payrollModel.hm(start+minutes),reason:label,absenceType:type,unproductiveCategory:type==="urlaub"?"vacation":type==="krank"?"sick":"other",unproductiveCode:code}]:[];
+      source=label+" · "+schedule.model.name;
     }
     if(correction){segments=correction.segments;source="Lohnzeit korrigiert";automatic=true}
     if(closed){segments=closed.days.find(d=>d.date===date)?.segments||[];source="Abgeschlossen";automatic=true}
