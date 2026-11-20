@@ -23,15 +23,16 @@ function obeliskSchedule(model,employee,weekday){
   const targetMinutes=weekday<5?540:weekday===5?240:0;
   return {model:{...model, name:"39 Std. + 1 vertragliche Überstunde"},targetMinutes,fixedSegments:null,regularWeekMinutes:2340,contractOvertimeWeekMinutes:60};
  }
- if(model?.id==="office-alex")return {model,targetMinutes:weekday<=5?396:0,fixedSegments:null};
  let targetMinutes=0,from="",reason="",code="";
- if(model?.id==="office-geri"){
+ if(model?.id==="office-alex"){
+  targetMinutes=weekday<=5?396:0;from="07:00";reason="Modellzeit";
+ }else if(model?.id==="office-geri"){
   targetMinutes=[2,4].includes(weekday)?150:0;from="14:00";reason="Werkstatt";code="913";
  }else if(model?.id==="office-judith"){
   targetMinutes=[1,5].includes(weekday)?480:weekday===2?240:0;from="08:00";reason="Büro";
  }else return null;
  const fixedSegments=targetMinutes?split({from,to:hm(minute(from)+targetMinutes),activityLabel:reason,activityCode:code},"office_"+weekday):[];
- if(model.id==="office-judith")for(const segment of fixedSegments)segment.durationOnly=true;
+ if(["office-alex","office-judith"].includes(model.id))for(const segment of fixedSegments)segment.durationOnly=true;
  return {model,targetMinutes,fixedSegments};
 }
 function schedule(models,e,date){
