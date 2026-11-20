@@ -18,6 +18,11 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
  try{
  await instance.startupReady;
  let a=await days("a");assert.equal(a.find(d=>d.date==="2026-10-05").targetMinutes,408);assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-05").segments),408);assert.deepEqual(a.find(d=>d.date==="2026-10-05").segments.map(s=>[s.type,s.from,s.to]),[["up","07:00","12:00"],["lunch","12:00","14:00"],["up","14:00","15:48"]]);assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-26").segments),0,"holiday is paid, never worked");
+ const holiday=(await days("p")).find(d=>d.date==="2026-10-26");
+ assert.equal(holiday.released,true);
+ assert.equal(holiday.segments[0].unproductiveCode,"904");
+ assert.equal(policy.minute(holiday.segments[0].to)-policy.minute(holiday.segments[0].from),holiday.targetMinutes);
+ assert.equal(holiday.workingMinutes,0);
  const d=await days("d");assert.equal(d.find(d=>d.date==="2026-10-05").targetMinutes,240);assert.equal(d.find(d=>d.date==="2026-10-06").targetMinutes,0);assert.equal(d.find(d=>d.date==="2026-10-08").targetMinutes,240);
  const g=await days("g");assert.equal(g.find(d=>d.date==="2026-10-06").targetMinutes,150);assert.equal(g.find(d=>d.date==="2026-10-05").targetMinutes,0);assert.equal(policy.workMinutes(g.find(d=>d.date==="2026-10-06").segments),150);
  const j=await days("j");assert.equal(j.find(d=>d.date==="2026-10-05").targetMinutes,480);assert.equal(j.find(d=>d.date==="2026-10-06").targetMinutes,240);assert.equal(j.find(d=>d.date==="2026-10-08").targetMinutes,0);

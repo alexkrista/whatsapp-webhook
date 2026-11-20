@@ -8,6 +8,9 @@ const html='<div id="monthlyReportModal"></div><button id="openKriszeitPdf"></bu
  if(date==="2026-09-28")to="19:30";if(date==="2026-10-05")to="18:31";
  days.set(date,{date,employeeId:"a",segments:weekday?[{id:date,type:"up",from,to,reason:"Büro",unproductiveCategory:"other",unproductiveCode:""}]:[],released:true,targetMinutes:weekday?480:0,modelName:"Büro",source:"Buchungen",payrollFixed:false,workingMinutes:weekday?(date==="2026-09-28"?720:date==="2026-10-05"?661:600):0});
  }
+ for(const [date,code,reason] of [["2026-10-23","930","Zeitausgleich"],["2026-10-26","904","Nationalfeiertag"],["2026-10-27","900","Urlaub"]]){
+   Object.assign(days.get(date),{segments:[{type:"up",from:"07:00",to:"15:00",unproductiveCode:code,reason}],workingMinutes:0});
+ }
  w.state={bootstrap:{employees:[employee],assignments:[],worktimeModels:[]}};w.CSS={escape:String};w.toast=()=>{};w.confirm=()=>true;w.prompt=()=>"Test Wiederöffnung";
  w.request=async(url,options={})=>{calls.push({url,options});if(url.startsWith("/kristine/api/month-closures"))return{closures:[]};if(url.startsWith("/kristine/api/monthly-days/")){const u=new URL(url,"https://x.test");return{days:[...days.values()].filter(d=>d.date>=u.searchParams.get("from")&&d.date<=u.searchParams.get("to"))}}
  if(url.startsWith("/kristine/api/segments/")){const date=url.split("/").at(-1),body=JSON.parse(options.body);saved.push(body);days.get(date).segments=body.segments;return{ok:true,segments:body.segments}}
@@ -25,7 +28,17 @@ const html='<div id="monthlyReportModal"></div><button id="openKriszeitPdf"></bu
  const settle=async()=>{for(let i=0;i<15;i++)await new Promise(r=>setImmediate(r))};
  w.document.querySelector("[data-person-review]").click();await settle();
  const modal=w.document.getElementById("monthlyEmployeeModal");assert.equal(modal.hidden,false);assert.match(modal.textContent,/07:30–17:30/);assert.match(modal.textContent,/Büro/);
- assert.match(modal.textContent,/Über 10 Std.: \+01:01/);assert.match(modal.textContent,/Über 50 Std.: \+02:00/,"full cross-month calendar week is marked");
+ assert.match(modal.textContent,/Über 10 Std.: \+01:01/);const firstWeek=modal.querySelector(".week-total");
+ assert.match(firstWeek.textContent,/2026-10-01 bis 2026-10-04.*20:00/);
+ assert(!firstWeek.classList.contains("over-limit"));
+ assert.match(modal.textContent,/Über 50 Std.: \+01:01/);
+ const absenceRow=day=>[...modal.querySelectorAll("tr")].find(r=>r.cells[0]?.textContent.includes(day+".10."));
+ assert.match(absenceRow("23").cells[2].textContent,/^00:00/);
+ assert.equal(absenceRow("23").cells[4].textContent,"-8,00");
+ for(const day of ["26","27"]){
+   assert.match(absenceRow(day).cells[2].textContent,/^08:00/);
+   assert.equal(absenceRow(day).cells[4].textContent,"0,00");
+ }
  const row=[...modal.querySelectorAll("tr")].find(r=>r.textContent.includes("05.10."));assert(row.classList.contains("over-limit"));
  const exact=[...modal.querySelectorAll("tr")].find(r=>r.textContent.includes("06.10."));assert(!exact.classList.contains("over-limit"),"exactly ten hours is not over ten");
  modal.querySelector('[data-review-edit="2026-10-05"]').click();
@@ -37,5 +50,5 @@ const html='<div id="monthlyReportModal"></div><button id="openKriszeitPdf"></bu
  const report=await w.KrisMonthly.buildPerson(employee,"2026-10-01","2026-10-31",0);assert(report.days.find(d=>d.date==="2026-10-05").printBlocks.some(b=>b.from==="07:30"&&b.to==="12:00"&&b.label==="Büro"),"UP Von/Bis must appear in PDF");
  const longDays=report.days.map(d=>({...d,printBlocks:Array.from({length:8},(_,i)=>({from:"07:00",to:"08:00",durationMinutes:60}))}));
  const pdf=await createKriszeitMonthlyPdf({from:"2026-10-01",to:"2026-10-31",people:[{...JSON.parse(JSON.stringify(report)),days:longDays}]});const parsed=await PDFDocument.load(pdf);assert(parsed.getPageCount()>1,"long time sheets require continuation pages");
- dom.window.close();console.log("PASS: individual editable view shows paid UP Von/Bis, strict 10h/50h limits incl. cross-month week, saved reason, same UP blocks in PDF and pagination");
+ dom.window.close();console.log("PASS: individual editable view shows paid UP Von/Bis, strict 10h/50h limits for visible days, saved reason, same UP blocks in PDF and pagination");
 })().catch(e=>{console.error(e);process.exitCode=1});
