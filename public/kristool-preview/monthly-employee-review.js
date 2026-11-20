@@ -24,8 +24,8 @@
   function message(text,error=false){$("employeeReviewSaveStatus").textContent=text;$("employeeReviewSaveStatus").className=error?"review-warning":""}
   function setBusy(value){loading=value;modal.querySelectorAll("[data-review-save],[data-review-close],[data-review-pdf],[data-review-reopen]").forEach(b=>b.disabled=value||Boolean(current?.closed&&!b.hasAttribute("data-review-pdf")&&!b.hasAttribute("data-review-reopen")))}
   async function load(){
-    const c=current,first=monday(c.from),last=window.KrisMonthly.reportTo(add(monday(c.to),6));
-    const data=await request(`/kristine/api/monthly-days/${encodeURIComponent(c.id)}?from=${first}&to=${last}`);
+    const c=current;
+    const data=await request(`/kristine/api/monthly-days/${encodeURIComponent(c.id)}?from=${c.from}&to=${c.to}`);
     if(c!==current)return;
     c.days=data.days;c.drafts={};c.closed=c.days.some(d=>d.date>=c.from&&d.date<=c.to&&d.monthClosed);
     await window.KrisMonthly.refreshClosures(c.from.slice(0,7));
@@ -48,13 +48,17 @@
     const status=$("employeeReviewStatus");status.className="employee-review-status"+(c.closed?" closed":"");
     status.innerHTML=c.closed?'<strong>Monat abgeschlossen – Stunden gesperrt.</strong> Abschluss und PDF bleiben unverändert. Änderungen erfordern eine ausdrückliche Wiederöffnung mit Begründung. <button class="btn secondary" type="button" data-review-reopen>Abgeschlossenen Monat wieder öffnen</button>':'<strong>Offener Monat.</strong> Rot markiert: mehr als 10 Arbeitsstunden pro Tag bzw. mehr als 50 pro Kalenderwoche. Pausen und bezahlte Abwesenheiten zählen dafür nicht als Arbeit. Randwochen enthalten auch die Tage außerhalb des Monats.';
     const byDate=new Map(person.days.map(d=>[d.date,d])),days=c.days.filter(d=>d.date>=c.from&&d.date<=c.to),weeks=new Map();
-    for(const d of c.days){const key=monday(d.date);weeks.set(key,(weeks.get(key)||0)+work(c.drafts[d.date]?.segments||d.segments))}
+    for(const d of days){
+      const key=monday(d.date),week=weeks.get(key)||{first:d.date,sum:0};
+      week.sum+=work(c.drafts[d.date]?.segments||d.segments);
+      weeks.set(key,week);
+    }
     let html='<div class="employee-review-summary"><strong>Stunden: '+hm(person.totals.actualMinutes)+' ('+decimal(person.totals.actualMinutes)+' Std.)</strong><span>Soll: '+hm(person.totals.targetMinutes)+'</span><span>Saldo: '+decimal(person.totals.balanceMinutes)+' Std.</span></div><div class="review-scroll"><table class="employee-review-table"><thead><tr><th>Tag</th><th>Arbeitszeiten Von–Bis · Dauer</th><th>Stunden</th><th>Soll</th><th>Saldo</th><th>Kontrolle</th></tr></thead><tbody>';
     days.forEach((d,index)=>{
       const r=byDate.get(d.date)||{},segments=c.drafts[d.date]?.segments||d.segments,working=work(segments),paid=total(segments),shown=c.drafts[d.date]?paid:r.actualMinutes??paid;
       html+='<tr'+(working>600?' class="over-limit"':'')+'><td>'+esc(new Date(d.date+"T12:00:00").toLocaleDateString("de-AT",{weekday:"short",day:"2-digit",month:"2-digit"}))+'</td><td>'+ (segments.length?segments.map(s=>'<div class="review-block"><span>'+esc(s.from)+'–'+esc(s.to||"offen")+'</span> '+hm(Math.max(0,minute(s.to)-minute(s.from)))+' · '+esc(s.reason||kinds[s.type]||s.type)+'</div>').join(""):'–')+'<small>'+esc(d.source)+'</small></td><td>'+hm(shown)+'<small>'+decimal(shown)+' Std.</small>'+(working>600?'<strong>Über 10 Std.: +'+hm(working-600)+'</strong>':'')+'</td><td>'+hm(d.targetMinutes)+'</td><td>'+decimal(shown-d.targetMinutes)+'</td><td>'+(d.released?"Freigegeben / Modell":"Noch nicht freigegeben")+(!c.closed?'<br><button class="btn secondary" type="button" data-review-edit="'+d.date+'">Bearbeiten</button>'+(!d.released?' <button class="btn secondary" type="button" data-review-release="'+d.date+'">Tag freigeben</button>':'')+'':'')+'</td></tr>';
       html+='<tr id="review-editor-'+d.date+'" hidden><td colspan="6"></td></tr>';
-      if(index===days.length-1||monday(days[index+1].date)!==monday(d.date)){const sum=weeks.get(monday(d.date))||0;html+='<tr class="week-total'+(sum>3000?' over-limit':'')+'"><td colspan="2">Wochensumme Arbeit · '+esc(monday(d.date))+' bis '+esc(add(monday(d.date),6))+'</td><td colspan="4">'+hm(sum)+' · '+decimal(sum)+' Std.'+(sum>3000?' · Über 50 Std.: +'+hm(sum-3000):'')+'</td></tr>'}
+      if(index===days.length-1||monday(days[index+1].date)!==monday(d.date)){const {first,sum}=weeks.get(monday(d.date));html+='<tr class="week-total'+(sum>3000?' over-limit':'')+'"><td colspan="2">Wochensumme Arbeit · '+esc(first)+' bis '+esc(d.date)+'</td><td colspan="4">'+hm(sum)+' · '+decimal(sum)+' Std.'+(sum>3000?' · Über 50 Std.: +'+hm(sum-3000):'')+'</td></tr>'}
     });
     $("employeeReviewContent").innerHTML=html+'</tbody></table></div>';setBusy(loading);
   }
