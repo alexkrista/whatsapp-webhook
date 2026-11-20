@@ -13,6 +13,13 @@ test("Linher: four missing days; overreported staff do not cover another employe
  assert.equal(p.days.filter(d=>d.create>.01).length,4);assert.equal(p.missing,31.86);assert.equal(p.reported,11.75);
  assert.equal(p.days.find(d=>d.date==="2026-10-05").employees.filter(e=>e.create>.01).length,2);
 });
+test("Edi and Edi Mock match the same booked employee without creating duplicate hours",()=>{
+ const date="2026-11-19";
+ const plan=missingHoursPlan({jobId:"26107",rows:[{date,name:"Johannes Wiederin",hours:9.25},{date,name:"Edi",hours:9.27}],documents:[{id:"ww3",type:"regie_report",reportDate:date,reportNumber:"26107003",employeeDetails:[{name:"Johannes Wiederin",hours:9.5},{name:"Edi Mock",hours:9.5}]}]});
+ assert.equal(plan.reported,19);
+ assert.equal(plan.missing,0);
+ assert.equal(plan.days[0].create,0);
+});
 test("draft reserves hours without satisfying daily report; mirrored docs do not double count",()=>{
  const report={id:"draft1",jobId:"26104",date:"2026-10-05",status:"draft",employees:[{name:"Ronny Hoffmann",hours:7.92}]};
  const p=missingHoursPlan({jobId:"26104",rows:[{date:"2026-10-05",name:"Ronny Hoffmann",hours:7.92}],reports:[report],documents:[{id:"regie-office-draft1",type:"regie_report",reportDate:report.date,employeeDetails:report.employees}]});
