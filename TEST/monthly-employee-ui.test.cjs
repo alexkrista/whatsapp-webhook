@@ -16,7 +16,11 @@ const html='<div id="monthlyReportModal"></div><button id="openKriszeitPdf"></bu
  const settle=async()=>{for(let i=0;i<15;i++)await new Promise(r=>setImmediate(r))};
  w.document.querySelector("[data-person-review]").click();await settle();
  const modal=w.document.getElementById("monthlyEmployeeModal");assert.equal(modal.hidden,false);assert.match(modal.textContent,/07:30–17:30/);assert.match(modal.textContent,/Büro/);
- assert.match(modal.textContent,/Über 10 Std.: \+01:01/);assert.match(modal.textContent,/Über 50 Std.: \+02:00/,"full cross-month calendar week is marked");
+ assert.match(modal.textContent,/Über 10 Std.: \+01:01/);const firstWeek=modal.querySelector(".week-total");
+ assert.match(firstWeek.textContent,/2026-10-01 bis 2026-10-04.*20:00/);
+ assert(!firstWeek.classList.contains("over-limit"));
+ assert.match(modal.textContent,/Über 50 Std.: \+01:01/);
+ assert.match(calls.find(call=>call.url.includes("/monthly-days/")).url,/from=2026-10-01&to=2026-10-31$/);
  const row=[...modal.querySelectorAll("tr")].find(r=>r.textContent.includes("05.10."));assert(row.classList.contains("over-limit"));
  const exact=[...modal.querySelectorAll("tr")].find(r=>r.textContent.includes("06.10."));assert(!exact.classList.contains("over-limit"),"exactly ten hours is not over ten");
  modal.querySelector('[data-review-edit="2026-10-05"]').click();
@@ -28,5 +32,5 @@ const html='<div id="monthlyReportModal"></div><button id="openKriszeitPdf"></bu
  const report=await w.KrisMonthly.buildPerson(employee,"2026-10-01","2026-10-31",0);assert(report.days.find(d=>d.date==="2026-10-05").printBlocks.some(b=>b.from==="07:30"&&b.to==="12:00"&&b.label==="Büro"),"UP Von/Bis must appear in PDF");
  const longDays=report.days.map(d=>({...d,printBlocks:Array.from({length:8},(_,i)=>({from:"07:00",to:"08:00",durationMinutes:60}))}));
  const pdf=await createKriszeitMonthlyPdf({from:"2026-10-01",to:"2026-10-31",people:[{...JSON.parse(JSON.stringify(report)),days:longDays}]});const parsed=await PDFDocument.load(pdf);assert(parsed.getPageCount()>1,"long time sheets require continuation pages");
- dom.window.close();console.log("PASS: individual editable view shows paid UP Von/Bis, strict 10h/50h limits incl. cross-month week, saved reason, same UP blocks in PDF and pagination");
+ dom.window.close();console.log("PASS: individual editable view shows paid UP Von/Bis, strict 10h/50h limits for visible days only, saved reason, same UP blocks in PDF and pagination");
 })().catch(e=>{console.error(e);process.exitCode=1});
