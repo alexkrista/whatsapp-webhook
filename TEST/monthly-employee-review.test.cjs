@@ -23,6 +23,8 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
  assert.equal(vacationEntitlement(hired,"2026-11-19").monthlyDays,25/12);
  assert.equal(vacationEntitlement(hired,"2026-11-20").monthlyDays,2.5);
  assert.equal(vacationEntitlement({...hired,vacationPriorServiceConfirmed:false},"2026-11-20").annualDays,25);
+ assert.equal(vacationEntitlement({...hired,vacationPriorServiceOverFive:false},"2026-11-20").annualDays,25);
+ assert.equal(vacationEntitlement({employmentStart:hired.employmentStart,vacationPriorServiceOverFive:true},"2026-11-20").annualDays,30);
  assert.equal(vacationEntitlement({},"2026-11-20"),null);
  const october=Array.from({length:31},(_,i)=>"2026-10-"+String(i+1).padStart(2,"0"));
  const monthlyTarget=e=>october.reduce((n,date)=>n+policy.schedule(models,e,date).targetMinutes,0);

@@ -11,7 +11,8 @@ function vacationEntitlement(employee, asOf) {
   const [year,month,day]=entry.split("-").map(Number);
   const entryDate=new Date(entry+"T12:00:00Z");
   if(!Number.isFinite(+entryDate)||entryDate.toISOString().slice(0,10)!==entry)return null;
-  const priorMonths=employee.vacationPriorServiceConfirmed===true?Math.min(60,months(employee.vacationPriorServiceMonths)):0;
+  const overFive=employee.vacationPriorServiceOverFive??(employee.vacationPriorServiceConfirmed===true&&months(employee.vacationPriorServiceMonths)>60);
+  const priorMonths=overFive===true?60:0;
   const eligibleMonths=year*12+month-1+300-priorMonths;
   const eligibleYear=Math.floor(eligibleMonths/12);
   const eligibleMonth=eligibleMonths%12;
