@@ -23,6 +23,7 @@ function obeliskSchedule(model,employee,weekday){
   const targetMinutes=weekday<5?540:weekday===5?240:0;
   return {model:{...model, name:"39 Std. + 1 vertragliche Überstunde"},targetMinutes,fixedSegments:null,regularWeekMinutes:2340,contractOvertimeWeekMinutes:60};
  }
+ if(model?.id==="office-bettina")return {model,targetMinutes:weekday<=5?200:0,fixedSegments:null};
  let targetMinutes=0,from="",reason="",code="";
  if(model?.id==="office-alex"){
   targetMinutes=weekday<=5?396:0;from="07:00";reason="Modellzeit";

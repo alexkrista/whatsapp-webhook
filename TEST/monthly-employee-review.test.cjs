@@ -21,6 +21,8 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
  const october=Array.from({length:31},(_,i)=>"2026-10-"+String(i+1).padStart(2,"0"));
  const monthlyTarget=e=>october.reduce((n,date)=>n+policy.schedule(models,e,date).targetMinutes,0);
  assert.equal(monthlyTarget(employees[0]),145*60+12);
+ assert.equal(monthlyTarget(employees[4]),73*60+20);
+ assert.equal((await days("b")).find(d=>d.date==="2026-10-26").targetMinutes,200);
  assert.equal(monthlyTarget(employees[2]),22*60+30);
  assert.equal(monthlyTarget(employees[3]),88*60);
  for(const personnelNumber of ["20","39"]){
