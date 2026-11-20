@@ -16,8 +16,30 @@ function split(row,id="model"){
  return {id:id+"_"+i,type:pause?.type||"up",from:hm(start),to:hm(end),reason:pause?"":String(row.activityLabel||"Büro"),unproductiveCategory:pause?"":"other",unproductiveCode:pause?"":String(row.activityCode||""),payrollModel:true}});
 }
 function net(row){return split(row).filter(s=>s.type==="up").reduce((n,s)=>n+minute(s.to)-minute(s.from),0)}
+function obeliskSchedule(model,employee,weekday){
+ const personnel=String(employee.finkzeitPersonnelNumber||employee.finkzeitPersonalNumber||employee.personalnummerFinkzeit||employee.personnelNumber||employee.personalNumber||"");
+ const name=String(employee.name||employee.employeeName||"").toLowerCase();
+ if(["20","39"].includes(personnel)||/^(johannes wiederin|wiederin johannes|ronny hoffmann|hoffmann ronny)$/.test(name)){
+  const targetMinutes=weekday<5?540:weekday===5?240:0;
+  return {model:{...model, name:"39 Std. + 1 vertragliche Überstunde"},targetMinutes,fixedSegments:null,regularWeekMinutes:2340,contractOvertimeWeekMinutes:60};
+ }
+ if(model?.id==="office-alex")return {model,targetMinutes:weekday<=5?396:0,fixedSegments:null};
+ let targetMinutes=0,from="",reason="",code="";
+ if(model?.id==="office-geri"){
+  targetMinutes=[2,4].includes(weekday)?150:0;from="14:00";reason="Werkstatt";code="913";
+ }else if(model?.id==="office-judith"){
+  targetMinutes=[1,5].includes(weekday)?480:weekday===2?240:0;from="08:00";reason="Büro";
+ }else return null;
+ const fixedSegments=targetMinutes?split({from,to:hm(minute(from)+targetMinutes),activityLabel:reason,activityCode:code},"office_"+weekday):[];
+ if(model.id==="office-judith")for(const segment of fixedSegments)segment.durationOnly=true;
+ return {model,targetMinutes,fixedSegments};
+}
 function schedule(models,e,date){
  const model=modelFor(models,e),d=new Date(date+"T12:00:00Z"),weekday=d.getUTCDay()||7;
+ if(Number.isFinite(+d)){
+  const obelisk=obeliskSchedule(model,e,weekday);
+  if(obelisk)return obelisk;
+ }
  if(!model||!Number.isFinite(+d))return {model:null,targetMinutes:0,fixedSegments:null};
  const rows=model.blocks?.finkTarget?.rows,matching=Array.isArray(rows)?rows.filter(r=>(r.days||[]).map(Number).includes(weekday)):null;
  const factor=model.configured===true||model.officeModel||model.id!=="krista-standard"?1:Math.max(0,Number(e.employmentPercent??e.employmentPercentage??e.workPercent??100)||0)/100;
