@@ -25,7 +25,7 @@ const html='<div id="monthlyReportModal"></div><button id="openKriszeitPdf"></bu
  modal.querySelector("[data-review-save]").click();await settle();
  assert.equal(saved.length,1);assert.equal(saved[0].segments[0].from,"07:30");assert.equal(saved[0].segments[0].to,"12:00");assert.equal(saved[0].segments[0].reason,"Büro");assert.equal(saved[0].reason,"Kontrolle laut Zeitnachweis");assert.match(modal.textContent,/Alle Änderungen gespeichert/);
  // PDF with many paid UP rows must paginate instead of dropping the bottom of the timesheet.
- const report=await w.KrisMonthly.buildPerson(employee,"2026-10-01","2026-10-31",0);assert(report.days.find(d=>d.date==="2026-10-05").printBlocks.some(b=>b.from==="07:30"&&b.to==="12:00"),"UP Von/Bis must appear in PDF");
+ const report=await w.KrisMonthly.buildPerson(employee,"2026-10-01","2026-10-31",0);assert(report.days.find(d=>d.date==="2026-10-05").printBlocks.some(b=>b.from==="07:30"&&b.to==="12:00"&&b.label==="Büro"),"UP Von/Bis must appear in PDF");
  const longDays=report.days.map(d=>({...d,printBlocks:Array.from({length:8},(_,i)=>({from:"07:00",to:"08:00",durationMinutes:60}))}));
  const pdf=await createKriszeitMonthlyPdf({from:"2026-10-01",to:"2026-10-31",people:[{...JSON.parse(JSON.stringify(report)),days:longDays}]});const parsed=await PDFDocument.load(pdf);assert(parsed.getPageCount()>1,"long time sheets require continuation pages");
  dom.window.close();console.log("PASS: individual editable view shows paid UP Von/Bis, strict 10h/50h limits incl. cross-month week, saved reason, same UP blocks in PDF and pagination");

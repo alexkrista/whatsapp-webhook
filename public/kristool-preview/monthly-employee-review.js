@@ -11,6 +11,7 @@
   const reasons=[["","Büro"],["913","Werkstatt"],["900","Urlaub"],["901","Krank"],["904","Feiertag"],["930","Zeitausgleich"],["902","Arzt"],["903","Berufsschule"],["911","Sonderurlaub"]];
   let current=null,loading=false;
   const style=document.createElement("style");style.textContent=`
+    #monthlyPeople{grid-column:1/-1;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));max-height:300px}#monthlyPeople label.monthly-person-row{display:flex;flex-wrap:wrap;text-align:left}#monthlyPeople label.monthly-person-row>span{flex:1;min-width:150px}#monthlyPeople [data-person-review],#monthlyPeople [data-person-pdf]{flex:1;min-width:85px}
     #monthlyEmployeeModal{z-index:1100}.employee-review-dialog{width:min(1500px,98vw);max-width:98vw;max-height:96vh;overflow:auto;padding:22px;background:#fff;border-radius:18px}
     .employee-review-head,.employee-review-actions{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;position:sticky;background:#fff;z-index:2;padding:12px 0}.employee-review-head{top:-22px}.employee-review-actions{bottom:-22px;border-top:1px solid #ddd}
     .employee-review-head h2{margin:0}.employee-review-status{padding:12px;border-radius:8px;background:#edf6ed;margin:8px 0}.employee-review-status.closed{background:#fff0d1;border:2px solid #a56700}.employee-review-table{width:100%;border-collapse:collapse;font-size:14px}.employee-review-table th,.employee-review-table td{padding:9px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}.employee-review-table th{background:#edf1ed}
