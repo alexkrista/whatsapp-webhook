@@ -4506,6 +4506,8 @@ function cleanEmployeeMaster(e, existingId = "") {
     worktimeModelId: String(e?.worktimeModelId || "krista-standard").trim().slice(0, 80),
     grossMonthlySalary: Math.max(0, Number(e?.grossMonthlySalary || 0)),
     employmentPercent: Math.min(100, Math.max(0, Number(e?.employmentPercent ?? 100))),
+    vacationPriorServiceMonths: require("./vacation-entitlement").months(e?.vacationPriorServiceMonths),
+    vacationPriorServiceConfirmed: e?.vacationPriorServiceConfirmed === true,
     employmentStart: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.employmentStart || "")) ? String(e.employmentStart) : "",
     employmentEnd: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.employmentEnd || "")) ? String(e.employmentEnd) : "",
     birthDate: /^\d{4}-\d{2}-\d{2}$/.test(String(e?.birthDate || "")) ? String(e.birthDate) : "",
