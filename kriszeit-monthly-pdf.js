@@ -52,7 +52,7 @@ async function createKriszeitMonthlyPdf(payload = {}) {
 
     const columns = [
       ["Datum", 44], ["TP", 95], ["Von", 118], ["Bis", 151], ["Dauer", 183], ["", 220],
-      ["IstStd", 277], ["Soll", 313], ["Glz", 341], ["JahresU", 365], ["FT", 405],
+      ["IstStd", 277], ["Soll", 313], ["Glz", 341], ["Urlaubssaldo", 365], ["FT", 405],
       ["Urlaub", 427], ["Arzt", 455], ["Krank", 478], ["Schule", 506], ["SonUrl", 540]
     ];
     columns.forEach(([label, x]) => text(label, x, y, 6.4, bold));
@@ -66,7 +66,7 @@ async function createKriszeitMonthlyPdf(payload = {}) {
       text((person.name||person.employeeId||"Mitarbeiter")+" - Fortsetzung",left,y,10,bold);
       y-=20;columns.forEach(([label,x])=>text(label,x,y,6.4,bold));rule(y-3);y-=14;
     }
-    let weekly = { actual: 0, target: 0, balance: 0, vacation: 0, work:0 };
+    let weekly = { actual: 0, target: 0, balance: 0, vacation: 0, sick:0, holiday:0, work:0 };
     const drawWeek = label => {
       ensureSpace(22);
       if(weekly.work>3000)page.drawRectangle({x:left,y:y-4,width:right-left,height:13,color:rgb(1,0.88,0.84)});
@@ -76,9 +76,11 @@ async function createKriszeitMonthlyPdf(payload = {}) {
       if (weekly.target) text(hm(weekly.target), 313, y, 6.7, bold);
       if (weekly.balance) text(signedDecimal(weekly.balance), 341, y, 6.7, bold);
       if (weekly.vacation) text(decimal(weekly.vacation * 60), 427, y, 6.7, bold);
+      if(weekly.sick)text(hm(weekly.sick),481,y,6.7,bold);
+      if(weekly.holiday)text(hm(weekly.holiday),408,y,6.7,bold);
       rule(y - 3, 0.45);
       y -= 14;
-      weekly = { actual: 0, target: 0, balance: 0, vacation: 0, work:0 };
+      weekly = { actual: 0, target: 0, balance: 0, vacation: 0, sick:0, holiday:0, work:0 };
     };
 
     for (const day of days) {
@@ -96,11 +98,11 @@ async function createKriszeitMonthlyPdf(payload = {}) {
       if (day.payrollMinutes) text(hm(day.payrollMinutes), 277, y, 6.7);
       if (day.targetMinutes) text(hm(day.targetMinutes), 313, y, 6.7);
       if (day.targetMinutes || day.payrollMinutes) text(signedDecimal(Number(day.payrollMinutes||0)-Number(day.targetMinutes||0)), 341, y, 6.7);
-      if (day.yearLeave) text(String(day.yearLeave).replace(".", ","), 369, y, 6.7);
+
       if (day.holiday) text(hm(day.targetMinutes), 408, y, 6.7);
       if (day.vacation) text(String(day.vacation).replace(".", ","), 430, y, 6.7);
       if (day.doctor) text(String(day.doctor).replace(".", ","), 458, y, 6.7);
-      if (day.sick) text(String(day.sick).replace(".", ","), 481, y, 6.7);
+      if (day.sickMinutes) text(hm(day.sickMinutes),481,y,6.7);
       if (day.school) text(String(day.school).replace(".", ","), 509, y, 6.7);
       if (day.specialLeave) text(String(day.specialLeave).replace(".", ","), 543, y, 6.7);
       y -= 10;
@@ -118,30 +120,48 @@ async function createKriszeitMonthlyPdf(payload = {}) {
       weekly.target += Number(day.targetMinutes || 0);
       weekly.balance += Number(day.payrollMinutes || 0) - Number(day.targetMinutes || 0);
       weekly.vacation += Number(day.vacation || 0);
+      weekly.sick+=Number(day.sickMinutes||0);
+      if(day.holiday)weekly.holiday+=Number(day.targetMinutes||0);
       if (day.weekday === "So" || day === days[days.length - 1]) drawWeek(`KW ${day.week || ""}`);
     }
 
-    ensureSpace(125);
+    ensureSpace(190);
     const totals = person.totals || {};
     y -= 3;
     rule(y + 6, 0.55);
+    const balances=person.balances||{};
+    const amount=value=>value==null?"-":Number(value).toLocaleString("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2});
+    const balanceRow=(label,time,vacation)=>{text(label,left,y,7);text(amount(time),341,y,7);text(amount(vacation),369,y,7);y-=13};
+    const previous=new Date(payload.from+"T12:00:00Z");previous.setUTCMonth(previous.getUTCMonth()-1);
+    balanceRow("Vortrag "+monthLabel(previous.toISOString().slice(0,10)),balances.openingTime,balances.openingVacation);
     text(monthLabel(payload.from), left, y, 7, bold);
     text(hm(totals.payrollMinutes), 277, y, 7, bold);
     text(hm(totals.targetMinutes), 313, y, 7, bold);
-    text(signedDecimal(totals.balanceMinutes), 341, y, 7, bold);
+    text(amount(balances.monthTime??Number(totals.balanceMinutes||0)/60), 341, y, 7, bold);
+    text(amount(balances.accrual==null?null:balances.accrual-Number(balances.vacationUsed??totals.vacation??0)),369,y,7);
     if (totals.vacation) text(decimal(Number(totals.vacation) * 60), 427, y, 7, bold);
-    if (totals.sick) text(decimal(Number(totals.sick) * 60), 478, y, 7, bold);
+    if(totals.sickMinutes)text(hm(totals.sickMinutes),478,y,7,bold);
+    const holidays=days.reduce((n,d)=>n+(d.holiday?Number(d.targetMinutes||0):0),0);if(holidays)text(hm(holidays),408,y,7,bold);
     y -= 14;
+    balanceRow("Korrekturen",balances.correctionTime,balances.correctionVacation);
+    balanceRow("Umbuchungen",balances.transferTime,balances.transferVacation);
     text("Neuer Saldo", left, y, 7.2, bold);
     text(hm(totals.payrollMinutes), 277, y, 7.2, bold);
     text(hm(totals.targetMinutes), 313, y, 7.2, bold);
-    text(signedDecimal(totals.balanceMinutes), 341, y, 7.2, bold);
+    text(amount(balances.newTime),341,y,7.2,bold);
+    text(amount(balances.newVacation),369,y,7.2,bold);
     rule(y - 3, 0.7);
 
     y -= 27;
     text("Weitere Salden", left, y, 6.7);
     [["B intern",277],["B extern",313],["Anw",349],["AnsprU",382],["M Z10%",422],["M Z50%",461],["V Z50%",500]].forEach(([label,x])=>text(label,x,y,6.3));
     rule(y - 3, 0.4);
+    y-=13;
+    text(balances.attendanceMinutes==null?"-":hm(balances.attendanceMinutes),349,y,6.7);
+    text(amount(balances.newVacation),382,y,6.7);
+    text(amount(balances.z10),422,y,6.7);
+    text(amount(balances.z50),461,y,6.7);
+    if(balances.source){y-=14;text("Saldoquelle: "+balances.source,left,y,6.5,regular,grey);}
 
     text(person.monthClosed?"Abgeschlossen - Stunden gesperrt":"Freigegebene Stunden und fixe Modell-Lohnzeiten",left,105,8,bold);
     text("Rot: Arbeit > 10 Std./Tag oder > 50 Std./KW (gesamte KW inkl. Monatsrand).",left,90,7,regular);

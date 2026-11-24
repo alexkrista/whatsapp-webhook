@@ -5,7 +5,7 @@ const row=(days,from,to,extra={})=>({days,from,to,...extra});
 const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-standard",configured:true,blocks:{finkTarget:{rows:targets},finkFixed:{enabled:fixed!==null,rows:fixed||[]}}});
 (async()=>{
  const root=await fsp.mkdtemp(path.join(os.tmpdir(),"monthly-review-")),dir=path.join(root,"_kristine");await fsp.mkdir(dir);await fsp.mkdir(path.join(root,"_system"));
- const employees=[{id:"a",name:"Alexander Krista",worktimeModelId:"krista-standard",employmentPercent:40},{id:"d",name:"Dunja Türtscher",worktimeModelId:"krista-standard",employmentPercent:20},{id:"g",name:"Gerald Gruber",worktimeModelId:"krista-standard",employmentPercent:13},{id:"j",name:"Judith Krista",worktimeModelId:"krista-standard",employmentPercent:50},{id:"b",name:"Bettina Eberle-Nigsch",worktimeModelId:"krista-standard",employmentPercent:40},{id:"p",name:"Produktiver Mitarbeiter",worktimeModelId:"krista-standard"}];
+ const employees=[{id:"a",name:"Alexander Krista",worktimeModelId:"krista-standard",employmentPercent:40},{id:"d",name:"Dunja Türtscher",worktimeModelId:"krista-standard",employmentPercent:20},{id:"g",name:"Gerald Gruber",worktimeModelId:"krista-standard",employmentPercent:13},{id:"j",name:"Judith Krista",worktimeModelId:"krista-standard",employmentPercent:50},{id:"b",name:"Bettina Eberle-Nigsch",worktimeModelId:"krista-standard",employmentPercent:40},{id:"p",name:"Produktiver Mitarbeiter",worktimeModelId:"krista-standard"},{id:"c",name:"Cathrin Grabherr",personnelNumber:"276",worktimeModelId:"krista-standard"}];
  const alex=[row([1,2,3,4,5],"07:00","15:48",{lunchFrom:"12:00",lunchTo:"14:00",activityLabel:"Baustelle ≥ 120 km"})];
  const models=[model("krista-standard",[row([1,2,3,4],"07:00","16:15"),row([5],"07:00","14:15")]),model("office-alex",alex,alex),model("office-dunja",[row([1,4],"08:00","12:00")]),model("office-geri",[row([2,4],"14:30","17:00")],[row([2,4],"14:30","17:00",{activityLabel:"Werkstatt",activityCode:"913"})]),model("office-judith",[row([1,5],"08:00","17:30",{lunchFrom:"12:00",lunchTo:"13:30"}),row([2],"08:00","12:00")],[row([1,5],"08:00","17:30",{lunchFrom:"12:00",lunchTo:"13:30",activityLabel:"Büro"}),row([2],"08:00","12:00",{activityLabel:"Büro"})]),model("office-bettina",[row([1,2,3,4,5],"08:00","11:12")])];
  await fsp.writeFile(path.join(root,"_system","worktime-models.json"),JSON.stringify(models));await fsp.writeFile(path.join(root,"_system","holidays.json"),JSON.stringify([{date:"2026-10-26",name:"Nationalfeiertag"}]));
@@ -38,6 +38,9 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
    assert.equal(monthlyTarget(employee),173*60);
    assert.equal(policy.schedule(models,employee,"2026-10-01").contractOvertimeWeekMinutes,60);
  }
+ const cathrin=await call("get","/kristine/api/monthly-days/:employeeId",{params:{employeeId:"c"},query:{from:"2026-10-01",to:"2026-10-31"}});
+ assert.equal(cathrin.body.balances.newVacation,8.17);assert.equal(cathrin.body.balances.newTime,50.61);
+ for(const date of ["2026-10-12","2026-10-13"]){const day=cathrin.body.days.find(d=>d.date===date);assert.equal(day.segments[0].unproductiveCode,"901");assert.equal(day.released,true);assert.equal(policy.workMinutes(day.segments),0);}
  const holiday=(await days("p")).find(d=>d.date==="2026-10-26");
  assert.equal(holiday.released,true);
  assert.equal(holiday.segments[0].unproductiveCode,"904");

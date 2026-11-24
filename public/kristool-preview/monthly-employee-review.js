@@ -52,6 +52,9 @@
     const vacation=c.vacationEntitlement;
     const vacationSummary=vacation?'<span>Urlaubsanspruch (5-Tage-Woche): '+vacation.annualDays+' Tage/Jahr · '+vacation.monthlyDays.toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2})+' Tage/Monat</span>':'';
     let html='<div class="employee-review-summary"><strong>Stunden: '+hm(person.totals.actualMinutes)+' ('+decimal(person.totals.actualMinutes)+' Std.)</strong><span>Soll: '+hm(person.totals.targetMinutes)+'</span><span>Saldo: '+decimal(person.totals.balanceMinutes)+' Std.</span>'+vacationSummary+'</div><div class="review-scroll"><table class="employee-review-table"><thead><tr><th>Tag</th><th>Arbeitszeiten Von–Bis · Dauer</th><th>Stunden</th><th>Soll</th><th>Saldo</th><th>Kontrolle</th></tr></thead><tbody>';
+    const b=person.balances||{},fmt=n=>n==null?"?":Number(n).toLocaleString("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2});
+    const balanceHtml='<div class="employee-review-summary"><span>ZA Vortrag: '+fmt(b.openingTime)+'</span><span>ZA Neustand: '+fmt(b.newTime)+'</span><span>Urlaub Rest: '+fmt(b.newVacation)+'</span><span>?Std. 10 %: '+fmt(b.z10)+'</span><span>?Std. 50 %: '+fmt(b.z50)+'</span>'+(!c.closed&&c.from.slice(0,7)>="2026-11"?'<button type="button" data-review-balance="correction">Korrektur buchen</button><button type="button" data-review-balance="transfer">Umbuchung buchen</button>':'')+'</div>';
+    html=html.replace('<div class="review-scroll">',balanceHtml+'<div class="review-scroll">');
     days.forEach((d,index)=>{
       const r=byDate.get(d.date)||{},segments=c.drafts[d.date]?.segments||d.segments,working=work(segments),paid=total(segments),shown=c.drafts[d.date]?paid:r.actualMinutes??paid;
       const key=monday(d.date),week=weeks.get(key)||{first:d.date,credited:0,worked:0};
@@ -117,6 +120,17 @@
     const row=b.closest("[data-date]");
     if(row&&b.hasAttribute("data-review-add")){capture(row);const segments=current.drafts[row.dataset.date].segments,last=segments.at(-1);segments.push({id:"review_"+Date.now(),type:"up",from:last?.to||"07:00",to:"",reason:"Büro",unproductiveCategory:"other",unproductiveCode:""});editor(row.dataset.date);return}
     if(row&&b.hasAttribute("data-review-remove")){capture(row);current.drafts[row.dataset.date].segments.splice(+b.dataset.reviewRemove,1);editor(row.dataset.date);return}
+    if(b.dataset.reviewBalance){
+      if(dirty())return message("Bitte Tagesaenderungen zuerst speichern.",true);
+      const number=label=>{const value=prompt(label,"0");return value===null?null:Number(value.replace(",","."))};
+      const time=number("Zeitkonto: Stunden (+/-)"),vacation=number("Urlaub: Tage (+/-)");
+      if(time===null||vacation===null||!Number.isFinite(time)||!Number.isFinite(vacation)||(!time&&!vacation))return;
+      const reason=prompt("Begruendung");if(!reason?.trim())return;
+      if(!confirm("Saldoaenderung speichern?"))return;
+      setBusy(true);
+      try{await request("/kristine/api/month-balance-adjustment",{method:"POST",body:JSON.stringify({id:crypto.randomUUID(),month:current.from.slice(0,7),employeeId:current.id,kind:b.dataset.reviewBalance,timeHours:time,vacationDays:vacation,reason})});window.KrisMonthly.invalidate();await load();message("Saldoaenderung gespeichert.")}catch(error){message(error.message,true)}finally{setBusy(false)}
+      return;
+    }
     setBusy(true);
     try{
       if(b.dataset.reviewRelease){

@@ -140,6 +140,10 @@
         <div class="full actions"><button onclick="saveEmployeeMaster()">💾 Mitarbeiter speichern</button><button class="secondary" onclick="resetEmployeeForm()">Neu/Zurücksetzen</button></div>
       </div>
       <div id="employeeList" class="loading">Lade Mitarbeiter …</div>
+      <section class="section">
+        <button class="secondary" type="button" id="openZaOldAdmin">ZA alt</button>
+        <div id="zaOldAdminContent" hidden></div>
+      </section>
     </div>
   </section>
 
@@ -953,5 +957,6 @@ loadJobs();
 })();
 </script>
 
+<script src="/public/ui/za-old-admin.js?v=1"></script>
 </body>
 </html>

@@ -6,12 +6,12 @@ const assert=require("node:assert/strict"),fs=require("node:fs"),path=require("n
  class Clock extends Date{constructor(...args){super(...(args.length?args:["2027-02-01T12:00:00Z"]))}}
  const employee={id:"a",name:"Anna",worktimeModelId:"test",employmentPercent:100},model={id:"test",name:"Test",seasons:[{months:[12],weekdays:{3:{payrollTargetHours:7.8},4:{payrollTargetHours:7.8},5:{payrollTargetHours:7.8}}}]};
  const state={bootstrap:{employees:[employee],worktimeModels:[model],assignments:[],employeeWorkRules:{}}};
- let kind="za";const c={state,Date:Clock,document:{getElementById:()=>null},request:async()=>({released:true,segments:[{type:"up",from:"07:00",to:"14:48",reason:kind==="za"?"Zeitausgleich":kind==="feiertag"?"Feiertag":"Urlaub",unproductiveCode:kind==="za"?"930":kind==="feiertag"?"904":"900"}]})};
+ let kind="za";const c={state,Date:Clock,document:{getElementById:()=>null},request:async()=>({days:[{date:"2026-12-23",released:true,targetMinutes:468,segments:[{type:"up",from:"07:00",to:"14:48",reason:kind==="za"?"Zeitausgleich":kind==="feiertag"?"Feiertag":kind==="krank"?"Krank":"Urlaub",unproductiveCode:kind==="za"?"930":kind==="feiertag"?"904":kind==="krank"?"901":"900"}]}]})};
  vm.createContext(c);vm.runInContext(truncated,c);
- for(const [type,za,vacation,balance] of [["za",468,0,-468],["urlaub",0,468,0],["feiertag",0,0,0]]){
-  kind=type;state.bootstrap.assignments=[{employeeId:"a",date:"2026-12-23",cardType:type,jobName:type==="za"?"Zeitausgleich":type==="feiertag"?"Feiertag":"Urlaub"}];
+ for(const [type,za,vacation,balance] of [["za",468,0,-468],["urlaub",0,468,0],["feiertag",0,0,0],["krank",0,0,0]]){
+  kind=type;state.bootstrap.assignments=[{employeeId:"a",date:"2026-12-23",cardType:type,jobName:type==="za"?"Zeitausgleich":type==="feiertag"?"Feiertag":type==="krank"?"Krank":"Urlaub"}];
   const result=await c.test.buildPerson(employee,"2026-12-23","2026-12-23",0);
-  assert.equal(result.totals.zaUsedMinutes,za,type);assert.equal(result.totals.vacationMinutes,vacation,type);assert.equal(result.totals.balanceMinutes,balance,type);
+  assert.equal(result.totals.zaUsedMinutes,za,type);assert.equal(result.totals.vacationMinutes,vacation,type);assert.equal(result.totals.balanceMinutes,balance,type);if(type==="krank")assert.equal(result.totals.sickMinutes,468);
  }
  const exportCode=fs.readFileSync(path.join(root,"public/kristool-preview/finkzeit-export.js"),"utf8"),finkSource=exportCode.slice(0,exportCode.indexOf("function updateFinkPreview"));
  const fink={state:{bootstrap:{employees:[{...employee,finkzeitPersonnelNumber:"1"}],assignments:[{employeeId:"a",date:"2026-12-23",cardType:"urlaub",jobName:"Urlaub",from:"08:00",to:"17:00",calendarMinutes:192}]}},request:async()=>({segments:[]})};
