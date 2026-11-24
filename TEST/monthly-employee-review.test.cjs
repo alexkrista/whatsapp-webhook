@@ -55,6 +55,18 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
  assert.deepEqual(withPause.map(s=>[s.type,s.from,s.to]),[["work","07:00","09:00"],["pause","09:00","09:15"],["work","09:15","12:00"]]);
  assert.equal(policy.workMinutes(withPause),285);
  assert.deepEqual(policy.withMorningPause(withPause),withPause);
+ for(const [code,reason] of [["913","Werkstatt"],["903","Fortbildung"],["","Schulung"]]){
+   const activity={id:code||"training",type:"up",from:"07:00",to:"12:00",unproductiveCode:code,reason};
+   const split=policy.withMorningPause([activity]);
+   assert.deepEqual(split.map(s=>[s.type,s.from,s.to]),[["up","07:00","09:00"],["pause","09:00","09:15"],["up","09:15","12:00"]]);
+   assert.equal(split[0].unproductiveCode,code);
+   assert.deepEqual(policy.withMorningPause(split),split);
+ }
+ for(const [code,reason] of [["900","Urlaub"],["901","Krank"],["904","Feiertag"],["930","Zeitausgleich"]]){
+   const absence={id:code,type:"up",from:"07:00",to:"14:48",unproductiveCode:code,reason};
+   assert.deepEqual(policy.withMorningPause([absence]),[absence]);
+ }
+
  assert.equal(policy.workMinutes(b.find(d=>d.date==="2026-10-06").segments),270,"office bookings keep their full duration");
  assert.equal(policy.modelFor(models,employees[5]).id,"krista-standard");assert.equal(policy.modelFor(models,{...employees[0],worktimeModelId:"office-judith"}).id,"office-judith","explicit dedicated assignment wins");
  const makeReport=rows=>({employeeId:"a",name:"Alex",days:rows.map(d=>({date:d.date,actualMinutes:d.segments.filter(s=>["up","work"].includes(s.type)).reduce((sum,s)=>sum+policy.minute(s.to)-policy.minute(s.from),0)})),totals:{actualMinutes:rows.reduce((sum,d)=>sum+d.segments.filter(s=>["up","work"].includes(s.type)).reduce((n,s)=>n+policy.minute(s.to)-policy.minute(s.from),0),0)}});

@@ -2875,7 +2875,7 @@ const open = taskId
     const holiday=context.holidays.find(h=>String(h.date)===date);
     const release=dayControlReleaseForEmployee(context.releases,employee,date);
     const office=schedule.model?.officeModel||String(schedule.model?.id||"").startsWith("office-");
-    let segments=office?original:payrollModel.withMorningPause(original),source="Buchungen",automatic=false;
+    let segments=original,source="Buchungen",automatic=false;
     if(schedule.fixedSegments!==null&&employeeBelongsToDay(employee,date)){
       segments=schedule.fixedSegments;automatic=true;source="Fixe Lohnzeit · "+schedule.model.name;
     }
@@ -2892,6 +2892,7 @@ const open = taskId
       source=label+" · "+schedule.model.name;
     }
     if(correction){segments=correction.segments;source="Lohnzeit korrigiert";automatic=true}
+    if(!office&&!closed)segments=payrollModel.withMorningPause(segments);
     if(closed){segments=closed.days.find(d=>d.date===date)?.segments||[];source="Abgeschlossen";automatic=true}
     const targetMinutes=closed?.report?.days?.find(d=>d.date===date)?.targetMinutes??(employeeBelongsToDay(employee,date)?schedule.targetMinutes:0);
     return {date,employeeId,segments,originalSegments:original,released:automatic||Boolean(release?.released&&!release.returned),monthClosed:Boolean(closed),closedAt:closed?.closedAt||null,targetMinutes,regularWeekMinutes:schedule.regularWeekMinutes,contractOvertimeWeekMinutes:schedule.contractOvertimeWeekMinutes,modelName:closed?.report?.modelLabel||schedule.model?.name||"Zeitmodell",modelId:schedule.model?.id||"",payrollFixed:schedule.fixedSegments!==null||context.reopenings.some(r=>r.employeeId===employeeId&&r.month===date.slice(0,7)),payrollAutomatic:automatic,source,workingMinutes:payrollModel.workMinutes(segments),correction:correction?{history:correction.history,reason:correction.reason}:null};

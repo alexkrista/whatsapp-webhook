@@ -55,7 +55,10 @@ function workMinutes(segments){return segments.filter(s=>["work","up"].includes(
 function withMorningPause(segments){
  const start=9*60,end=start+15;
  return segments.flatMap(segment=>{
-  if(segment.type!=="work")return [segment];
+  if(!["work","up"].includes(segment.type))return [segment];
+  if(segment.type==="up"&&(["900","901","904","930"].includes(String(segment.unproductiveCode||""))||
+    ["vacation","sick","urlaub","krank","feiertag","za","holiday"].includes(String(segment.absenceType||segment.unproductiveCategory||"").toLowerCase())||
+    /(?:^|\b)urlaub\b|krank|feiertag|zeitausgleich/i.test(segment.reason||"")))return [segment];
   const from=minute(segment.from),to=minute(segment.to);
   if(from===null||to===null||to<=start||from>=end)return [segment];
   const pauseFrom=Math.max(from,start),pauseTo=Math.min(to,end);
