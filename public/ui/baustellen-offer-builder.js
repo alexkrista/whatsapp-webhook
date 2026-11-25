@@ -387,7 +387,22 @@
   const offerInquiryStates=new Map();
   function mountOfferInquiry(box){
     const panel=document.createElement("details");
-    panel.className="kcv2-card";
+    panel.className="kcv2-card koffer-inquiry";
+    if(!document.getElementById("kofferInquiryCss")){
+      const style=document.createElement("style");
+      style.id="kofferInquiryCss";
+      style.textContent=`
+        .koffer-inquiry,.koffer-inquiry article,.koffer-inquiry-row,.koffer-inquiry-row label{min-width:0}
+        .koffer-inquiry article{margin:8px 0}
+        .koffer-inquiry article h5{margin:0 0 6px;font-size:14px}
+        .koffer-inquiry-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(72px,0.55fr) minmax(0,2fr) auto;gap:8px;align-items:end;margin:8px 0}
+        .koffer-inquiry-row label{display:block;font-size:12px}
+        .koffer-inquiry-row input,.koffer-inquiry-row select{box-sizing:border-box;display:block;width:100%;min-width:0;max-width:100%;margin-top:3px}
+        .koffer-inquiry-row select{padding:7px;border:1px solid #d2cec4;border-radius:7px;background:white;text-overflow:ellipsis}
+        @media(max-width:740px){.koffer-inquiry-row{grid-template-columns:minmax(0,1fr) minmax(72px,.45fr)}}
+      `;
+      document.head.append(style);
+    }
     panel.innerHTML='<summary>Angebot aus Anfrage</summary><p><label>Outlook-Mail hierher ziehen oder auswählen <input type="file" accept=".msg" multiple></label></p><p role="status"></p><div data-inquiry-documents></div><div data-inquiry-groups></div><p><button type="button" data-inquiry-transfer disabled>Ins Angebot übernehmen</button></p>';
     box.querySelector(".kcv2-section-head")?.after(panel);
     const input=panel.querySelector("input"), status=panel.querySelector("[role=status]");
@@ -464,14 +479,37 @@
           }
           action(controls,"Gruppe entfernen",()=>{groups.splice(groups.indexOf(group),1);draw();});
           for(const row of group.rows){
-            const line=append(card,"p");
-            field(line,"Leistung",row.text,value=>{row.text=value;});
+            const line=append(card,"div");
+            line.className="koffer-inquiry-row";
+            const description=field(line,"Leistung",row.text,value=>{row.text=value;});
             field(line,group.unit,row.quantity,value=>{row.quantity=value;},"number");
-            const select=append(append(line,"label"," Textbaustein "),"select");
-            select.add(new Option("Freie Leistung",""));
-            offerPositionTemplates.forEach((template,index)=>select.add(new Option(template.text,String(index))));
-            select.value=row.templateIndex??"";
-            select.onchange=()=>{row.templateIndex=select.value;draw();};
+            const chooser=append(line,"div");
+            const search=field(chooser,"Position suchen","",()=>renderOptions(),"search");
+            search.placeholder="Leistung oder Positionsgruppe";
+            const select=append(append(chooser,"label","Leistungsposition aus Stamm"),"select");
+            function renderOptions(){
+              const term=search.value.trim().toLocaleLowerCase("de-AT");
+              select.replaceChildren(new Option("Freie Leistung",""));
+              const categories=new Map();
+              for(const [index,template] of offerPositionTemplates.entries()){
+                const category=template.group||"Allgemein";
+                const match=[template.text,category,template.supplierQuote?.quoteNumber].join(" ").toLocaleLowerCase("de-AT").includes(term);
+                if(!match&&String(index)!==row.templateIndex)continue;
+                if(!categories.has(category)){
+                  const options=append(select,"optgroup");options.label=category;categories.set(category,options);
+                }
+                const title=String(template.text||"").trim().replace(/\s+/g," ");
+                if(title)categories.get(category).append(new Option(title.length>125?title.slice(0,122)+"…":title,String(index)));
+              }
+              select.value=row.templateIndex??"";
+            }
+            renderOptions();
+            select.onchange=()=>{
+              row.templateIndex=select.value;
+              const template=select.value===""?null:offerPositionTemplates[Number(select.value)];
+              if(template){description.value=template.text;row.text=template.text;}
+              persist();
+            };
             action(line,"Entfernen",()=>{group.rows.splice(group.rows.indexOf(row),1);draw();});
           }
           action(card,"+ Unterposition",()=>{group.rows.push({text:"",quantity:group.quantity});draw();});
@@ -529,7 +567,7 @@
       const context=editorContext();
       if(!editorContextActive(context)||context.editor!==box)return;
       const selections=groups.flatMap(group=>group.rows.map(row=>({group,row,template:row.templateIndex?offerPositionTemplates[Number(row.templateIndex)]:null})));
-      if(selections.some(({row,template})=>!String(template?.text||row.text).trim()||row.quantity===""||!Number.isFinite(Number(row.quantity))||Number(row.quantity)<0)){
+      if(selections.some(({row,template})=>!String(row.text||template?.text).trim()||row.quantity===""||!Number.isFinite(Number(row.quantity))||Number(row.quantity)<0)){
         status.textContent="Bitte jede Unterposition mit Leistung und gültiger Menge ergänzen.";
         return;
       }
@@ -538,7 +576,7 @@
         id:"mail-"+crypto.randomUUID(),
         groupId:group.id,
         groupName:group.area+" · "+group.title,
-        text:(template?.text||row.text).trim()+(group.eventual?" (Eventualposition)":""),
+        text:(row.text||template?.text).trim()+(group.eventual?" (Eventualposition)":""),
         quantity:Number(row.quantity),
         unit:group.unit,
         templateId:template?.id||"",
@@ -686,7 +724,7 @@
   async function acceptOffer(){const context=editorContext(),msg=context.editor?.querySelector("#kofferMsg"),button=context.editor?.querySelector("#kofferAccept"),topButton=context.editor?.querySelector("#kofferAcceptTop");if(!editorContextActive(context)||!msg||!button)return;if(acceptedOrder){msg.textContent=`✓ Auftrag aus Angebot ${acceptedOrder.offerNumber} besteht bereits.`;return}try{button.disabled=true;if(topButton)topButton.disabled=true;msg.textContent="Angebot wird geprüft …";await ensureOfferMaterials(context);const saved=await save(context);if(!saved)throw new Error("Angebot wurde nicht gespeichert.");const savedContext={...context,draft};requireEditorContext(savedContext);const alternatives=(savedContext.draft.positions||[]).filter(p=>p.isAlternative===true&&(+p.quantity||0)>0),selection=await chooseAcceptedAlternatives(alternatives);if(selection===null){if(editorContextActive(savedContext))msg.textContent="Auftragsübernahme abgebrochen.";return}requireEditorContext(savedContext);msg.textContent="Auftrag wird erstellt …";const result=await api(`/admin/api/job/${encodeURIComponent(savedContext.jobId)}/offer-draft/accept`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(selection)});requireEditorContext(savedContext);acceptedOrder=result.order;orderSchedule=result.schedule||null;job.status="Auftrag";button.textContent="✓ Auftrag erstellt";button.disabled=true;if(topButton){topButton.textContent="✓ Auftrag erstellt";topButton.disabled=true}mountOrderSchedule(true);const money=n=>(+n||0).toLocaleString("de-AT",{style:"currency",currency:"EUR"});msg.textContent=`✓ Angebot ${acceptedOrder.offerNumber} als Auftrag übernommen · ${money(acceptedOrder.totals.net)} netto${result.invoiceDraft?` · Vorkassa-Rechnungsentwurf ${money(result.invoiceDraft.netAmount)} netto / ${money(result.invoiceDraft.grossAmount)} brutto`:""}`;if(orderSchedule?.status==="confirmed")await openOrderConfirmation(savedContext);}catch(e){if(document.getElementById("koffer")===context.editor)msg.textContent="Auftragsübernahme fehlgeschlagen: "+e.message;if(editorContextActive(context)){button.disabled=false;if(topButton)topButton.disabled=false}}finally{if(editorContextActive(context)&&!acceptedOrder){button.disabled=false;if(topButton)topButton.disabled=false}}}
   let offerPreviewBlobUrl="",offerPreviewSerial=0;
   async function renderOfferPdfPreview(){const serial=++offerPreviewSerial,context=editorContext(),body=context.editor?.querySelector("#kofferLiveBody");if(!editorContextActive(context)||!body)return;body.innerHTML='<div style="padding:28px;font-weight:800">PDF-Vorschau wird erstellt …</div>';try{const staging=document.createElement("div");renderLivePreview(staging);enhanceFinancialPreview(staging);enhanceLivePreview(staging);const paper=staging.querySelector(".koffer-paper");if(!paper)throw new Error("Angebotsinhalt fehlt.");const response=await fetch(url("/admin/api/document-layout/render"),{method:"POST",headers:{"Content-Type":"text/html"},body:printDocumentHtml(paper)});if(!response.ok){const error=await response.json().catch(()=>({}));throw new Error(error.error||"PDF konnte nicht erstellt werden.")}const blob=await response.blob();requireEditorContext(context);if(serial!==offerPreviewSerial)return;if(offerPreviewBlobUrl)URL.revokeObjectURL(offerPreviewBlobUrl);offerPreviewBlobUrl=URL.createObjectURL(blob);body.innerHTML='<iframe title="PDF-Vorschau des Angebots" style="display:block;width:100%;height:72vh;border:0;background:#fff"></iframe>';body.querySelector("iframe").src=offerPreviewBlobUrl}catch(error){if(serial===offerPreviewSerial&&document.getElementById("koffer")===context.editor)body.innerHTML=`<div style="padding:28px;color:#922"><strong>PDF-Vorschau nicht möglich:</strong> ${esc(error.message)}</div>`}}
-  function mountLivePreview(){const box=document.getElementById("koffer");if(!box||document.getElementById("kofferLive"))return;box.querySelector(".kcv2-section-head")?.insertAdjacentHTML("beforeend",`<div style="display:flex;gap:7px;flex-wrap:wrap"><button id="kofferLiveToggle" type="button">👁 Angebotsvorschau</button><button id="kofferAcceptTop" type="button" ${acceptedOrder?"disabled":""}>${acceptedOrder?"✓ Auftrag erstellt":"✓ Als Auftrag übernehmen"}</button></div>`);const saveButton=document.getElementById("kofferSave");saveButton?.insertAdjacentHTML("afterend",`<button id="kofferPrint" type="button">🖨 Drucken / PDF</button><button id="kofferSend" type="button">✉ Angebot senden</button><button id="kofferAccept" type="button" ${acceptedOrder?"disabled":""}>${acceptedOrder?"✓ Auftrag erstellt":"✓ Als Auftrag übernehmen"}</button>`);document.getElementById("kofferPrint").onclick=printOffer;document.getElementById("kofferSend").onclick=prepareOfferDispatch;document.getElementById("kofferAccept").onclick=acceptOffer;document.getElementById("kofferAcceptTop").onclick=()=>document.getElementById("kofferAccept")?.click();box.insertAdjacentHTML("beforeend",'<div id="kofferLive" class="koffer-live" hidden><div class="koffer-live-head"><strong>PDF-Vorschau des Angebots</strong><span><button id="kofferLiveRefresh" type="button">↻</button> <button id="kofferLiveClose" type="button">×</button></span></div><div id="kofferLiveBody"></div></div>');const w=document.getElementById("kofferLive");document.getElementById("kofferLiveToggle").onclick=()=>{w.hidden=!w.hidden;if(!w.hidden){renderOfferPdfPreview();enableLivePreview()}};document.getElementById("kofferLiveRefresh").onclick=renderOfferPdfPreview;document.getElementById("kofferLiveClose").onclick=()=>w.hidden=true}
+  function mountLivePreview(){const box=document.getElementById("koffer");if(!box||document.getElementById("kofferLive"))return;box.querySelector(".kcv2-section-head")?.insertAdjacentHTML("beforeend",`<div style="display:flex;gap:7px;flex-wrap:wrap"><button id="kofferLiveToggle" type="button">👁 Angebotsvorschau</button><button id="kofferAcceptTop" type="button" ${acceptedOrder?"disabled":""}>${acceptedOrder?"✓ Auftrag erstellt":"✓ Als Auftrag übernehmen"}</button></div>`);const saveButton=document.getElementById("kofferSave");saveButton?.insertAdjacentHTML("afterend",`<button id="kofferPrint" type="button">🖨 Drucken / PDF</button><button id="kofferSend" type="button">✉ Angebot senden</button>${document.getElementById("kofferAccept")?"":`<button id="kofferAccept" type="button" ${acceptedOrder?"disabled":""}>${acceptedOrder?"✓ Auftrag erstellt":"✓ Als Auftrag übernehmen"}</button>`}`);document.getElementById("kofferPrint").onclick=printOffer;document.getElementById("kofferSend").onclick=prepareOfferDispatch;document.getElementById("kofferAccept").onclick=acceptOffer;document.getElementById("kofferAcceptTop").onclick=()=>document.getElementById("kofferAccept")?.click();box.insertAdjacentHTML("beforeend",'<div id="kofferLive" class="koffer-live" hidden><div class="koffer-live-head"><strong>PDF-Vorschau des Angebots</strong><span><button id="kofferLiveRefresh" type="button">↻</button> <button id="kofferLiveClose" type="button">×</button></span></div><div id="kofferLiveBody"></div></div>');const w=document.getElementById("kofferLive");document.getElementById("kofferLiveToggle").onclick=()=>{w.hidden=!w.hidden;if(!w.hidden){renderOfferPdfPreview();enableLivePreview()}};document.getElementById("kofferLiveRefresh").onclick=renderOfferPdfPreview;document.getElementById("kofferLiveClose").onclick=()=>w.hidden=true}
   window.KristaAcceptOffer=acceptOffer;
   function mountAcceptedOrderAction(){
     const box=document.getElementById("koffer"),saveButton=document.getElementById("kofferSave");
@@ -697,13 +735,7 @@
       bottomButton=document.getElementById("kofferAccept");
       bottomButton.onclick=()=>window.KristaAcceptOffer?.();
     }
-    const header=box.querySelector(".kcv2-section-head");
-    if(header&&!document.getElementById("kofferAcceptTop")){
-      const topButton=document.createElement("button");
-      topButton.id="kofferAcceptTop";topButton.type="button";topButton.disabled=!!acceptedOrder;topButton.textContent=acceptedOrder?"✓ Auftrag erstellt":"✓ Als Auftrag übernehmen";
-      topButton.onclick=()=>bottomButton?.click();
-      header.appendChild(topButton);
-    }
+
   }
   const acceptedOrderButtonObserver=new MutationObserver(mountAcceptedOrderAction);
   acceptedOrderButtonObserver.observe(document.documentElement,{childList:true,subtree:true});

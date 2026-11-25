@@ -167,7 +167,7 @@ test("incoming measurements survive a second editor mount and a page reload", ()
       w.mountInquiry(editor);
       assert.equal(editor.querySelectorAll("article").length,1);
       assert.match(editor.querySelector("article").textContent,/Wände/);
-      return editor.querySelector('article p input[type="text"]');
+      return editor.querySelector('article .koffer-inquiry-row input[type="text"]');
     };
     reloadScript();
     const row=mount();
