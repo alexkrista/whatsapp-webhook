@@ -402,6 +402,12 @@
         .koffer-inquiry-amount,.koffer-inquiry-totals{font-variant-numeric:tabular-nums}
         .koffer-inquiry-amount strong{display:block;margin-top:5px}
         .koffer-inquiry-totals{margin:8px 0;font-weight:700}
+        .koffer-inquiry-subgroup{margin:12px 0;padding:10px;border:1px solid #d2cec4;border-radius:9px;background:#f8f8f4}
+        .koffer-inquiry-group-tools{display:flex;flex-wrap:wrap;align-items:end;gap:8px;margin:8px 0}
+        .koffer-inquiry-group-tools[hidden]{display:none}
+        .koffer-inquiry-group-tools input{max-width:18rem}
+        .koffer-inquiry-heading{display:flex;align-items:baseline;gap:8px}
+        .koffer-inquiry-subgroup>summary{cursor:pointer;font-weight:700;font-variant-numeric:tabular-nums}
         .koffer-inquiry-row .koffer-inquiry-free{grid-column:1/-1}
         .koffer-inquiry-row .koffer-inquiry-free[hidden]{display:none}
         .koffer-inquiry-row select{padding:7px;border:1px solid #d2cec4;border-radius:7px;background:white;text-overflow:ellipsis}
@@ -422,7 +428,7 @@
       offerInquiryStates.set(id,state);
     }
     const {groups,documents}=state, seen=new Set(state.hashes);
-    const priceViews=[];
+    const priceViews=[], selectedGroups=new Set();
     const money=new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR"});
     const moneyCents=cents=>money.format(cents/100);
     const templateFor=row=>row.templateIndex?offerPositionTemplates[Number(row.templateIndex)]:null;
@@ -431,11 +437,15 @@
     const groupCents=group=>group.rows.reduce((sum,row)=>sum+rowCents(row),0);
     const groupPending=group=>group.rows.filter(row=>rowPrice(row)==="").length;
     function updatePrices(){for(const update of priceViews)update();}
-    function subtotal(target,items,label){
-      const sum=(alternative)=>items.filter(group=>!!group.alternative===alternative).reduce((total,group)=>total+groupCents(group),0);
+    const groupKind=group=>group.eventual?"Eventualpositionen":group.alternative?"Variante":"Grundangebot";
+    const sumGroups=items=>items.reduce((total,group)=>total+groupCents(group),0);
+    const pendingText=items=>{
       const pending=items.reduce((total,group)=>total+groupPending(group),0);
-      const options=items.some(group=>group.alternative)?" · Varianten / eventual: "+moneyCents(sum(true)):"";
-      target.textContent=label+": "+moneyCents(sum(false))+options+(pending?" · "+pending+" ohne Einheitspreis":"");
+      return pending?" · "+pending+" ohne Einheitspreis":"";
+    };
+    function subtotal(target,items,label){
+      const primary=items.filter(group=>groupKind(group)==="Grundangebot");
+      target.textContent=label+": "+moneyCents(sumGroups(primary))+pendingText(primary);
     }
     const persist=()=>{
       state.hashes=[...seen];
@@ -480,10 +490,56 @@
         const section=append(groupsHost,"section");
         append(section,"h4",area);
         const areaGroups=groups.filter(group=>group.area===area);
+        const tools=append(section,"div");
+        tools.className="koffer-inquiry-group-tools";
+        const name=field(tools,"Variantenname","",()=>{});
+        name.placeholder="z. B. Glatt spachteln und malen";
+        const createVariant=action(tools,"Variante bilden",()=>{
+          const title=name.value.trim()||"Variante";
+          for(const group of areaGroups){
+            if(!selectedGroups.delete(group.id))continue;
+            group.alternative=true;
+            group.variantName=title;
+          }
+          draw();
+        });
+        const updateSelection=()=>{createVariant.disabled=!areaGroups.some(group=>selectedGroups.has(group.id));};
+        updateSelection();
+        tools.hidden=!areaGroups.some(group=>!group.eventual);
+        const subgroupKey=group=>groupKind(group)==="Variante"?"variant:"+String(group.variantName||"Variante"):groupKind(group);
+        const subgroupHosts=new Map();
+        const keys=["Grundangebot",...new Set(areaGroups.filter(group=>groupKind(group)==="Variante").map(subgroupKey)),"Eventualpositionen"];
+        for(const kind of keys){
+          const items=areaGroups.filter(group=>subgroupKey(group)===kind);
+          if(!items.length)continue;
+          if(kind==="Grundangebot"){subgroupHosts.set(kind,append(section,"div"));continue;}
+          const subgroup=append(section,"details");
+          subgroup.className="koffer-inquiry-subgroup";
+          const stateKey=area+"-"+kind;
+          subgroup.open=state.subgroups?.[stateKey]??true;
+          subgroup.ontoggle=()=>{
+            state.subgroups??={};
+            state.subgroups[stateKey]=subgroup.open;
+            persist();
+          };
+          const label=kind.startsWith("variant:")?kind.slice(8):kind;
+          const heading=append(subgroup,"summary");
+          priceViews.push(()=>{heading.textContent=label+" · Summe netto: "+moneyCents(sumGroups(items))+pendingText(items);});
+          subgroupHosts.set(kind,subgroup);
+        }
         areaGroups.forEach(group=>{
-          const card=append(section,"article");
+          const card=append(subgroupHosts.get(subgroupKey(group)),"article");
           card.className="koffer-pos";
-          const heading=append(card,"h5",group.title+(group.eventual?" · Eventualposition":""));
+          const head=append(card,"div");head.className="koffer-inquiry-heading";
+          if(!group.eventual){
+            const mark=append(head,"input");mark.type="checkbox";mark.checked=selectedGroups.has(group.id);
+            mark.setAttribute("aria-label",group.title+" für Variante markieren");
+            mark.onchange=()=>{
+              if(mark.checked)selectedGroups.add(group.id);else selectedGroups.delete(group.id);
+              updateSelection();
+            };
+          }
+          const heading=append(head,"h5",group.title+(group.eventual?" · Eventualposition":""));
           const controls=append(card,"details");
           append(controls,"summary",Number(group.quantity).toLocaleString("de-AT")+" "+group.unit+" · Aufmaß bearbeiten");
           field(controls,"Überschrift",group.title,value=>{
@@ -501,7 +557,7 @@
             const checkbox=append(label,"input");
             checkbox.type="checkbox";
             checkbox.checked=group.alternative===true;
-            checkbox.onchange=()=>{group.alternative=checkbox.checked;persist();updatePrices();};
+            checkbox.onchange=()=>{group.alternative=checkbox.checked;if(!checkbox.checked)delete group.variantName;draw();};
             label.append(" Alternative");
           }
           action(controls,"Gruppe entfernen",()=>{groups.splice(groups.indexOf(group),1);draw();});
@@ -641,7 +697,7 @@
         ...template,
         id:"mail-"+crypto.randomUUID(),
         groupId:group.id,
-        groupName:group.area+" · "+group.title,
+        groupName:[group.area,group.variantName,group.title].filter(Boolean).join(" · "),
         text:(row.text||template?.text).trim()+(group.eventual?" (Eventualposition)":""),
         quantity:Number(row.quantity),
         unitPrice:Number(rowPrice(row))||0,

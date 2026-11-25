@@ -203,5 +203,18 @@ test("incoming measurements survive a second editor mount and a page reload", ()
     assert.match(editor.textContent,/Summe Innen netto: €\s35,00/);
     rows[1].querySelector('[aria-label="Unterposition nach oben"]').click();
     assert.equal(editor.querySelector('.koffer-inquiry-row input[type="number"]').value,"3");
+    const alternative=editor.querySelector('article details input[type="checkbox"]');
+    alternative.checked=true;
+    alternative.dispatchEvent(new w.Event("change"));
+    const subgroup=editor.querySelector(".koffer-inquiry-subgroup");
+    assert.equal(subgroup.querySelectorAll("article").length,1);
+    assert.match(subgroup.querySelector("summary").textContent,/Variante · Summe netto: €\s35,00/);
+    assert.match(editor.textContent,/Summe Innen netto: €\s0,00/);
+    const mark=editor.querySelector('[aria-label$="für Variante markieren"]');
+    mark.checked=true;
+    mark.dispatchEvent(new w.Event("change"));
+    editor.querySelector(".koffer-inquiry-group-tools input").value="Glatt spachteln und malen";
+    Array.from(editor.querySelectorAll("button")).find(button=>button.textContent==="Variante bilden").click();
+    assert.match(editor.querySelector(".koffer-inquiry-subgroup summary").textContent,/Glatt spachteln und malen · Summe netto: €\s35,00/);
   }finally{dom.window.close();}
 });
