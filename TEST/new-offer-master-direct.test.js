@@ -147,3 +147,34 @@ test("mail prefills the offer and hands off the imported positions after confirm
     assert.deepEqual(JSON.parse(JSON.stringify(w.kristaPendingOfferInquiry.intakes[0].documents)),intake.documents);
   } finally {dom.window.close();}
 });
+
+test("incoming measurements survive a second editor mount and a page reload", ()=>{
+  const source=fs.readFileSync(path.join(ROOT,"public","ui","baustellen-offer-builder.js"),"utf8");
+  const start=source.indexOf("  const offerInquiryStates=");
+  const end=source.indexOf("  function render(){",start);
+  const dom=new JSDOM('<div id="koffer" data-job-id="26111"><header class="kcv2-section-head"></header></div>',{
+    url:"https://example.test/kristine/baustellen",runScripts:"outside-only",
+  });
+  const w=dom.window;
+  try{
+    w.sessionStorage.setItem("krista-offer-inquiry-pending:26111",JSON.stringify([{subject:"Anfrage",documents:[{
+      hash:"sample",name:"Wohnhaus.pdf",groups:[{area:"Innen",title:"Wände",quantity:250.77,unit:"m²",suggestions:["Kalkdünnputz"]}],
+    }]}]));
+    const reloadScript=()=>w.eval("(()=>{const offerPositionTemplates=[];"+source.slice(start,end)+";window.mountInquiry=mountOfferInquiry;})()");
+    const editor=w.document.getElementById("koffer");
+    const mount=()=>{
+      editor.querySelector("details")?.remove();
+      w.mountInquiry(editor);
+      assert.equal(editor.querySelectorAll("article").length,1);
+      assert.match(editor.querySelector("article").textContent,/Wände/);
+      return editor.querySelector('article p input[type="text"]');
+    };
+    reloadScript();
+    const row=mount();
+    row.value="Kalkdünnputz bearbeitet";
+    row.dispatchEvent(new w.Event("input"));
+    assert.equal(mount().value,"Kalkdünnputz bearbeitet");
+    reloadScript();
+    assert.equal(mount().value,"Kalkdünnputz bearbeitet");
+  }finally{dom.window.close();}
+});

@@ -668,6 +668,7 @@ function groupRegieComparisonRows(rows = []) {
           if(j.inquiries?.length){
             const jobId=String(created.jobId);
             window.kristaPendingOfferInquiry={jobId,intakes:j.inquiries};
+            try{sessionStorage.setItem("krista-offer-inquiry-pending:"+jobId,JSON.stringify(j.inquiries));}catch{}
             const target=new URL(location.href);
             target.searchParams.set("offerMail",jobId);target.hash=encodeURIComponent(jobId);
             history.replaceState(history.state,"",target.pathname+target.search+target.hash);

@@ -384,6 +384,7 @@
   function renderMeasureResult(){const el=document.getElementById("kofferMeasureResult"),m=draft.measurement||{};if(!el)return;if(draft.offerType==="interior"){const a=roomAreas(),f=n=>n.toLocaleString("de-AT",{maximumFractionDigits:2});el.textContent=m.mode==="estimate"?`Näherung: ${f(a.floor)} m² Boden × 3,5 = ${f(a.total)} m² Gesamtfläche (${f(a.walls)} m² Wände + ${f(a.ceiling)} m² Decke)`: `Berechnung: Wände ${f(a.walls)} m² + Decke ${f(a.ceiling)} m² = ${f(a.total)} m² Gesamtfläche`}else el.textContent="Die Aufmaßwerte werden automatisch in die ausgewählten Positionen übernommen."}
   function renderAreaResult(){const el=document.getElementById("kofferAreaResult");if(!el)return;const a=bathAreas(),f=n=>n.toLocaleString("de-AT",{maximumFractionDigits:2});el.textContent=`Automatisch: Wände ${f(a.wall)} m² · Boden ${f(a.floor)} m² · Decke ${f(a.ceiling)} m² · Abdichtung ${f(a.shower)} m² · Fugenlos ${f(a.fugenlos)} m² · Kalk ${f(a.lime)} m² · Malen ${f(a.paint)} m²`}
   function pane(type,title,content){return `<div class="koffer-pane" data-pane="${type}" style="${draft.offerType===type?"":"display:none"}"><h4>${title}</h4>${content}</div>`}
+  const offerInquiryStates=new Map();
   function mountOfferInquiry(box){
     const panel=document.createElement("details");
     panel.className="kcv2-card";
@@ -392,7 +393,19 @@
     const input=panel.querySelector("input"), status=panel.querySelector("[role=status]");
     const sources=panel.querySelector("[data-inquiry-documents]"), groupsHost=panel.querySelector("[data-inquiry-groups]");
     const transfer=panel.querySelector("[data-inquiry-transfer]");
-    const groups=[], seen=new Set();
+    const id=String(box.dataset.jobId), key="krista-offer-inquiry:"+id;
+    let state=offerInquiryStates.get(id);
+    if(!state){
+      try{state=JSON.parse(sessionStorage.getItem(key));}catch{}
+      state=state||{groups:[],hashes:[],documents:[],message:""};
+      offerInquiryStates.set(id,state);
+    }
+    const {groups,documents}=state, seen=new Set(state.hashes);
+    const persist=()=>{
+      state.hashes=[...seen];
+      state.message=status.textContent;
+      try{sessionStorage.setItem(key,JSON.stringify(state));return true;}catch{return false;}
+    };
     let busy=false;
     function append(parent, tag, text=""){
       const node=document.createElement(tag);
@@ -406,7 +419,7 @@
       control.type=type;
       if(type==="number"){control.min="0";control.step="any";}
       control.value=value;
-      control.oninput=()=>onInput(control.value);
+      control.oninput=()=>{onInput(control.value);persist();};
       return control;
     }
     function action(parent,label,handler){
@@ -419,6 +432,7 @@
       groups.push({...group,id:"mail-"+crypto.randomUUID(),rows:group.suggestions.map(text=>({text,quantity:group.quantity}))});
     }
     function draw(){
+      persist();
       groupsHost.replaceChildren();
       transfer.disabled=busy||!groups.some(group=>group.rows.length);
       for(const area of ["Innen","Außen"]){
@@ -445,7 +459,7 @@
             const checkbox=append(label,"input");
             checkbox.type="checkbox";
             checkbox.checked=group.alternative===true;
-            checkbox.onchange=()=>{group.alternative=checkbox.checked;};
+            checkbox.onchange=()=>{group.alternative=checkbox.checked;persist();};
             label.append(" Alternative");
           }
           action(controls,"Gruppe entfernen",()=>{groups.splice(groups.indexOf(group),1);draw();});
@@ -465,6 +479,12 @@
         action(section,"+ Aufmaß in "+area,()=>{addGroup({area,title:"Aufmaß",quantity:"",unit:"m²",suggestions:[]});draw();});
       }
     }
+    function showDocument(document){
+      const details=append(sources,"details");
+      append(details,"summary",document.name+" · Aufmaß manuell zuordnen");
+      append(details,"pre",document.text).style.whiteSpace="pre-wrap";
+    }
+    documents.forEach(showDocument);
     function addIntake(intake,messages){
       for(const document of intake.documents){
         if(seen.has(document.hash))continue;
@@ -473,10 +493,8 @@
           for(const group of document.groups)addGroup(group);
           messages.push(document.name+": "+document.groups.length+" Aufmaßgruppen.");
         }else if(document.text){
-          const details=append(sources,"details");
-          append(details,"summary",document.name+" · Aufmaß manuell zuordnen");
-          const content=append(details,"pre",document.text);
-          content.style.whiteSpace="pre-wrap";
+          documents.push({name:document.name,text:document.text});
+          showDocument(document);
         }else {
           messages.push(document.name+(document.unreadable?": Datei konnte nicht gelesen werden.":": Kein auswertbares Aufmaß erkannt."));
         }
@@ -533,13 +551,17 @@
       renderPositions();renderOfferTotals();renderLivePreview();draw();
       status.textContent=positions.length+" Leistungen übernommen. Bitte Angebotsentwurf speichern.";
     };
-    const pending=window.kristaPendingOfferInquiry;
-    if(pending?.jobId===String(jobId)){
+    const pending=window.kristaPendingOfferInquiry, pendingKey="krista-offer-inquiry-pending:"+id;
+    let intakes=pending?.jobId===id?pending.intakes:null;
+    if(!intakes){try{intakes=JSON.parse(sessionStorage.getItem(pendingKey));}catch{}}
+    if(intakes?.length){
       const messages=[];
-      pending.intakes.forEach(intake=>addIntake(intake,messages));
-      panel.open=true;status.textContent=messages.join(" ");
-      delete window.kristaPendingOfferInquiry;
-    }
+      intakes.forEach(intake=>addIntake(intake,messages));
+      status.textContent=messages.join(" ");
+      if(persist()){try{sessionStorage.removeItem(pendingKey);}catch{}}
+      if(pending?.jobId===id)delete window.kristaPendingOfferInquiry;
+    }else status.textContent=state.message;
+    panel.open=groups.length>0||documents.length>0;
     draw();
   }
   function render(){const host=document.getElementById("kcv2Host");if(!host||!draft||document.getElementById("koffer"))return;document.querySelector('[data-bk-tab="calculation"]')?.replaceChildren(document.createTextNode("Kalkulation / Angebot"));const box=document.createElement("div");box.id="koffer";box.dataset.jobId=jobId;box.className="kcv2-card koffer";box.innerHTML=`<div class="kcv2-section-head"><div><h3>Angebot erstellen</h3><div class="koffer-note">Stammdaten und Terminwissen dieser Baustelle werden übernommen. Positionen und Preise stammen aus deinen Vorlagen.</div></div><span class="bk-source">${esc(job?.contactName||job?.customerMaster?.name||"Kunde noch ergänzen")}</span></div><textarea id="kofferIntro" class="koffer-intro">${esc(draft.intro||defaultIntro())}</textarea><h4>Leistungsumfang / Räume</h4><textarea id="kofferScope" class="koffer-intro" placeholder="z. B. Wohnzimmer, Küche und Gang – Wände und Decken; Türen ausgenommen.">${esc(draft.scopeDescription||"")}</textarea><label style="display:block;margin:10px 0;font-weight:800"><input id="kofferShowQty" type="checkbox" ${draft.showQuantities!==false?"checked":""}> Mengen und Einheiten (z. B. m²) im Kundenangebot anzeigen</label><h4>Angebotsart</h4><div class="koffer-choice">${TYPES.map(x=>`<button data-type="${x.id}" class="${draft.offerType===x.id?"active":""}">${esc(x.label)}</button>`).join("")}</div>${measurementUi()}<div id="kofferBathCalc" style="${["bathroom","bathroom_compact"].includes(draft.offerType)?"":"display:none"}">${bathCalculator()}</div>${pane("interior","Abdeckarbeiten – einmalig auswählen",checks(COVER,"coverSteps")+"<h4>Bauteile</h4>"+checks(PARTS,"parts")+"<h4>Beschichtung und Zusatzarbeiten</h4>"+checks(INTERIOR,"steps"))}${pane("facade","Fassadenarbeiten",checks(FACADE,"facadeSteps"))}${pane("bathroom","Bad – ausführliche Variante",checks(BATH,"bathroomSteps"))}${pane("bathroom_compact","Fugenloses Bad – kompakte Variante",checks(BATH_COMPACT,"bathroomCompactSteps"))}${pane("lime_plaster","Kalkputz",checks(LIME,"limeSteps"))}${pane("wdvs","WDVS – kurz",checks(WDVS,"wdvsSteps"))}<div id="kofferNotepad"></div><h4>Angebotspositionen</h4><div id="kofferPositions" class="koffer-preview"></div><div class="kcv2-savebar" style="position:static;margin-top:12px"><span id="kofferMsg" class="msg"></span><button id="kofferSave" type="button">Angebotsentwurf speichern</button></div>`;host.prepend(box);mountOfferInquiry(box);
