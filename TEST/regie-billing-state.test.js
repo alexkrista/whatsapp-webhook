@@ -85,3 +85,13 @@ test("keeps delivery numbers separate and excludes pending prices from invoicing
  assert.equal(result.openAmount,135);
  assert.deepEqual(result.openRows.map(x=>x.report.id).sort(),['ls','regie']);
 });
+
+test("deducts an unallocated part invoice from a Regie-only job to the cent",()=>{
+  const {performanceForJob}=require("../public/ui/regie-billing-state");
+  const job={calculation:{contractAmount:22000,kristaAmount:0,fixedCalculatedHours:0}};
+  const reports=[{source:"KRISTINE",reportNumber:"1",totalNet:26354}];
+  const invoice={invoiceNumber:"TR-1",kind:"TR",status:"issued",source:"KRISTINE",net:20201.16};
+  const result=performanceForJob(job,{reports,billing:{invoices:[invoice]}});
+  assert.equal(result.fixedPartialInvoiceNet,0);
+  assert.equal(result.amountToInvoice,6152.84);
+});
