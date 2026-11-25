@@ -54,6 +54,13 @@ function schedule(models,e,date){
 function workMinutes(segments){return segments.filter(s=>["work","up"].includes(s.type)&&!["900","901","902","903","904","911","930","945","946"].includes(String(s.unproductiveCode||""))&&!/urlaub|krank|feiertag|zeitausgleich/i.test(s.reason||"")).reduce((n,s)=>n+Math.max(0,(minute(s.to)??0)-(minute(s.from)??0)),0)}
 function withMorningPause(segments){
  const start=9*60,end=start+15;
+ const doctorOverlapsPause=segments.some(segment=>{
+  if(segment.type!=="up")return false;
+  const doctor=String(segment.unproductiveCode||"")==="902"||/^(arzt|doctor)$/i.test(segment.absenceType||"")||/\barzt(?:besuch|termin)?\b/i.test(segment.reason||"");
+  const from=minute(segment.from),to=minute(segment.to);
+  return doctor&&from!==null&&to!==null&&to>from&&from<end&&to>start;
+ });
+ if(doctorOverlapsPause)return segments;
  return segments.flatMap(segment=>{
   if(!["work","up"].includes(segment.type))return [segment];
   if(segment.type==="up"&&(["900","901","904","930"].includes(String(segment.unproductiveCode||""))||

@@ -77,6 +77,13 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
  assert.deepEqual(withPause.map(s=>[s.type,s.from,s.to]),[["work","07:00","09:00"],["pause","09:00","09:15"],["work","09:15","12:00"]]);
  assert.equal(policy.workMinutes(withPause),285);
  assert.deepEqual(policy.withMorningPause(withPause),withPause);
+ const doctor={id:"doctor",type:"up",from:"08:56",to:"09:30",unproductiveCode:"902",reason:"Arzt"};
+ assert.deepEqual(policy.withMorningPause([doctor]),[doctor]);
+ const partial=[{...doctor,to:"09:05"}, {...workBlock,from:"09:05"}];
+ assert.deepEqual(policy.withMorningPause(partial),partial,"a doctor visit during any part of the window suppresses the automatic pause");
+ for(const outside of [{from:"08:56",to:"09:00"},{from:"09:15",to:"09:30"}]){
+   assert.ok(policy.withMorningPause([{...doctor,...outside},workBlock]).some(s=>s.type==="pause"),"touching the window is not an overlap");
+ }
  for(const [code,reason] of [["913","Werkstatt"],["903","Fortbildung"],["","Schulung"]]){
    const activity={id:code||"training",type:"up",from:"07:00",to:"12:00",unproductiveCode:code,reason};
    const split=policy.withMorningPause([activity]);
