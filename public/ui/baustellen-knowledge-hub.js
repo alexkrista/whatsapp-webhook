@@ -401,22 +401,30 @@ function groupRegieComparisonRows(rows = []) {
             const {intake}=await api("/admin/api/offer-inquiry",{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:file});
             if(newOfferDraft!==draft)return;
             draft.inquiries.push(intake);
-            const {name,site={},owner={},architect={},deadline,start,submissionEmail}=intake.project||{};
+            const {name,site={},owner={},architect={},deadline,start,submissionEmail,hints=[]}=intake.project||{};
             fill("bkJobName",name);
             address("bkSite",site);
             fill("bkOwnerCustomer",owner.name);
             address("bkHome",owner);
             fill("bkArchitectCompany",architect.name);
+            fill("bkArchitectTitle",architect.title);
+            fill("bkArchitectFirstName",architect.firstName);
+            fill("bkArchitectLastName",architect.lastName);
             address("bkArchitect",architect);
             fill("bkArchitectPhone",architect.phone);
-            if(submissionEmail&&architect.name)fill("bkArchitectEmail",submissionEmail);
-            if(!site.street||!owner.name||!architect.name)notes.push("Bitte fehlende Stammdaten ergänzen.");
+            fill("bkArchitectEmail",architect.email||(architect.name?submissionEmail:""));
+            const missing=[];
+            if(!site.street||!site.house)missing.push("Baustellenstraße und Hausnummer");
+            if(!owner.name)missing.push("Bauherrschaft");
+            if(!architect.name&&!architect.lastName)missing.push("Architekt");
+            if(missing.length)notes.push("Noch offen: "+missing.join(", ")+".");
+            notes.push(...hints);
             notes.push([intake.subject||file.name,deadline&&"Angebotsfrist: "+deadline,start&&"Ausführung: "+start].filter(Boolean).join(" · "));
           }catch(error){notes.push(file.name+": "+error.message);}
         }
       }finally{
         if(newOfferDraft===draft){
-          status.textContent=notes.join(" / ");
+          status.textContent=[draft.inquiries.length+" Mail(s) eingelesen.",...new Set(notes)].join(" / ");
           save.disabled=false;input.disabled=false;input.value="";
         }
       }

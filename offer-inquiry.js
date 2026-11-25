@@ -97,7 +97,7 @@ function onlvMeasurements(xml) {
   return groups.slice(0, 250);
 }
 
-function projectDetails(cover, subject) {
+function projectDetails(cover, subject, mail = {}) {
   const lines = cover.split(/\r?\n/).map(line => line.trim());
   const find = pattern => lines.findIndex(line => pattern.test(line));
   const value = (index, pattern) => index < 0 ? "" : lines[index].replace(pattern, "").trim();
@@ -111,13 +111,22 @@ function projectDetails(cover, subject) {
   };
   const architectLine = value(architect, /^(Planung|Architekt(?:urbüro)?):/i);
   const architectParts = architectLine.match(/^(.*),\s*([^,]+),\s*((?:A[- ]?)?\d{4}\s+.+)$/);
+  const signature = String(mail.body || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const architectIndex = signature.findLastIndex(line => /^Architekt(?:in)?\s+(?:DI|Dipl[.-]?Ing\.?)\s+\p{L}/iu.test(line));
+  const signer = architectIndex < 0 ? null : signature[architectIndex].match(/^Architekt(?:in)?\s+(DI|Dipl[.-]?Ing\.?)\s+(.+?)\s+(\S+)$/iu);
+  const signatureAddress = signer ? address(signature[architectIndex + 1], signature[architectIndex + 2]) : {};
+  const signaturePhone = signer && /^\+?[\d ()/-]{7,}$/.test(signature[architectIndex + 3] || "") ? signature[architectIndex + 3] : "";
+  const subjectHint = subject?.match(/^(?:EFH|Einfamilienhaus)\s+([\p{L}-]+)\s+([\p{L}-]+)$/iu);
+  const reportedDeadline = signature.find(line => /(?:anbot|angebot|abgabe)/i.test(line) && /\bbis\s*\d/i.test(line))?.match(/\bbis\s*(\d{1,2}\.\d{1,2}\.\d{2,4})\b/i)?.[1] || "";
+  const reportedStart = signature.find(line => /Ausführung\s+(?:ab|ab ca\.)/i.test(line))?.match(/Ausführung\s+(.+?)\s*\.?$/i)?.[1] || "";
   return {
     name: value(project, /^Bauvorhaben:/i) || subject,
-    site: project < 0 ? {} : address(lines[project + 1], lines[project + 2]),
-    owner: owner < 0 ? {} : { name: value(owner, /^(Auftraggeber|Bauherrschaft):/i), ...address(lines[owner + 1], lines[owner + 2]) },
-    architect: { name: architectParts?.[1] || architectLine, ...address(architectParts?.[2], architectParts?.[3]), phone: architect < 0 ? "" : (lines[architect + 1]?.match(/^Tel\.?\s*:?\s*(.*)$/i)?.[1] || "") },
-    deadline: value(find(/^Angebotsfrist(?:\/Abgabetermin)?:/i), /^Angebotsfrist(?:\/Abgabetermin)?:/i),
-    start: value(find(/^Leistungsbeginn:/i), /^Leistungsbeginn:/i),
+    site: project < 0 ? { city: subjectHint?.[2] || "" } : address(lines[project + 1], lines[project + 2]),
+    owner: owner < 0 ? { name: subjectHint?.[1] || "" } : { name: value(owner, /^(Auftraggeber|Bauherrschaft):/i), ...address(lines[owner + 1], lines[owner + 2]) },
+    architect: !architectLine && signer ? { title: signer[1], firstName: signer[2], lastName: signer[3], ...signatureAddress, phone: signaturePhone, email: mail.senderEmail || "" } : { name: architectParts?.[1] || architectLine, ...address(architectParts?.[2], architectParts?.[3]), phone: architect < 0 ? "" : (lines[architect + 1]?.match(/^Tel\.?\s*:?\s*(.*)$/i)?.[1] || "") },
+    hints: project < 0 && subjectHint ? ["Bauherrschaft und Baustellenort aus dem Betreff vorgeschlagen. Bitte bestätigen."] : [],
+    deadline: value(find(/^Angebotsfrist(?:\/Abgabetermin)?:/i), /^Angebotsfrist(?:\/Abgabetermin)?:/i) || reportedDeadline,
+    start: value(find(/^Leistungsbeginn:/i), /^Leistungsbeginn:/i) || reportedStart,
     submissionEmail: submission < 0 ? "" : (lines[submission + 1]?.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)?.[0] || ""),
   };
 }
@@ -148,7 +157,7 @@ async function readInquiry(buffer) {
   if (structuredDocument) {
     const pdf = mail.attachments.find(item => item.name.toLowerCase() === structuredDocument.name.replace(/\.onlv$/i, ".pdf").toLowerCase());
     const cover = pdf ? await pdfText(getMsgAttachment(buffer, pdf.index).content, 1).catch(() => "") : "";
-    return { subject: mail.subject, sender: mail.senderName || mail.senderEmail, project: projectDetails(cover || mail.body, mail.subject), documents };
+    return { subject: mail.subject, sender: mail.senderName || mail.senderEmail, project: projectDetails(cover || mail.body, mail.subject, mail), documents };
   }
   for (const metadata of mail.attachments.filter(item => /\.pdf$/i.test(item.name)).slice(0, 12)) {
     const attachment = getMsgAttachment(buffer, metadata.index);
@@ -160,7 +169,7 @@ async function readInquiry(buffer) {
     } catch { /* Keep the attachment listed for manual review. */ }
     documents.push({ name: attachment.name, hash, text: source, groups: measurements(source) });
   }
-  return { subject: mail.subject, sender: mail.senderName || mail.senderEmail, project: projectDetails(documents.map(document => document.text).find(text => /^Bauvorhaben:/im.test(text)) || mail.body, mail.subject), documents };
+  return { subject: mail.subject, sender: mail.senderName || mail.senderEmail, project: projectDetails(documents.map(document => document.text).find(text => /^Bauvorhaben:/im.test(text)) || mail.body, mail.subject, mail), documents };
 }
 
 module.exports = { readInquiry, measurements, onlvMeasurements, projectDetails };
