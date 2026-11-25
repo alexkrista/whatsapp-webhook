@@ -2909,7 +2909,7 @@ const open = taskId
       source="Lohnzeit korrigiert";
       automatic ||= schedule.fixedSegments !== null || context.reopenings.some(r=>r.employeeId===employeeId&&r.month===date.slice(0,7));
     }
-    if(!office&&!closed)segments=payrollModel.withMorningPause(segments);
+    if(!office&&!closed&&!correction?.pauseRemovalReason)segments=payrollModel.withMorningPause(segments);
     if(closed){segments=closed.days.find(d=>d.date===date)?.segments||[];source="Abgeschlossen";automatic=true}
     const targetMinutes=closed?.report?.days?.find(d=>d.date===date)?.targetMinutes??(employeeBelongsToDay(employee,date)?schedule.targetMinutes:0);
     return {date,employeeId,segments,originalSegments:original,released:automatic||Boolean(release?.released&&!release.returned),monthClosed:Boolean(closed),closedAt:closed?.closedAt||null,targetMinutes,regularWeekMinutes:schedule.regularWeekMinutes,contractOvertimeWeekMinutes:schedule.contractOvertimeWeekMinutes,modelName:closed?.report?.modelLabel||schedule.model?.name||"Zeitmodell",modelId:schedule.model?.id||"",payrollFixed:schedule.fixedSegments!==null||context.reopenings.some(r=>r.employeeId===employeeId&&r.month===date.slice(0,7)),payrollAutomatic:automatic,source,workingMinutes:payrollModel.workMinutes(segments),correction:correction?{history:correction.history,reason:correction.reason,undoCount:closed?0:payrollUndoSteps(correction).length,undoVersion:payrollUndoVersion(correction)}:null};
@@ -3004,8 +3004,8 @@ const open = taskId
         const step=payrollUndoSteps(row).at(-1);
         if(!step||payrollUndoVersion(row)!==req.body.undoVersion)return res.status(409).json({ok:false,error:"Rückgängig-Stand hat sich geändert. Bitte die Ansicht neu laden."});
         const reason="Lohnzeitkorrektur rückgängig gemacht";
-        row.history.push({at:now,by,reason,before:row.segments,after:step.before,undo:true});
-        Object.assign(row,{segments:step.before,reason,updatedAt:now,updatedBy:by});
+        row.history.push({at:now,by,reason,before:row.segments,after:step.before,beforePauseRemovalReason:row.pauseRemovalReason||"",undo:true});
+        Object.assign(row,{segments:step.before,pauseRemovalReason:step.beforePauseRemovalReason||"",reason,updatedAt:now,updatedBy:by});
         await writeJson(PAYROLL_CORRECTIONS,context.corrections);
         return res.json({ok:true,segments:monthlyDay(context,employee,date).segments});
       }
@@ -3018,8 +3018,12 @@ const open = taskId
         if(!["work","up","lunch","pause"].includes(r.type)||a===null||b===null||b<=a||(i&&payrollModel.minute(segments[i-1].to)>a))return res.status(400).json({ok:false,error:"Zeitblöcke sind ungültig oder überschneiden sich."});
       }
       const before=monthlyDay(context,employee,date).segments;
+      const requestedPauseRemoval=req.body?.pauseRemovalReason;
+      const beforePauseRemovalReason=row?.pauseRemovalReason||"";
+      const pauseRemovalReason=typeof requestedPauseRemoval==="string"?requestedPauseRemoval.trim().slice(0,300):beforePauseRemovalReason;
+      if(typeof requestedPauseRemoval==="string"&&pauseRemovalReason.length<5)return res.status(400).json({ok:false,error:"Bitte begründen, warum die Morgenpause entfällt."});
       if(!row){row={employeeId,date,history:[]};context.corrections.push(row)}
-      row.history.push({at:now,by,reason,before,after:segments});Object.assign(row,{segments,reason,updatedAt:now,updatedBy:by});
+      row.history.push({at:now,by,reason,before,after:segments,beforePauseRemovalReason,pauseRemovalReason});Object.assign(row,{segments,pauseRemovalReason,reason,updatedAt:now,updatedBy:by});
       await writeJson(PAYROLL_CORRECTIONS,context.corrections);
       res.json({ok:true,segments:monthlyDay(context,employee,date).segments,history:row.history});
     }catch(error){res.status(500).json({ok:false,error:String(error.message||error)})}

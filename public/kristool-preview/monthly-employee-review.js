@@ -99,7 +99,7 @@
       for(let i=0;i<sorted.length;i++){const s=sorted[i];if(!s.from||!s.to||minute(s.to)<=minute(s.from)||(i&&minute(sorted[i-1].to)>minute(s.from)))throw new Error(date+": Zeiten prüfen – offen, ungültig oder überlappend.")}
     }
     for(const [date,draft] of Object.entries(c.drafts)){
-      await request("/kristine/api/monthly-payroll/"+encodeURIComponent(c.id)+"/"+date,{method:"PUT",body:JSON.stringify({employeeName:c.employee.name,segments:draft.segments,reason:draft.reason,correctedBy:"Bettina / Büro"})});
+      await request("/kristine/api/monthly-payroll/"+encodeURIComponent(c.id)+"/"+date,{method:"PUT",body:JSON.stringify({employeeName:c.employee.name,segments:draft.segments,reason:draft.reason,pauseRemovalReason:draft.pauseRemovalReason,correctedBy:"Bettina / Büro"})});
       delete c.drafts[date];message(date+" gespeichert.");
     }
     window.KrisMonthly.invalidate();await load();message("Gespeichert. Der geänderte Stand ist sichtbar. Der Monat bleibt offen.");
@@ -144,7 +144,24 @@
     if(b.dataset.reviewEdit){editor(b.dataset.reviewEdit);return}
     const row=b.closest("[data-date]");
     if(row&&b.hasAttribute("data-review-add")){capture(row);const segments=current.drafts[row.dataset.date].segments,last=segments.at(-1);segments.push({id:"review_"+Date.now(),type:"up",from:last?.to||"07:00",to:"",reason:"Büro",unproductiveCategory:"other",unproductiveCode:""});editor(row.dataset.date);return}
-    if(row&&b.hasAttribute("data-review-remove")){capture(row);current.drafts[row.dataset.date].segments.splice(+b.dataset.reviewRemove,1);editor(row.dataset.date);return}
+    if(row&&b.hasAttribute("data-review-remove")){
+      capture(row);
+      const draft=current.drafts[row.dataset.date],index=+b.dataset.reviewRemove;
+      const segment=draft.segments[index];
+      const morningPause=segment.type==="pause"&&minute(segment.from)<555&&minute(segment.to)>540;
+      if(morningPause){
+        if(!confirm("Morgenpause wirklich löschen? Der automatische Pausenabzug entfällt an diesem Tag."))return;
+        const reason=prompt("Warum entfällt die Morgenpause?",draft.pauseRemovalReason||"");
+        if(reason===null)return;
+        if(reason.trim().length<5)return message("Bitte einen nachvollziehbaren Grund für die fehlende Morgenpause eingeben.",true);
+        draft.pauseRemovalReason=reason.trim();
+      }
+      const source=morningPause&&segment.morningPauseSource;
+      if(source)draft.segments.splice(index,1,{...source,id:segment.id+"_restored",from:segment.from,to:segment.to});
+      else draft.segments.splice(index,1);
+      editor(row.dataset.date);
+      return;
+    }
     if(b.dataset.reviewBalance){
       if(dirty())return message("Bitte Tagesaenderungen zuerst speichern.",true);
       const number=label=>{const value=prompt(label,"0");return value===null?null:Number(value.replace(",","."))};

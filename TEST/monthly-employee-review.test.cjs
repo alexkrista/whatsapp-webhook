@@ -72,11 +72,31 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
    assert.equal(restored.segments[0].to,expected);
    assert.equal(restored.correction.undoCount,count-1);
  }
+ const noPause=[{type:"work",from:"08:00",to:"10:00"}];
+ const saveNonOffice=body=>call("put","/kristine/api/monthly-payroll/:employeeId/:date",{params:{employeeId:"p",date:normalDate},body});
+ const getNonOffice=async()=> (await days("p")).find(d=>d.date===normalDate);
+ const correctionBody={reason:"Tageszeit korrigiert",segments:noPause};
+ assert.equal((await saveNonOffice(correctionBody)).statusCode,200);
+ assert.equal((await getNonOffice()).workingMinutes,105);
+ assert.equal((await saveNonOffice({...correctionBody,pauseRemovalReason:" "})).statusCode,400);
+ assert.equal((await saveNonOffice({...correctionBody,pauseRemovalReason:"Kundenbesprechung ohne Unterbrechung"})).statusCode,200);
+ const withoutPause=await getNonOffice();
+ assert.equal(withoutPause.workingMinutes,120);
+ assert.equal(withoutPause.correction.history.at(-1).pauseRemovalReason,"Kundenbesprechung ohne Unterbrechung");
+ assert.equal((await saveNonOffice({undoVersion:withoutPause.correction.undoVersion})).statusCode,200);
+ assert.equal((await getNonOffice()).workingMinutes,105);
  const workBlock={id:"morning",type:"work",from:"07:00",to:"12:00",jobId:"123"};
  const withPause=policy.withMorningPause([workBlock]);
  assert.deepEqual(withPause.map(s=>[s.type,s.from,s.to]),[["work","07:00","09:00"],["pause","09:00","09:15"],["work","09:15","12:00"]]);
  assert.equal(policy.workMinutes(withPause),285);
  assert.deepEqual(policy.withMorningPause(withPause),withPause);
+ const doctor={id:"doctor",type:"up",from:"08:56",to:"09:30",unproductiveCode:"902",reason:"Arzt"};
+ assert.deepEqual(policy.withMorningPause([doctor]),[doctor]);
+ const partial=[{...doctor,to:"09:05"}, {...workBlock,from:"09:05"}];
+ assert.deepEqual(policy.withMorningPause(partial),partial,"a doctor visit during any part of the window suppresses the automatic pause");
+ for(const outside of [{from:"08:56",to:"09:00"},{from:"09:15",to:"09:30"}]){
+   assert.ok(policy.withMorningPause([{...doctor,...outside},workBlock]).some(s=>s.type==="pause"),"touching the window is not an overlap");
+ }
  for(const [code,reason] of [["913","Werkstatt"],["903","Fortbildung"],["","Schulung"]]){
    const activity={id:code||"training",type:"up",from:"07:00",to:"12:00",unproductiveCode:code,reason};
    const split=policy.withMorningPause([activity]);
