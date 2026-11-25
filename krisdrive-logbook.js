@@ -878,6 +878,18 @@ function registerKrisdriveLogbook(app, options = {}) {
       const current = resolvedRows(Object.values(state.records)).find(row => row.id === record.data.id);
       if (employeeId && !employee && current.driver?.employeeId !== employeeId) throw fail("Mitarbeiter nicht gefunden oder inaktiv.");
       const edits = { ...record.edits, category: body.category, driver: employee ? { employeeId, employeeName: employee.name, source: "logbook" } : employeeId ? current.driver : null };
+      for (const key of ["startedAt", "closedAt"]) {
+        if (!Object.hasOwn(body, key)) continue;
+        const local = String(body[key]);
+        if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(local)) throw fail("Bitte Datum und Uhrzeit eingeben.");
+        const expected = local.length === 16 ? local + ":00" : local;
+        const formatter = new Intl.DateTimeFormat("sv-SE", {timeZone:ZONE, year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit", hourCycle:"h23"});
+        const candidates = ["+01:00", "+02:00"].map(offset => iso(expected + offset)).filter(value => value && formatter.format(new Date(value)).replace(" ", "T") === expected);
+        if (candidates.length !== 1) throw fail("Diese Uhrzeit ist wegen der Zeitumstellung nicht eindeutig oder ungültig.");
+        edits[key] = candidates[0];
+      }
+      if ((edits.closedAt || record.data.closedAt) <= (edits.startedAt || record.data.startedAt) &&
+          (Object.hasOwn(body,"startedAt") || Object.hasOwn(body,"closedAt"))) throw fail("Das Fahrtende muss nach dem Beginn liegen.");
       if (body.category !== "private") {
         for (const key of ["startLocation", "endLocation", "purpose"]) {
           if (Object.hasOwn(body, key)) edits[key] = key === "purpose" ? text(body[key], 1000) : streetAndTown(body[key]);
@@ -931,7 +943,7 @@ function registerKrisdriveLogbook(app, options = {}) {
   app.get(api + "/export.:format", route(async (req, res) => {
     if (!["csv", "pdf"].includes(req.params.format)) throw fail("Unbekanntes Exportformat.");
     const data = await report(req.query);
-    if (data.rows.some(row => row.timeConflict)) throw fail("Export gesperrt. Bitte zuerst widersprüchliche Fahrtzeiten prüfen.", 409);
+    if (data.rows.some(row => row.timeConflict)) data.warning = [data.warning,"Vorlaeufig: Widerspruechliche Fahrtzeiten; betroffene Kilometer sind in der Summe nicht enthalten."].filter(Boolean).join(" ");
     const file = `Fahrtenbuch-${data.vehicle.plate || data.vehicle.id}-${data.range.from}-${data.range.to}`.replace(/[^A-Za-z0-9_-]/g, "_");
     res.set("Content-Disposition", `attachment; filename="${file}.${req.params.format}"`);
     if (req.params.format === "csv") res.type("text/csv; charset=utf-8").send(createCsv(data));
