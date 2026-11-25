@@ -2866,6 +2866,19 @@ const open = taskId
     ]);
     return {employees,models,events,states,releases,assignments,corrections,closures,holidays,reopenings};
   }
+  function payrollUndoSteps(row) {
+    const steps=[];
+    for(const entry of row?.history||[]){
+      if(row.undoResetAt && entry.at<row.undoResetAt)continue;
+      if(entry.undo)steps.pop();
+      else if(Array.isArray(entry.before)){
+        steps.push(entry);
+        if(steps.length>3)steps.shift();
+      }
+    }
+    return steps;
+  }
+  function payrollUndoVersion(row){return row ? row.updatedAt+":"+row.history.length : "";}
   function monthlyDay(context,employee,date) {
     const employeeId=String(employee.id||employee.employeeId),schedule=payrollModel.schedule(context.models,employee,date);
     const closed=context.closures.find(r=>r.employeeId===employeeId&&r.month===date.slice(0,7));
@@ -2899,7 +2912,7 @@ const open = taskId
     if(!office&&!closed)segments=payrollModel.withMorningPause(segments);
     if(closed){segments=closed.days.find(d=>d.date===date)?.segments||[];source="Abgeschlossen";automatic=true}
     const targetMinutes=closed?.report?.days?.find(d=>d.date===date)?.targetMinutes??(employeeBelongsToDay(employee,date)?schedule.targetMinutes:0);
-    return {date,employeeId,segments,originalSegments:original,released:automatic||Boolean(release?.released&&!release.returned),monthClosed:Boolean(closed),closedAt:closed?.closedAt||null,targetMinutes,regularWeekMinutes:schedule.regularWeekMinutes,contractOvertimeWeekMinutes:schedule.contractOvertimeWeekMinutes,modelName:closed?.report?.modelLabel||schedule.model?.name||"Zeitmodell",modelId:schedule.model?.id||"",payrollFixed:schedule.fixedSegments!==null||context.reopenings.some(r=>r.employeeId===employeeId&&r.month===date.slice(0,7)),payrollAutomatic:automatic,source,workingMinutes:payrollModel.workMinutes(segments),correction:correction?{history:correction.history,reason:correction.reason}:null};
+    return {date,employeeId,segments,originalSegments:original,released:automatic||Boolean(release?.released&&!release.returned),monthClosed:Boolean(closed),closedAt:closed?.closedAt||null,targetMinutes,regularWeekMinutes:schedule.regularWeekMinutes,contractOvertimeWeekMinutes:schedule.contractOvertimeWeekMinutes,modelName:closed?.report?.modelLabel||schedule.model?.name||"Zeitmodell",modelId:schedule.model?.id||"",payrollFixed:schedule.fixedSegments!==null||context.reopenings.some(r=>r.employeeId===employeeId&&r.month===date.slice(0,7)),payrollAutomatic:automatic,source,workingMinutes:payrollModel.workMinutes(segments),correction:correction?{history:correction.history,reason:correction.reason,undoCount:closed?0:payrollUndoSteps(correction).length,undoVersion:payrollUndoVersion(correction)}:null};
   }
   function monthCorrection(context, employeeId, month, days, balances) {
     const reopening = context.reopenings.findLast(row => row.employeeId === employeeId && row.month === month);
@@ -2984,7 +2997,19 @@ const open = taskId
       if(await closedMonthFor(employeeId,date))return res.status(409).json({ok:false,error:"Monat abgeschlossen – Stunden gesperrt. Zuerst ausdrücklich mit Begründung wieder öffnen."});
       const context=await monthlyContext(),employee=context.employees.find(e=>String(e.id||e.employeeId)===employeeId);
       if(!employee)return res.status(404).json({ok:false,error:"Mitarbeiter nicht gefunden."});
-      const reason=String(req.body?.reason||"").trim().slice(0,300),by=String(req.body?.correctedBy||"Bettina / Büro").slice(0,120);
+      const by=String(req.body?.correctedBy||"Bettina / Büro").slice(0,120);
+      let row=context.corrections.find(r=>r.employeeId===employeeId&&r.date===date);
+      const now=new Date().toISOString();
+      if(req.body?.undoVersion){
+        const step=payrollUndoSteps(row).at(-1);
+        if(!step||payrollUndoVersion(row)!==req.body.undoVersion)return res.status(409).json({ok:false,error:"Rückgängig-Stand hat sich geändert. Bitte die Ansicht neu laden."});
+        const reason="Lohnzeitkorrektur rückgängig gemacht";
+        row.history.push({at:now,by,reason,before:row.segments,after:step.before,undo:true});
+        Object.assign(row,{segments:step.before,reason,updatedAt:now,updatedBy:by});
+        await writeJson(PAYROLL_CORRECTIONS,context.corrections);
+        return res.json({ok:true,segments:monthlyDay(context,employee,date).segments});
+      }
+      const reason=String(req.body?.reason||"").trim().slice(0,300);
       if(reason.length<5)return res.status(400).json({ok:false,error:"Bitte einen nachvollziehbaren Änderungsgrund eingeben."});
       if(!Array.isArray(req.body?.segments))return res.status(400).json({ok:false,error:"Zeitblöcke fehlen."});
       const segments=req.body.segments.map((r,i)=>({id:String(r.id||"payroll_"+Date.now()+"_"+i),type:r.type,from:String(r.from||""),to:String(r.to||""),reason:String(r.reason||"").slice(0,140),unproductiveCategory:String(r.unproductiveCategory||"").slice(0,40),unproductiveCode:String(r.unproductiveCode||"").slice(0,12),absenceType:String(r.absenceType||"").slice(0,40),jobId:"",jobName:""})).sort((a,b)=>String(a.from).localeCompare(String(b.from)));
@@ -2992,8 +3017,7 @@ const open = taskId
         const r=segments[i],a=payrollModel.minute(r.from),b=payrollModel.minute(r.to);
         if(!["work","up","lunch","pause"].includes(r.type)||a===null||b===null||b<=a||(i&&payrollModel.minute(segments[i-1].to)>a))return res.status(400).json({ok:false,error:"Zeitblöcke sind ungültig oder überschneiden sich."});
       }
-      let row=context.corrections.find(r=>r.employeeId===employeeId&&r.date===date);
-      const before=monthlyDay(context,employee,date).segments,now=new Date().toISOString();
+      const before=monthlyDay(context,employee,date).segments;
       if(!row){row={employeeId,date,history:[]};context.corrections.push(row)}
       row.history.push({at:now,by,reason,before,after:segments});Object.assign(row,{segments,reason,updatedAt:now,updatedBy:by});
       await writeJson(PAYROLL_CORRECTIONS,context.corrections);
@@ -3017,7 +3041,7 @@ const open = taskId
       // Seed only fixed payroll times. Subsequent payroll corrections never rewrite project history.
       for(const day of closed.days||[]){
         const segments=day.segments||[],existing=corrections.find(r=>r.employeeId===employeeId&&r.date===day.date);
-        if(existing)Object.assign(existing,{segments,reason,updatedAt:now,updatedBy:reviewer});
+        if(existing)Object.assign(existing,{segments,reason,updatedAt:now,updatedBy:reviewer,undoResetAt:now});
         else corrections.push({employeeId,date:day.date,segments,reason,updatedAt:now,updatedBy:reviewer,history:[]});
       }
       await writeJson(MONTH_REOPENINGS,history);

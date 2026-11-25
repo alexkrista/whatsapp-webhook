@@ -61,6 +61,17 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
  assert.deepEqual(saved.originalSegments,regularDay.originalSegments);
  assert.equal(saved.released,true);
  assert.equal(saved.monthClosed,false);
+ const saveDay=(body)=>call("put","/kristine/api/monthly-payroll/:employeeId/:date",{params:{employeeId:"b",date:normalDate},body});
+ for(const to of ["10:30","11:00","11:30"]){assert.equal((await saveDay({reason:"Weitere Korrektur",segments:[{type:"up",from:"07:30",to}]})).statusCode,200);}
+ for(const [count,expected] of [[3,"11:00"],[2,"10:30"],[1,"09:00"]]){
+   const before=(await days("b")).find(d=>d.date===normalDate);
+   assert.equal(before.correction.undoCount,count);
+   assert.equal((await saveDay({undoVersion:before.correction.undoVersion})).statusCode,200);
+   assert.equal((await saveDay({undoVersion:before.correction.undoVersion})).statusCode,409);
+   const restored=(await days("b")).find(d=>d.date===normalDate);
+   assert.equal(restored.segments[0].to,expected);
+   assert.equal(restored.correction.undoCount,count-1);
+ }
  const workBlock={id:"morning",type:"work",from:"07:00",to:"12:00",jobId:"123"};
  const withPause=policy.withMorningPause([workBlock]);
  assert.deepEqual(withPause.map(s=>[s.type,s.from,s.to]),[["work","07:00","09:00"],["pause","09:00","09:15"],["work","09:15","12:00"]]);
