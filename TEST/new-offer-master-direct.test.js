@@ -160,7 +160,7 @@ test("incoming measurements survive a second editor mount and a page reload", ()
     w.sessionStorage.setItem("krista-offer-inquiry-pending:26111",JSON.stringify([{subject:"Anfrage",documents:[{
       hash:"sample",name:"Wohnhaus.pdf",groups:[{area:"Innen",title:"Wände",quantity:250.77,unit:"m²",suggestions:["Kalkdünnputz"]}],
     }]}]));
-    const reloadScript=()=>w.eval("(()=>{const offerPositionTemplates=[{text:\"Sockelprofil\",unit:\"lfm\"}];"+source.slice(start,end)+";window.mountInquiry=mountOfferInquiry;})()");
+    const reloadScript=()=>w.eval("(()=>{const draft={measurement:{hourlyRate:60}};const calculatedPrice=p=>p.laborHoursPerUnit*p.hourlyRate+p.materialCostPerUnit;const offerPositionTemplates=[{text:\"Sockelprofil\",unit:\"lfm\"}];"+source.slice(start,end)+";window.mountInquiry=mountOfferInquiry;})()");
     const editor=w.document.getElementById("koffer");
     const mount=()=>{
       editor.querySelector("details")?.remove();
@@ -192,6 +192,15 @@ test("incoming measurements survive a second editor mount and a page reload", ()
       input.value=value;
       input.dispatchEvent(new w.Event("input"));
     };
+    const rowSelect=editor.querySelector("article select");
+    rowSelect.value="free";
+    rowSelect.dispatchEvent(new w.Event("change"));
+    const calculator=editor.querySelector(".koffer-inquiry-calc");
+    assert.equal(calculator.hidden,false);
+    Array.from(calculator.querySelectorAll("button")).find(button=>button.textContent==="+ Arbeitsschritt").click();
+    const minutes=Array.from(calculator.querySelectorAll("label")).find(label=>label.textContent.includes("Minuten je Einheit")).querySelector("input");
+    change(minutes,"30");
+    assert.match(editor.querySelector(".koffer-inquiry-amount").textContent,/7\.523,10/);
     let rows=editor.querySelectorAll(".koffer-inquiry-row");
     change(rows[0].querySelectorAll('input[type="number"]')[0],"10");
     change(rows[0].querySelectorAll('input[type="number"]')[1],"2");

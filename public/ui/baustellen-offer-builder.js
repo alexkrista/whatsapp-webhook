@@ -409,7 +409,11 @@
         .koffer-inquiry-heading{display:flex;align-items:baseline;gap:8px}
         .koffer-inquiry-subgroup>summary{cursor:pointer;font-weight:700;font-variant-numeric:tabular-nums}
         .koffer-inquiry-row .koffer-inquiry-free{grid-column:1/-1}
-        .koffer-inquiry-row .koffer-inquiry-free[hidden]{display:none}
+        .koffer-inquiry-row .koffer-inquiry-free[hidden],.koffer-inquiry-calc[hidden]{display:none}
+        .koffer-inquiry-calc{grid-column:1/-1;border:1px solid #d2cec4;border-radius:7px;padding:8px}
+        .koffer-inquiry-calc>summary{cursor:pointer;font-weight:700}
+        .koffer-inquiry-calc-line{display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin:8px 0}
+        .koffer-inquiry-calc-line>label{flex:1 1 105px}
         .koffer-inquiry-row select{padding:7px;border:1px solid #d2cec4;border-radius:7px;background:white;text-overflow:ellipsis}
         @media(max-width:740px){.koffer-inquiry-row{grid-template-columns:repeat(2,minmax(0,1fr))}.koffer-inquiry-chooser{grid-column:1/-1}}
       `;
@@ -480,6 +484,56 @@
     }
     function addGroup(group){
       groups.push({...group,id:"mail-"+crypto.randomUUID(),rows:group.suggestions.map(text=>({text,quantity:group.quantity}))});
+    }
+    function mountInquiryCalculation(line,row,price){
+      const panel=append(line,"details");
+      panel.className="koffer-inquiry-calc";
+      append(panel,"summary","Kalkulation dieser Position");
+      panel.open=row.calculationOpen===true;
+      panel.ontoggle=()=>{row.calculationOpen=panel.open;persist();};
+      const defaults=()=>({
+        workSteps:[],materials:[],
+        hourlyRate:Number(draft?.measurement?.hourlyRate??75),
+        materialMarkupPct:Number(draft?.measurement?.materialMarkupPct??15),
+        adjustmentPct:0,
+      });
+      const model=()=>row.calculation??=defaults();
+      const controls=append(panel,"div");
+      function recalculate(){
+        const data=model();
+        data.laborHoursPerUnit=+(data.workSteps.reduce((sum,item)=>sum+(+item.minutes||0),0)/60).toFixed(4);
+        data.materialCostPerUnit=+data.materials.reduce((sum,item)=>sum+(+item.unitPrice||0)*(+item.consumption||0),0).toFixed(2);
+        row.unitPrice=+calculatedPrice(data).toFixed(2);
+        price.value=row.unitPrice;
+        updatePrices();persist();
+      }
+      function drawCalculator(){
+        controls.replaceChildren();
+        const data=row.calculation||defaults();
+        const rates=append(controls,"div");rates.className="koffer-inquiry-calc-line";
+        field(rates,"Stundensatz €",data.hourlyRate,value=>{model().hourlyRate=Number(value);recalculate();},"number");
+        field(rates,"Materialaufschlag %",data.materialMarkupPct,value=>{model().materialMarkupPct=Number(value);recalculate();},"number");
+        field(rates,"Zu-/Abschlag %",data.adjustmentPct,value=>{model().adjustmentPct=Number(value);recalculate();},"number").min="-100";
+        for(const item of data.workSteps){
+          const fields=append(controls,"div");fields.className="koffer-inquiry-calc-line";
+          field(fields,"Arbeitsschritt",item.text,value=>{item.text=value;});
+          field(fields,"Minuten je Einheit",item.minutes,value=>{item.minutes=Number(value);recalculate();},"number");
+          action(fields,"Entfernen",()=>{data.workSteps.splice(data.workSteps.indexOf(item),1);recalculate();drawCalculator();});
+        }
+        action(controls,"+ Arbeitsschritt",()=>{model().workSteps.push({text:"",minutes:0});persist();drawCalculator();});
+        for(const item of data.materials){
+          const fields=append(controls,"div");fields.className="koffer-inquiry-calc-line";
+          field(fields,"Material",item.name,value=>{item.name=value;}).setAttribute("list","kofferMaterialMaster");
+          field(fields,"Verbrauch je Einheit",item.consumption,value=>{item.consumption=Number(value);recalculate();},"number");
+          field(fields,"Materialpreis €",item.unitPrice,value=>{item.unitPrice=Number(value);recalculate();},"number");
+          action(fields,"Entfernen",()=>{data.materials.splice(data.materials.indexOf(item),1);recalculate();drawCalculator();});
+        }
+        action(controls,"+ Material",()=>{model().materials.push({name:"",consumption:0,unitPrice:0});persist();drawCalculator();});
+      }
+      return visible=>{
+        panel.hidden=!visible;
+        if(visible&&!controls.childNodes.length)drawCalculator();
+      };
     }
     function draw(){
       persist();
@@ -608,7 +662,11 @@
             const description=field(line,"Freie Position",row.text,value=>{row.text=value;});
             const freeField=description.closest("label");
             freeField.className="koffer-inquiry-free";
-            const showFree=()=>{freeField.hidden=select.value!=="free";};
+            const showCalculator=mountInquiryCalculation(line,row,price);
+            const showFree=()=>{
+              freeField.hidden=select.value!=="free";
+              showCalculator(!freeField.hidden);
+            };
             renderOptions();showFree();
             select.onchange=()=>{
               row.free=select.value==="free";
@@ -617,6 +675,7 @@
               if(template){description.value=template.text;row.text=template.text;}
               delete row.unit;
               delete row.unitPrice;
+              if(row.free&&row.calculation)row.unitPrice=+calculatedPrice(row.calculation).toFixed(2);
               unit.value=inquiryRowUnit(group,row);price.value=rowPrice(row);
               showFree();persist();updatePrices();
               if(row.free)description.focus();
@@ -695,6 +754,7 @@
       }
       const positions=selections.map(({group,row,template})=>costing({
         ...template,
+        ...(!template&&row.calculation?{...row.calculation,hourlyRateOverridden:true,materialMarkupOverridden:true}:{}),
         id:"mail-"+crypto.randomUUID(),
         groupId:group.id,
         groupName:[group.area,group.variantName,group.title].filter(Boolean).join(" · "),
