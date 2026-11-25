@@ -148,7 +148,7 @@ test("mail prefills the offer and hands off the imported positions after confirm
   } finally {dom.window.close();}
 });
 
-test("incoming measurements survive a second editor mount and a page reload", ()=>{
+test("incoming measurements survive rerenders and a free position can be saved to the master", async ()=>{
   const source=fs.readFileSync(path.join(ROOT,"public","ui","baustellen-offer-builder.js"),"utf8");
   const start=source.indexOf("  const offerInquiryStates=");
   const end=source.indexOf("  function render(){",start);
@@ -160,7 +160,7 @@ test("incoming measurements survive a second editor mount and a page reload", ()
     w.sessionStorage.setItem("krista-offer-inquiry-pending:26111",JSON.stringify([{subject:"Anfrage",documents:[{
       hash:"sample",name:"Wohnhaus.pdf",groups:[{area:"Innen",title:"Wände",quantity:250.77,unit:"m²",suggestions:["Kalkdünnputz"]}],
     }]}]));
-    const reloadScript=()=>w.eval("(()=>{const draft={measurement:{hourlyRate:60}};const calculatedPrice=p=>p.laborHoursPerUnit*p.hourlyRate+p.materialCostPerUnit;const offerPositionTemplates=[{text:\"Sockelprofil\",unit:\"lfm\"}];"+source.slice(start,end)+";window.mountInquiry=mountOfferInquiry;})()");
+    const reloadScript=()=>w.eval("(()=>{const draft={measurement:{hourlyRate:60}};const editorContext=()=>({editor:document.getElementById(\"koffer\")});const editorContextActive=()=>true;const api=async(path,options)=>{window.savedInquiryTemplate=JSON.parse(options.body);return {template:{...window.savedInquiryTemplate,id:\"op_test\"}}};const calculatedPrice=p=>p.laborHoursPerUnit*p.hourlyRate+p.materialCostPerUnit;const offerPositionTemplates=[{text:\"Sockelprofil\",unit:\"lfm\"}];"+source.slice(start,end)+";window.mountInquiry=mountOfferInquiry;})()");
     const editor=w.document.getElementById("koffer");
     const mount=()=>{
       editor.querySelector("details")?.remove();
@@ -225,5 +225,11 @@ test("incoming measurements survive a second editor mount and a page reload", ()
     editor.querySelector(".koffer-inquiry-group-tools input").value="Glatt spachteln und malen";
     Array.from(editor.querySelectorAll("button")).find(button=>button.textContent==="Variante bilden").click();
     assert.match(editor.querySelector(".koffer-inquiry-subgroup summary").textContent,/Glatt spachteln und malen · Summe netto: €\s35,00/);
+    const saveTemplate=Array.from(editor.querySelectorAll(".koffer-inquiry-free button")).find(button=>!button.closest("[hidden]")&&button.closest(".koffer-inquiry-row").querySelector(".koffer-inquiry-free input").value);
+    await saveTemplate.onclick();
+    assert.equal(w.savedInquiryTemplate.group,"Eigene Positionen");
+    assert.equal(w.savedInquiryTemplate.unitPrice,2);
+    assert.equal(w.savedInquiryTemplate.workSteps[0].minutes,30);
+    assert.equal(Object.hasOwn(w.savedInquiryTemplate,"quantity"),false);
   }finally{dom.window.close();}
 });

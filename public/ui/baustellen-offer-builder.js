@@ -535,6 +535,38 @@
         if(visible&&!controls.childNodes.length)drawCalculator();
       };
     }
+    function addSaveTemplate(host,group,row){
+      const note=append(host,"span");
+      note.setAttribute("role","status");
+      const button=action(host,"Im Positionsstamm speichern",async()=>{
+        const context=editorContext();
+        if(!editorContextActive(context)||context.editor!==box||row.savedTemplateId||button.disabled)return;
+        const text=row.text.trim(),unit=inquiryRowUnit(group,row).trim(),price=rowPrice(row);
+        if(!text||!unit||price===""||!Number.isFinite(Number(price))||Number(price)<0){
+          note.textContent="Bitte Leistung, Einheit und Netto-Einheitspreis eintragen.";
+          return;
+        }
+        button.disabled=true;
+        note.textContent="Wird gespeichert …";
+        try{
+          const payload={...row.calculation,text,unit,unitPrice:Number(price),group:"Eigene Positionen"};
+          const result=await api("/admin/api/offer-position-templates",{
+            method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),
+          });
+          row.savedTemplateId=result.template.id;
+          persist();
+          if(editorContextActive(context)){
+            offerPositionTemplates.push(result.template);
+            note.textContent="Im Positionsstamm gespeichert.";
+            draw();
+          }
+        }catch(error){
+          note.textContent="Speichern fehlgeschlagen: "+error.message;
+          button.disabled=false;
+        }
+      });
+      if(row.savedTemplateId){button.disabled=true;note.textContent="Im Positionsstamm gespeichert.";}
+    }
     function draw(){
       persist();
       groupsHost.replaceChildren();
@@ -660,8 +692,10 @@
             const down=action(actions,"↓",()=>move(1));down.disabled=index===group.rows.length-1;down.setAttribute("aria-label","Unterposition nach unten");
             action(actions,"Entfernen",()=>{group.rows.splice(index,1);draw();});
             const description=field(line,"Freie Position",row.text,value=>{row.text=value;});
-            const freeField=description.closest("label");
+            const freeField=append(line,"div");
             freeField.className="koffer-inquiry-free";
+            freeField.append(description.closest("label"));
+            addSaveTemplate(freeField,group,row);
             const showCalculator=mountInquiryCalculation(line,row,price);
             const showFree=()=>{
               freeField.hidden=select.value!=="free";
@@ -762,7 +796,7 @@
         quantity:Number(row.quantity),
         unitPrice:Number(rowPrice(row))||0,
         unit:inquiryRowUnit(group,row).trim(),
-        templateId:template?.id||"",
+        templateId:template?.id||row.savedTemplateId||"",
         isCustom:true,
         isAlternative:group.alternative===true,
         autoQuantityOverridden:true,
