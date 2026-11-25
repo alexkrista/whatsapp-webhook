@@ -7,7 +7,7 @@ function measurements(text) {
   const rows = text.split("\n").map(line => line.trim().split(/\s*\t\s*/));
   const groups = [];
   const add = (area, title, quantity, suggestions, alternative = false) =>
-    groups.push({ area, title, quantity: Math.round(quantity * 100) / 100, suggestions, alternative });
+    groups.push({ area, title, quantity: Math.round(quantity * 100) / 100, suggestions, alternative, unit: "m²" });
   const number = cell => /^\d+(?:[,.]\d+)?$/.test(cell || "") ? Number(cell.replace(",", ".")) : NaN;
   const header = (row, pattern) => /^\d+(?:\.\d+)*$/.test(row[0]) && pattern.test(row[1] || "");
   if (/Kalkputz/i.test(text) && /Türleibung.*Fensterleibungen.*Decke/i.test(text)) {
@@ -76,7 +76,7 @@ function onlvMeasurements(xml) {
     }
     if (frame.name !== "pos-eigenschaften") return;
     const quantity = position.quantity ? Number(position.quantity.replace(",", ".")) : NaN;
-    if (/^(?:m²|m2|qmt)$/i.test(position.unit) && position.title && Number.isFinite(quantity) && quantity >= 0) {
+    if (position.unit && position.title && Number.isFinite(quantity) && quantity >= 0) {
       const group = stack.findLast(item => item.name === "ulg");
       const outer = /außen|aussen|fassade|sockel/i.test((group?.title || "") + " " + position.title);
       const number = stack.filter(item => ["og", "lg", "ulg", "grundtextnr"].includes(item.name))
@@ -85,6 +85,7 @@ function onlvMeasurements(xml) {
         area: outer ? "Außen" : "Innen",
         title: [number, position.title].filter(Boolean).join(" · "),
         quantity,
+        unit: position.unit,
         eventual: position.eventual,
         alternative: position.eventual,
         suggestions: [position.title],

@@ -429,16 +429,16 @@
           card.className="koffer-pos";
           const heading=append(card,"h5",group.title+(group.eventual?" · Eventualposition":""));
           const controls=append(card,"details");
-          append(controls,"summary",Number(group.quantity).toLocaleString("de-AT")+" m² · Aufmaß bearbeiten");
+          append(controls,"summary",Number(group.quantity).toLocaleString("de-AT")+" "+group.unit+" · Aufmaß bearbeiten");
           field(controls,"Überschrift",group.title,value=>{
             group.title=value;
             heading.textContent=value+(group.eventual?" · Eventualposition":"");
           });
-          field(controls,"Aufmaß in m²",group.quantity,value=>{
+          field(controls,"Aufmaß in "+group.unit,group.quantity,value=>{
             const old=Number(group.quantity);
             group.quantity=value;
             for(const row of group.rows)if(Number(row.quantity)===old)row.quantity=value;
-            controls.querySelector("summary").textContent=Number(value).toLocaleString("de-AT")+" m² · Aufmaß bearbeiten";
+            controls.querySelector("summary").textContent=Number(value).toLocaleString("de-AT")+" "+group.unit+" · Aufmaß bearbeiten";
           },"number").onchange=()=>{draw();};
           if(!group.eventual){
             const label=append(controls,"label");
@@ -452,7 +452,7 @@
           for(const row of group.rows){
             const line=append(card,"p");
             field(line,"Leistung",row.text,value=>{row.text=value;});
-            field(line,"m²",row.quantity,value=>{row.quantity=value;},"number");
+            field(line,group.unit,row.quantity,value=>{row.quantity=value;},"number");
             const select=append(append(line,"label"," Textbaustein "),"select");
             select.add(new Option("Freie Leistung",""));
             offerPositionTemplates.forEach((template,index)=>select.add(new Option(template.text,String(index))));
@@ -462,7 +462,7 @@
           }
           action(card,"+ Unterposition",()=>{group.rows.push({text:"",quantity:group.quantity});draw();});
         });
-        action(section,"+ Aufmaß in "+area,()=>{addGroup({area,title:"Aufmaß",quantity:"",suggestions:[]});draw();});
+        action(section,"+ Aufmaß in "+area,()=>{addGroup({area,title:"Aufmaß",quantity:"",unit:"m²",suggestions:[]});draw();});
       }
     }
     async function importFiles(files){
@@ -509,7 +509,7 @@
       if(!editorContextActive(context)||context.editor!==box)return;
       const selections=groups.flatMap(group=>group.rows.map(row=>({group,row,template:row.templateIndex?offerPositionTemplates[Number(row.templateIndex)]:null})));
       if(selections.some(({row,template})=>!String(template?.text||row.text).trim()||row.quantity===""||!Number.isFinite(Number(row.quantity))||Number(row.quantity)<0)){
-        status.textContent="Bitte jede Unterposition mit Leistung und gültiger m²-Menge ergänzen.";
+        status.textContent="Bitte jede Unterposition mit Leistung und gültiger Menge ergänzen.";
         return;
       }
       const positions=selections.map(({group,row,template})=>costing({
@@ -519,7 +519,7 @@
         groupName:group.area+" · "+group.title,
         text:(template?.text||row.text).trim()+(group.eventual?" (Eventualposition)":""),
         quantity:Number(row.quantity),
-        unit:"m²",
+        unit:group.unit,
         templateId:template?.id||"",
         isCustom:true,
         isAlternative:group.alternative===true,
