@@ -79,8 +79,16 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
  const history=JSON.parse(await fsp.readFile(path.join(dir,"month-reopenings.json"),"utf8"));assert.equal(history.length,1);assert.equal(history[0].previousClosure.report.totals.actualMinutes,makeReport(a).totals.actualMinutes);assert.equal(history[0].reviewer,"Bettina");
  const projectsBefore=await fsp.readFile(path.join(dir,"project-time-archive.json"),"utf8");
  res=await call("put","/kristine/api/monthly-payroll/:employeeId/:date",{params:{employeeId:"a",date:"2026-10-05"},body:{reason:"Zeiten laut Kontrolle berichtigt",segments:[{type:"up",from:"08:00",to:"12:00",reason:"Büro"}]}});assert.equal(res.statusCode,200);
- a=await days("a");assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-05").segments),240);
- res=await call("post","/kristine/api/month-close",{body:{month:"2026-10",people:[makeReport(a)]}});assert.equal(res.statusCode,200,JSON.stringify(res.body));
+ const preview=await call("get","/kristine/api/monthly-days/:employeeId",{params:{employeeId:"a"},query:{from:"2026-10-01",to:"2026-10-31"}});
+ a=preview.body.days;assert.equal(policy.workMinutes(a.find(d=>d.date==="2026-10-05").segments),240);
+ const correction=preview.body.correction;
+ assert.deepEqual(correction.changes.map(day=>day.date),["2026-10-05"]);
+ assert.equal(correction.changes[0].before[0].from,"07:00");
+ assert.equal(correction.changes[0].after[0].from,"08:00");
+ const body={month:"2026-10",people:[makeReport(a)]};
+ res=await call("post","/kristine/api/month-close",{body});assert.equal(res.statusCode,409);
+ res=await call("post","/kristine/api/month-close",{body:{...body,correctionRevision:"stale"}});assert.equal(res.statusCode,409);
+ res=await call("post","/kristine/api/month-close",{body:{...body,correctionRevision:correction.revision}});assert.equal(res.statusCode,200,JSON.stringify(res.body));
  assert.equal(await fsp.readFile(path.join(dir,"project-time-archive.json"),"utf8"),projectsBefore,"reopening/correcting/reclosing payroll never rewrites project times");
  console.log("PASS: correct five office models, fixed payroll with breaks, UP Von/Bis, holidays, no double part-time factor, closure lock, required acknowledgment/reason/admin, full prior snapshot and isolated corrections");
  }finally{await fsp.rm(root,{recursive:true,force:true})}

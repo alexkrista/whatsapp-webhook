@@ -2897,6 +2897,26 @@ const open = taskId
     const targetMinutes=closed?.report?.days?.find(d=>d.date===date)?.targetMinutes??(employeeBelongsToDay(employee,date)?schedule.targetMinutes:0);
     return {date,employeeId,segments,originalSegments:original,released:automatic||Boolean(release?.released&&!release.returned),monthClosed:Boolean(closed),closedAt:closed?.closedAt||null,targetMinutes,regularWeekMinutes:schedule.regularWeekMinutes,contractOvertimeWeekMinutes:schedule.contractOvertimeWeekMinutes,modelName:closed?.report?.modelLabel||schedule.model?.name||"Zeitmodell",modelId:schedule.model?.id||"",payrollFixed:schedule.fixedSegments!==null||context.reopenings.some(r=>r.employeeId===employeeId&&r.month===date.slice(0,7)),payrollAutomatic:automatic,source,workingMinutes:payrollModel.workMinutes(segments),correction:correction?{history:correction.history,reason:correction.reason}:null};
   }
+  function monthCorrection(context, employeeId, month, days, balances) {
+    const reopening = context.reopenings.findLast(row => row.employeeId === employeeId && row.month === month);
+    if (!reopening) return null;
+    const block = ({type,from,to,unproductiveCode,reason}) => ({type,from,to,code:String(unproductiveCode||""),reason:reason||""});
+    const previous = new Map((reopening.previousClosure.days || []).map(day => [day.date, day.segments]));
+    const changes = days.flatMap(day => {
+      const before = (previous.get(day.date) || []).map(block);
+      const after = day.segments.map(block);
+      return JSON.stringify(before) === JSON.stringify(after) ? [] : [{date:day.date,before,after}];
+    });
+    const previousBalances = reopening.previousClosure.report?.balances || {};
+    const balanceChanges = ["newTime","newVacation","z10","z50"].flatMap(key => {
+      const before = previousBalances[key] ?? null, after = balances?.[key] ?? null;
+      return before === after ? [] : [{key,before,after}];
+    });
+    const revision = require("node:crypto").createHash("sha256")
+      .update(JSON.stringify([reopening.id,changes,balanceChanges])).digest("hex");
+    return {changes,balanceChanges,revision};
+  }
+
   function payrollBalanceTotals(days){
     return days.reduce((a,d)=>{
       const paid=d.released?d.segments.filter(s=>["work","up"].includes(s.type)&&String(s.unproductiveCode||"")!=="930"):[];
@@ -2946,7 +2966,9 @@ const open = taskId
       const fixed=context.closures.find(r=>String(r.employeeId)===String(req.params.employeeId)&&r.month===month);
       const adjustments=await readJson(MONTH_BALANCE_ADJUSTMENTS,[]);
       const balances=from===month+"-01"&&to===through?(fixed?.report?.balances||monthBalances.calculate(employee,month,context.closures,totals,entitlement,payrollSurcharges(context,employee,from,to),adjustments,await readJson(ZA_OLD_LEDGER,[]))):null;
-      res.json({ok:true,days,vacationEntitlement:entitlement,balances});
+      const correction = !fixed && to === last.toISOString().slice(0,10) && from === month+"-01"
+        ? monthCorrection(context,String(req.params.employeeId),month,days,balances) : null;
+      res.json({ok:true,days,vacationEntitlement:entitlement,balances,correction});
     }catch(error){res.status(500).json({ok:false,error:String(error.message||error)})}
   });
   app.put("/kristine/api/monthly-payroll/:employeeId/:date",serializedTimeMutation(async(req,res)=>{
@@ -3081,7 +3103,9 @@ const open = taskId
         const reportedTotal = reportDays.reduce((sum,row) => sum + Number(row.actualMinutes || 0),0);
         if (!Number.isFinite(reportedTotal) || Number(person.totals?.actualMinutes) !== reportedTotal) return res.status(400).json({ok:false,error:"Die Monatssumme stimmt nicht. Monatsübersicht neu aufbauen."});
         person.balances=monthBalances.calculate(employee,month,closures,payrollBalanceTotals(days.map(d=>monthlyDay(payrollContext,employee,d.date))),vacationEntitlement(employee,to),payrollSurcharges(payrollContext,employee,from,to),await readJson(MONTH_BALANCE_ADJUSTMENTS,[]),await readJson(ZA_OLD_LEDGER,[]));
-        created.push({month,employeeId,employeeName:employee.name || employeeId,from,to,closedAt:new Date().toISOString(),days,report:person});
+        const correction = monthCorrection(payrollContext,employeeId,month,days.map(day=>monthlyDay(payrollContext,employee,day.date)),person.balances);
+        if (correction && req.body?.correctionRevision !== correction.revision) return res.status(409).json({ok:false,error:"Korrektur bitte neu laden, prüfen und bestätigen."});
+        created.push({month,employeeId,employeeName:employee.name || employeeId,from,to,closedAt:new Date().toISOString(),days,report:person,...(correction?{correction}:{})});
       }
       // Validate all employees first. Failed closing never closes a partial selection.
       for (const row of pendingProjects) await saveProjectSegments(row);
