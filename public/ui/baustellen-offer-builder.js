@@ -395,9 +395,11 @@
         .koffer-inquiry,.koffer-inquiry article,.koffer-inquiry-row,.koffer-inquiry-row label{min-width:0}
         .koffer-inquiry article{margin:8px 0}
         .koffer-inquiry article h5{margin:0 0 6px;font-size:14px}
-        .koffer-inquiry-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(72px,0.55fr) minmax(0,2fr) auto;gap:8px;align-items:end;margin:8px 0}
+        .koffer-inquiry-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(85px,.18fr) auto;gap:8px;align-items:end;margin:8px 0}
         .koffer-inquiry-row label{display:block;font-size:12px}
         .koffer-inquiry-row input,.koffer-inquiry-row select{box-sizing:border-box;display:block;width:100%;min-width:0;max-width:100%;margin-top:3px}
+        .koffer-inquiry-row .koffer-inquiry-free{grid-column:1/-1}
+        .koffer-inquiry-row .koffer-inquiry-free[hidden]{display:none}
         .koffer-inquiry-row select{padding:7px;border:1px solid #d2cec4;border-radius:7px;background:white;text-overflow:ellipsis}
         @media(max-width:740px){.koffer-inquiry-row{grid-template-columns:minmax(0,1fr) minmax(72px,.45fr)}}
       `;
@@ -481,15 +483,14 @@
           for(const row of group.rows){
             const line=append(card,"div");
             line.className="koffer-inquiry-row";
-            const description=field(line,"Leistung",row.text,value=>{row.text=value;});
-            field(line,group.unit,row.quantity,value=>{row.quantity=value;},"number");
             const chooser=append(line,"div");
             const search=field(chooser,"Position suchen","",()=>renderOptions(),"search");
             search.placeholder="Leistung oder Positionsgruppe";
-            const select=append(append(chooser,"label","Leistungsposition aus Stamm"),"select");
+            const select=append(append(chooser,"label","Position"),"select");
             function renderOptions(){
               const term=search.value.trim().toLocaleLowerCase("de-AT");
-              select.replaceChildren(new Option("Freie Leistung",""));
+              const placeholder=new Option("Position auswählen","");placeholder.disabled=true;
+              select.replaceChildren(placeholder,new Option("Freie Position","free"));
               const categories=new Map();
               for(const [index,template] of offerPositionTemplates.entries()){
                 const category=template.group||"Allgemein";
@@ -501,16 +502,23 @@
                 const title=String(template.text||"").trim().replace(/\s+/g," ");
                 if(title)categories.get(category).append(new Option(title.length>125?title.slice(0,122)+"…":title,String(index)));
               }
-              select.value=row.templateIndex??"";
+              select.value=row.templateIndex||(row.free||row.text?"free":"");
             }
-            renderOptions();
-            select.onchange=()=>{
-              row.templateIndex=select.value;
-              const template=select.value===""?null:offerPositionTemplates[Number(select.value)];
-              if(template){description.value=template.text;row.text=template.text;}
-              persist();
-            };
+            field(line,group.unit,row.quantity,value=>{row.quantity=value;},"number");
             action(line,"Entfernen",()=>{group.rows.splice(group.rows.indexOf(row),1);draw();});
+            const description=field(line,"Freie Position",row.text,value=>{row.text=value;});
+            const freeField=description.closest("label");
+            freeField.className="koffer-inquiry-free";
+            const showFree=()=>{freeField.hidden=select.value!=="free";};
+            renderOptions();showFree();
+            select.onchange=()=>{
+              row.free=select.value==="free";
+              row.templateIndex=row.free?"":select.value;
+              const template=row.templateIndex?offerPositionTemplates[Number(row.templateIndex)]:null;
+              if(template){description.value=template.text;row.text=template.text;}
+              showFree();persist();
+              if(row.free)description.focus();
+            };
           }
           action(card,"+ Unterposition",()=>{group.rows.push({text:"",quantity:group.quantity});draw();});
         });
