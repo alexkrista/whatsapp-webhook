@@ -395,9 +395,13 @@
         .koffer-inquiry,.koffer-inquiry article,.koffer-inquiry-row,.koffer-inquiry-row label{min-width:0}
         .koffer-inquiry article{margin:8px 0}
         .koffer-inquiry article h5{margin:0 0 6px;font-size:14px}
-        .koffer-inquiry-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(85px,.18fr) minmax(70px,.14fr) auto;gap:8px;align-items:end;margin:8px 0}
+        .koffer-inquiry-row{display:grid;grid-template-columns:minmax(0,1fr) repeat(3,minmax(70px,.16fr)) minmax(90px,.2fr) auto;gap:8px;align-items:end;margin:8px 0}
         .koffer-inquiry-row label{display:block;font-size:12px}
         .koffer-inquiry-row input,.koffer-inquiry-row select{box-sizing:border-box;display:block;width:100%;min-width:0;max-width:100%;margin-top:3px}
+        .koffer-inquiry-actions{display:flex;flex-wrap:wrap;gap:4px}
+        .koffer-inquiry-amount,.koffer-inquiry-totals{font-variant-numeric:tabular-nums}
+        .koffer-inquiry-amount strong{display:block;margin-top:5px}
+        .koffer-inquiry-totals{margin:8px 0;font-weight:700}
         .koffer-inquiry-row .koffer-inquiry-free{grid-column:1/-1}
         .koffer-inquiry-row .koffer-inquiry-free[hidden]{display:none}
         .koffer-inquiry-row select{padding:7px;border:1px solid #d2cec4;border-radius:7px;background:white;text-overflow:ellipsis}
@@ -418,6 +422,21 @@
       offerInquiryStates.set(id,state);
     }
     const {groups,documents}=state, seen=new Set(state.hashes);
+    const priceViews=[];
+    const money=new Intl.NumberFormat("de-AT",{style:"currency",currency:"EUR"});
+    const moneyCents=cents=>money.format(cents/100);
+    const templateFor=row=>row.templateIndex?offerPositionTemplates[Number(row.templateIndex)]:null;
+    const rowPrice=row=>row.unitPrice??templateFor(row)?.unitPrice??"";
+    const rowCents=row=>Math.round((Number(rowPrice(row))||0)*(Number(row.quantity)||0)*100);
+    const groupCents=group=>group.rows.reduce((sum,row)=>sum+rowCents(row),0);
+    const groupPending=group=>group.rows.filter(row=>rowPrice(row)==="").length;
+    function updatePrices(){for(const update of priceViews)update();}
+    function subtotal(target,items,label){
+      const sum=(alternative)=>items.filter(group=>!!group.alternative===alternative).reduce((total,group)=>total+groupCents(group),0);
+      const pending=items.reduce((total,group)=>total+groupPending(group),0);
+      const options=items.some(group=>group.alternative)?" · Varianten / eventual: "+moneyCents(sum(true)):"";
+      target.textContent=label+": "+moneyCents(sum(false))+options+(pending?" · "+pending+" ohne Einheitspreis":"");
+    }
     const persist=()=>{
       state.hashes=[...seen];
       state.message=status.textContent;
@@ -446,7 +465,7 @@
       return button;
     }
     function inquiryRowUnit(group,row){
-      const template=row.templateIndex?offerPositionTemplates[Number(row.templateIndex)]:null;
+      const template=templateFor(row);
       return row.unit??(template?.unit?.trim()||group.unit);
     }
     function addGroup(group){
@@ -455,11 +474,13 @@
     function draw(){
       persist();
       groupsHost.replaceChildren();
+      priceViews.length=0;
       transfer.disabled=busy||!groups.some(group=>group.rows.length);
       for(const area of ["Innen","Außen"]){
         const section=append(groupsHost,"section");
         append(section,"h4",area);
-        groups.filter(group=>group.area===area).forEach(group=>{
+        const areaGroups=groups.filter(group=>group.area===area);
+        areaGroups.forEach(group=>{
           const card=append(section,"article");
           card.className="koffer-pos";
           const heading=append(card,"h5",group.title+(group.eventual?" · Eventualposition":""));
@@ -480,7 +501,7 @@
             const checkbox=append(label,"input");
             checkbox.type="checkbox";
             checkbox.checked=group.alternative===true;
-            checkbox.onchange=()=>{group.alternative=checkbox.checked;persist();};
+            checkbox.onchange=()=>{group.alternative=checkbox.checked;persist();updatePrices();};
             label.append(" Alternative");
           }
           action(controls,"Gruppe entfernen",()=>{groups.splice(groups.indexOf(group),1);draw();});
@@ -509,10 +530,25 @@
               }
               select.value=row.templateIndex||(row.free||row.text?"free":"");
             }
-            field(line,"Menge",row.quantity,value=>{row.quantity=value;},"number");
+            field(line,"Menge",row.quantity,value=>{row.quantity=value;updatePrices();},"number");
             const unit=field(line,"Einheit",inquiryRowUnit(group,row),value=>{row.unit=value;});
             unit.maxLength=24;
-            action(line,"Entfernen",()=>{group.rows.splice(group.rows.indexOf(row),1);draw();});
+            const price=field(line,"Einheitspreis netto",rowPrice(row),value=>{row.unitPrice=value;updatePrices();},"number");
+            price.step="0.01";
+            const amount=append(line,"div","Gesamtpreis netto");
+            amount.className="koffer-inquiry-amount";
+            const amountValue=append(amount,"strong");
+            priceViews.push(()=>{amountValue.textContent=rowPrice(row)===""?"—":moneyCents(rowCents(row));});
+            const actions=append(line,"div");actions.className="koffer-inquiry-actions";
+            const index=group.rows.indexOf(row);
+            const move=offset=>{
+              const next=index+offset;
+              if(next<0||next>=group.rows.length)return;
+              group.rows.splice(index,1);group.rows.splice(next,0,row);draw();
+            };
+            const up=action(actions,"↑",()=>move(-1));up.disabled=index===0;up.setAttribute("aria-label","Unterposition nach oben");
+            const down=action(actions,"↓",()=>move(1));down.disabled=index===group.rows.length-1;down.setAttribute("aria-label","Unterposition nach unten");
+            action(actions,"Entfernen",()=>{group.rows.splice(index,1);draw();});
             const description=field(line,"Freie Position",row.text,value=>{row.text=value;});
             const freeField=description.closest("label");
             freeField.className="koffer-inquiry-free";
@@ -524,15 +560,28 @@
               const template=row.templateIndex?offerPositionTemplates[Number(row.templateIndex)]:null;
               if(template){description.value=template.text;row.text=template.text;}
               delete row.unit;
-              unit.value=inquiryRowUnit(group,row);
-              showFree();persist();
+              delete row.unitPrice;
+              unit.value=inquiryRowUnit(group,row);price.value=rowPrice(row);
+              showFree();persist();updatePrices();
               if(row.free)description.focus();
             };
           }
+          const groupTotal=append(card,"p");
+          groupTotal.className="koffer-inquiry-totals";
+          priceViews.push(()=>{groupTotal.textContent="Summe Aufmaßposition netto: "+moneyCents(groupCents(group))+(groupPending(group)?" · "+groupPending(group)+" ohne Einheitspreis":"");});
           action(card,"+ Unterposition",()=>{group.rows.push({text:"",quantity:group.quantity});draw();});
         });
+        if(areaGroups.length){
+          const areaTotal=append(section,"p");areaTotal.className="koffer-inquiry-totals";
+          priceViews.push(()=>subtotal(areaTotal,areaGroups,"Summe "+area+" netto"));
+        }
         action(section,"+ Aufmaß in "+area,()=>{addGroup({area,title:"Aufmaß",quantity:"",unit:"m²",suggestions:[]});draw();});
       }
+      if(groups.length){
+        const total=append(groupsHost,"p");total.className="koffer-inquiry-totals";
+        priceViews.push(()=>subtotal(total,groups,"Gesamtpreis netto"));
+      }
+      updatePrices();
     }
     function showDocument(document){
       const details=append(sources,"details");
@@ -584,7 +633,7 @@
       const context=editorContext();
       if(!editorContextActive(context)||context.editor!==box)return;
       const selections=groups.flatMap(group=>group.rows.map(row=>({group,row,template:row.templateIndex?offerPositionTemplates[Number(row.templateIndex)]:null})));
-      if(selections.some(({group,row,template})=>!String(row.text||template?.text).trim()||!inquiryRowUnit(group,row).trim()||row.quantity===""||!Number.isFinite(Number(row.quantity))||Number(row.quantity)<0)){
+      if(selections.some(({group,row,template})=>!String(row.text||template?.text).trim()||!inquiryRowUnit(group,row).trim()||row.quantity===""||!Number.isFinite(Number(row.quantity))||Number(row.quantity)<0||!Number.isFinite(Number(rowPrice(row)))||Number(rowPrice(row))<0)){
         status.textContent="Bitte jede Unterposition mit Leistung, Einheit und gültiger Menge ergänzen.";
         return;
       }
@@ -595,6 +644,7 @@
         groupName:group.area+" · "+group.title,
         text:(row.text||template?.text).trim()+(group.eventual?" (Eventualposition)":""),
         quantity:Number(row.quantity),
+        unitPrice:Number(rowPrice(row))||0,
         unit:inquiryRowUnit(group,row).trim(),
         templateId:template?.id||"",
         isCustom:true,

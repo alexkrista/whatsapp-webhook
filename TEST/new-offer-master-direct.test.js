@@ -188,5 +188,20 @@ test("incoming measurements survive a second editor mount and a page reload", ()
     unit.dispatchEvent(new w.Event("input"));
     mount();
     assert.equal(editor.querySelector('article input[maxlength="24"]').value,"m");
+    const change=(input,value)=>{
+      input.value=value;
+      input.dispatchEvent(new w.Event("input"));
+    };
+    let rows=editor.querySelectorAll(".koffer-inquiry-row");
+    change(rows[0].querySelectorAll('input[type="number"]')[0],"10");
+    change(rows[0].querySelectorAll('input[type="number"]')[1],"2");
+    Array.from(editor.querySelectorAll("article button")).find(button=>button.textContent==="+ Unterposition").click();
+    rows=editor.querySelectorAll(".koffer-inquiry-row");
+    change(rows[1].querySelectorAll('input[type="number"]')[0],"3");
+    change(rows[1].querySelectorAll('input[type="number"]')[1],"5");
+    assert.match(editor.textContent,/Summe Aufmaßposition netto: €\s35,00/);
+    assert.match(editor.textContent,/Summe Innen netto: €\s35,00/);
+    rows[1].querySelector('[aria-label="Unterposition nach oben"]').click();
+    assert.equal(editor.querySelector('.koffer-inquiry-row input[type="number"]').value,"3");
   }finally{dom.window.close();}
 });
