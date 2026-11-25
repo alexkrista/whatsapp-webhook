@@ -103,23 +103,58 @@
     return true;
   }
 
+  const pendingDecisions = new Set();
+  let decisionQueue = Promise.resolve();
+
+  function decisionNotice(text, error = false) {
+    if (!document.body) return;
+    let notices = document.getElementById("financeDecisionNotices");
+    if (!notices) {
+      notices = document.createElement("div");
+      notices.id = "financeDecisionNotices";
+      notices.style.cssText = "position:fixed;bottom:1rem;right:1rem;z-index:20000;max-width:min(28rem,90vw);display:grid;gap:.5rem";
+      document.body.appendChild(notices);
+    }
+    const notice = document.createElement(error ? "button" : "div");
+    notice.setAttribute("role", error ? "alert" : "status");
+    notice.style.cssText = "padding:.8rem 1rem;border-radius:.5rem;color:#fff;background:" + (error ? "#982e24" : "#294c34");
+    notice.textContent = text;
+    if (error) { notice.type = "button"; notice.onclick = () => notice.remove(); }
+    else setTimeout(() => notice.remove(), 5000);
+    notices.appendChild(notice);
+  }
+
   async function persistFinanceDecision(task, meta, { done }) {
     if (!window.KristaUser?.currentId()) throw new Error("LOGIN_REQUIRED");
     if (!window.KristaUser.can("financeApproval")) throw new Error("Rechnungsfreigaben sind nur für Alexander freigeschaltet.");
     if (typeof persistTasks !== "function") throw new Error("Aufgaben-Speicherung ist noch nicht bereit.");
-    const previous = { reminder: task.reminder, status: task.status, completedAt: task.completedAt };
-    task.reminder = buildFinanceReminder(meta);
-    task.status = done ? "done" : "open";
-    task.completedAt = done ? new Date().toISOString() : null;
-    if (typeof persistTasks !== "function") throw new Error("Aufgaben-Speicherung ist noch nicht bereit.");
-    try { await persistTasks(); }
-    catch (error) { Object.assign(task, previous); throw error; }
-    if (typeof renderTasks === "function") renderTasks();
-    setTimeout(() => {
-      decorateRows();
-      const modal = document.getElementById("taskModalBackdrop");
-      if (modal?.classList.contains("open") && typeof openTaskListModal === "function") openTaskListModal(task.id);
-    }, 0);
+    const id = task.id;
+    if (pendingDecisions.has(id)) return;
+    pendingDecisions.add(id);
+    if (typeof closeTaskModal === "function") closeTaskModal();
+    const label = meta.invoice ? "Rechnung " + meta.invoice : task.title || "Rechnung";
+    decisionNotice(label + ": Entscheidung wird gespeichert …");
+    const store = async () => {
+      const task = getTask(id);
+      if (!task || task.status === "done") throw new Error("Aufgabe wurde inzwischen geändert. Bitte neu laden.");
+      const previous = { reminder: task.reminder, status: task.status, completedAt: task.completedAt };
+      task.reminder = buildFinanceReminder(meta);
+      task.status = done ? "done" : "open";
+      task.completedAt = done ? new Date().toISOString() : null;
+      try { await persistTasks(); }
+      catch (error) { Object.assign(task, previous); throw error; }
+    };
+    const saved = decisionQueue.then(store);
+    decisionQueue = saved.catch(() => {});
+    try {
+      await saved;
+      decisionNotice(label + ": Entscheidung gespeichert.");
+      setTimeout(decorateRows, 0);
+    } catch (error) {
+      decisionNotice(label + ": Speichern fehlgeschlagen. " + (error.message || error), true);
+    } finally {
+      pendingDecisions.delete(id);
+    }
   }
 
   async function approve(taskId) {
