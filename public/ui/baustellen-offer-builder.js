@@ -384,7 +384,155 @@
   function renderMeasureResult(){const el=document.getElementById("kofferMeasureResult"),m=draft.measurement||{};if(!el)return;if(draft.offerType==="interior"){const a=roomAreas(),f=n=>n.toLocaleString("de-AT",{maximumFractionDigits:2});el.textContent=m.mode==="estimate"?`Näherung: ${f(a.floor)} m² Boden × 3,5 = ${f(a.total)} m² Gesamtfläche (${f(a.walls)} m² Wände + ${f(a.ceiling)} m² Decke)`: `Berechnung: Wände ${f(a.walls)} m² + Decke ${f(a.ceiling)} m² = ${f(a.total)} m² Gesamtfläche`}else el.textContent="Die Aufmaßwerte werden automatisch in die ausgewählten Positionen übernommen."}
   function renderAreaResult(){const el=document.getElementById("kofferAreaResult");if(!el)return;const a=bathAreas(),f=n=>n.toLocaleString("de-AT",{maximumFractionDigits:2});el.textContent=`Automatisch: Wände ${f(a.wall)} m² · Boden ${f(a.floor)} m² · Decke ${f(a.ceiling)} m² · Abdichtung ${f(a.shower)} m² · Fugenlos ${f(a.fugenlos)} m² · Kalk ${f(a.lime)} m² · Malen ${f(a.paint)} m²`}
   function pane(type,title,content){return `<div class="koffer-pane" data-pane="${type}" style="${draft.offerType===type?"":"display:none"}"><h4>${title}</h4>${content}</div>`}
-  function render(){const host=document.getElementById("kcv2Host");if(!host||!draft||document.getElementById("koffer"))return;document.querySelector('[data-bk-tab="calculation"]')?.replaceChildren(document.createTextNode("Kalkulation / Angebot"));const box=document.createElement("div");box.id="koffer";box.dataset.jobId=jobId;box.className="kcv2-card koffer";box.innerHTML=`<div class="kcv2-section-head"><div><h3>Angebot erstellen</h3><div class="koffer-note">Stammdaten und Terminwissen dieser Baustelle werden übernommen. Positionen und Preise stammen aus deinen Vorlagen.</div></div><span class="bk-source">${esc(job?.contactName||job?.customerMaster?.name||"Kunde noch ergänzen")}</span></div><textarea id="kofferIntro" class="koffer-intro">${esc(draft.intro||defaultIntro())}</textarea><h4>Leistungsumfang / Räume</h4><textarea id="kofferScope" class="koffer-intro" placeholder="z. B. Wohnzimmer, Küche und Gang – Wände und Decken; Türen ausgenommen.">${esc(draft.scopeDescription||"")}</textarea><label style="display:block;margin:10px 0;font-weight:800"><input id="kofferShowQty" type="checkbox" ${draft.showQuantities!==false?"checked":""}> Mengen und Einheiten (z. B. m²) im Kundenangebot anzeigen</label><h4>Angebotsart</h4><div class="koffer-choice">${TYPES.map(x=>`<button data-type="${x.id}" class="${draft.offerType===x.id?"active":""}">${esc(x.label)}</button>`).join("")}</div>${measurementUi()}<div id="kofferBathCalc" style="${["bathroom","bathroom_compact"].includes(draft.offerType)?"":"display:none"}">${bathCalculator()}</div>${pane("interior","Abdeckarbeiten – einmalig auswählen",checks(COVER,"coverSteps")+"<h4>Bauteile</h4>"+checks(PARTS,"parts")+"<h4>Beschichtung und Zusatzarbeiten</h4>"+checks(INTERIOR,"steps"))}${pane("facade","Fassadenarbeiten",checks(FACADE,"facadeSteps"))}${pane("bathroom","Bad – ausführliche Variante",checks(BATH,"bathroomSteps"))}${pane("bathroom_compact","Fugenloses Bad – kompakte Variante",checks(BATH_COMPACT,"bathroomCompactSteps"))}${pane("lime_plaster","Kalkputz",checks(LIME,"limeSteps"))}${pane("wdvs","WDVS – kurz",checks(WDVS,"wdvsSteps"))}<div id="kofferNotepad"></div><h4>Angebotspositionen</h4><div id="kofferPositions" class="koffer-preview"></div><div class="kcv2-savebar" style="position:static;margin-top:12px"><span id="kofferMsg" class="msg"></span><button id="kofferSave" type="button">Angebotsentwurf speichern</button></div>`;host.prepend(box);
+  function mountOfferInquiry(box){
+    const panel=document.createElement("details");
+    panel.className="kcv2-card";
+    panel.innerHTML='<summary>Angebot aus Anfrage</summary><p><label>Outlook-Mail hierher ziehen oder auswählen <input type="file" accept=".msg" multiple></label></p><p role="status"></p><div data-inquiry-documents></div><div data-inquiry-groups></div><p><button type="button" data-inquiry-transfer disabled>Ins Angebot übernehmen</button></p>';
+    box.querySelector(".kcv2-section-head")?.after(panel);
+    const input=panel.querySelector("input"), status=panel.querySelector("[role=status]");
+    const sources=panel.querySelector("[data-inquiry-documents]"), groupsHost=panel.querySelector("[data-inquiry-groups]");
+    const transfer=panel.querySelector("[data-inquiry-transfer]");
+    const groups=[], seen=new Set();
+    let busy=false;
+    function append(parent, tag, text=""){
+      const node=document.createElement(tag);
+      node.textContent=text;
+      parent.append(node);
+      return node;
+    }
+    function field(parent, label, value, onInput, type="text"){
+      const wrapper=append(parent,"label",label+" ");
+      const control=append(wrapper,"input");
+      control.type=type;
+      if(type==="number"){control.min="0";control.step="any";}
+      control.value=value;
+      control.oninput=()=>onInput(control.value);
+      return control;
+    }
+    function action(parent,label,handler){
+      const button=append(parent,"button",label);
+      button.type="button";
+      button.onclick=handler;
+      return button;
+    }
+    function addGroup(group){
+      groups.push({...group,id:"mail-"+crypto.randomUUID(),rows:group.suggestions.map(text=>({text,quantity:group.quantity}))});
+    }
+    function draw(){
+      groupsHost.replaceChildren();
+      transfer.disabled=busy||!groups.some(group=>group.rows.length);
+      for(const area of ["Innen","Außen"]){
+        const section=append(groupsHost,"section");
+        append(section,"h4",area);
+        groups.filter(group=>group.area===area).forEach(group=>{
+          const card=append(section,"article");
+          card.className="koffer-pos";
+          const heading=append(card,"h5",group.title+(group.eventual?" · Eventualposition":""));
+          const controls=append(card,"details");
+          append(controls,"summary",Number(group.quantity).toLocaleString("de-AT")+" m² · Aufmaß bearbeiten");
+          field(controls,"Überschrift",group.title,value=>{
+            group.title=value;
+            heading.textContent=value+(group.eventual?" · Eventualposition":"");
+          });
+          field(controls,"Aufmaß in m²",group.quantity,value=>{
+            const old=Number(group.quantity);
+            group.quantity=value;
+            for(const row of group.rows)if(Number(row.quantity)===old)row.quantity=value;
+            controls.querySelector("summary").textContent=Number(value).toLocaleString("de-AT")+" m² · Aufmaß bearbeiten";
+          },"number").onchange=()=>{draw();};
+          if(!group.eventual){
+            const label=append(controls,"label");
+            const checkbox=append(label,"input");
+            checkbox.type="checkbox";
+            checkbox.checked=group.alternative===true;
+            checkbox.onchange=()=>{group.alternative=checkbox.checked;};
+            label.append(" Alternative");
+          }
+          action(controls,"Gruppe entfernen",()=>{groups.splice(groups.indexOf(group),1);draw();});
+          for(const row of group.rows){
+            const line=append(card,"p");
+            field(line,"Leistung",row.text,value=>{row.text=value;});
+            field(line,"m²",row.quantity,value=>{row.quantity=value;},"number");
+            const select=append(append(line,"label"," Textbaustein "),"select");
+            select.add(new Option("Freie Leistung",""));
+            offerPositionTemplates.forEach((template,index)=>select.add(new Option(template.text,String(index))));
+            select.value=row.templateIndex??"";
+            select.onchange=()=>{row.templateIndex=select.value;draw();};
+            action(line,"Entfernen",()=>{group.rows.splice(group.rows.indexOf(row),1);draw();});
+          }
+          action(card,"+ Unterposition",()=>{group.rows.push({text:"",quantity:group.quantity});draw();});
+        });
+        action(section,"+ Aufmaß in "+area,()=>{addGroup({area,title:"Aufmaß",quantity:"",suggestions:[]});draw();});
+      }
+    }
+    async function importFiles(files){
+      const context=editorContext();
+      if(busy||!editorContextActive(context)||context.editor!==box)return;
+      busy=true;input.disabled=true;transfer.disabled=true;
+      const messages=[];
+      for(const file of files){
+        if(!/\.msg$/i.test(file.name)||file.size>20*1024*1024){
+          messages.push(file.name+": Bitte eine .msg-Datei bis 20 MB auswählen.");
+          continue;
+        }
+        status.textContent="Lese "+file.name+" …";
+        try{
+          const result=await api("/admin/api/offer-inquiry",{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:file});
+          if(!editorContextActive(context))return;
+          const intake=result.intake;
+          for(const document of intake.documents){
+            if(seen.has(document.hash))continue;
+            seen.add(document.hash);
+            if(document.groups.length){
+              for(const group of document.groups)addGroup(group);
+              messages.push(document.name+": "+document.groups.length+" Aufmaßgruppen.");
+            }else if(document.text){
+              const details=append(sources,"details");
+              append(details,"summary",document.name+" · Aufmaß manuell zuordnen");
+              const content=append(details,"pre",document.text);
+              content.style.whiteSpace="pre-wrap";
+            }else {
+              messages.push(document.name+(document.unreadable?": Datei konnte nicht gelesen werden.":": Kein auswertbares Aufmaß erkannt."));
+            }
+          }
+          messages.push((intake.subject||file.name)+" gelesen.");
+        }catch(error){messages.push(file.name+": "+error.message);}
+      }
+      busy=false;input.disabled=false;input.value="";
+      if(editorContextActive(context)){status.textContent=messages.join(" ");draw();}
+    }
+    input.onchange=()=>importFiles([...input.files]);
+    panel.ondragover=event=>{if(event.dataTransfer.types.includes("Files"))event.preventDefault();};
+    panel.ondrop=event=>{event.preventDefault();importFiles([...event.dataTransfer.files]);};
+    transfer.onclick=()=>{
+      const context=editorContext();
+      if(!editorContextActive(context)||context.editor!==box)return;
+      const selections=groups.flatMap(group=>group.rows.map(row=>({group,row,template:row.templateIndex?offerPositionTemplates[Number(row.templateIndex)]:null})));
+      if(selections.some(({row,template})=>!String(template?.text||row.text).trim()||row.quantity===""||!Number.isFinite(Number(row.quantity))||Number(row.quantity)<0)){
+        status.textContent="Bitte jede Unterposition mit Leistung und gültiger m²-Menge ergänzen.";
+        return;
+      }
+      const positions=selections.map(({group,row,template})=>costing({
+        ...template,
+        id:"mail-"+crypto.randomUUID(),
+        groupId:group.id,
+        groupName:group.area+" · "+group.title,
+        text:(template?.text||row.text).trim()+(group.eventual?" (Eventualposition)":""),
+        quantity:Number(row.quantity),
+        unit:"m²",
+        templateId:template?.id||"",
+        isCustom:true,
+        isAlternative:group.alternative===true,
+        autoQuantityOverridden:true,
+      }));
+      draft.positions=(draft.positions||[]).concat(positions);
+      groups.splice(0);
+      renderPositions();renderOfferTotals();renderLivePreview();draw();
+      status.textContent=positions.length+" Leistungen übernommen. Bitte Angebotsentwurf speichern.";
+    };
+    draw();
+  }
+  function render(){const host=document.getElementById("kcv2Host");if(!host||!draft||document.getElementById("koffer"))return;document.querySelector('[data-bk-tab="calculation"]')?.replaceChildren(document.createTextNode("Kalkulation / Angebot"));const box=document.createElement("div");box.id="koffer";box.dataset.jobId=jobId;box.className="kcv2-card koffer";box.innerHTML=`<div class="kcv2-section-head"><div><h3>Angebot erstellen</h3><div class="koffer-note">Stammdaten und Terminwissen dieser Baustelle werden übernommen. Positionen und Preise stammen aus deinen Vorlagen.</div></div><span class="bk-source">${esc(job?.contactName||job?.customerMaster?.name||"Kunde noch ergänzen")}</span></div><textarea id="kofferIntro" class="koffer-intro">${esc(draft.intro||defaultIntro())}</textarea><h4>Leistungsumfang / Räume</h4><textarea id="kofferScope" class="koffer-intro" placeholder="z. B. Wohnzimmer, Küche und Gang – Wände und Decken; Türen ausgenommen.">${esc(draft.scopeDescription||"")}</textarea><label style="display:block;margin:10px 0;font-weight:800"><input id="kofferShowQty" type="checkbox" ${draft.showQuantities!==false?"checked":""}> Mengen und Einheiten (z. B. m²) im Kundenangebot anzeigen</label><h4>Angebotsart</h4><div class="koffer-choice">${TYPES.map(x=>`<button data-type="${x.id}" class="${draft.offerType===x.id?"active":""}">${esc(x.label)}</button>`).join("")}</div>${measurementUi()}<div id="kofferBathCalc" style="${["bathroom","bathroom_compact"].includes(draft.offerType)?"":"display:none"}">${bathCalculator()}</div>${pane("interior","Abdeckarbeiten – einmalig auswählen",checks(COVER,"coverSteps")+"<h4>Bauteile</h4>"+checks(PARTS,"parts")+"<h4>Beschichtung und Zusatzarbeiten</h4>"+checks(INTERIOR,"steps"))}${pane("facade","Fassadenarbeiten",checks(FACADE,"facadeSteps"))}${pane("bathroom","Bad – ausführliche Variante",checks(BATH,"bathroomSteps"))}${pane("bathroom_compact","Fugenloses Bad – kompakte Variante",checks(BATH_COMPACT,"bathroomCompactSteps"))}${pane("lime_plaster","Kalkputz",checks(LIME,"limeSteps"))}${pane("wdvs","WDVS – kurz",checks(WDVS,"wdvsSteps"))}<div id="kofferNotepad"></div><h4>Angebotspositionen</h4><div id="kofferPositions" class="koffer-preview"></div><div class="kcv2-savebar" style="position:static;margin-top:12px"><span id="kofferMsg" class="msg"></span><button id="kofferSave" type="button">Angebotsentwurf speichern</button></div>`;host.prepend(box);mountOfferInquiry(box);
     box.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{draft.offerType=b.dataset.type;draft.positions=positions();box.remove();render()});box.querySelectorAll("[data-list]").forEach(x=>x.onchange=()=>{const key=x.dataset.list;draft[key]=[...box.querySelectorAll(`[data-list="${key}"]:checked`)].map(y=>y.value);syncPositions()});box.querySelectorAll("[data-bath-surface]").forEach(x=>x.onchange=()=>{draft.bathroomCalc.finishes=bathFinishes();draft.bathroomCalc.finishes[x.dataset.bathSurface][x.dataset.bathFinish]=x.checked;syncPositions(true)});box.querySelectorAll("[data-bath-calc]").forEach(x=>x.oninput=x.onchange=()=>{const key=x.dataset.bathCalc;if(key.endsWith("Deduction")){const value=x.value.trim()?calculateNoteExpression(x.value):0,valid=Number.isFinite(value)&&value>=0; x.setCustomValidity(valid?"":"Bitte eine gültige Rechnung mit einem Ergebnis ab 0 eingeben.");const result=box.querySelector(`[data-bath-result="${key}"]`);if(result)result.textContent=valid?`${value.toLocaleString("de-AT",{maximumFractionDigits:3})} m²`:"Rechenweg prüfen";if(!valid)return;draft.bathroomCalc[key+"Formula"]=x.value;draft.bathroomCalc[key]=value;}else draft.bathroomCalc[key]=key==="wallFormula"?x.value:Math.max(0,Number(x.value||0));syncPositions(true)});box.querySelectorAll("[data-measure]").forEach(x=>x.oninput=x.onchange=()=>{const key=x.dataset.measure;draft.measurement[key]=key==="mode"?x.value:Math.max(0,Number(x.value||0));if(key==="mode"){box.remove();render()}else syncPositions(true)});box.querySelectorAll("[data-standard]").forEach(x=>x.oninput=()=>{const key=x.dataset.standard,value=key==="materialMarkupPct"?Math.max(-100,Number(x.value||0)):Math.max(0,Number(x.value||0));draft.measurement[key]=value;for(const p of draft.positions){if(key==="hourlyRate"&&!p.hourlyRateOverridden)p.hourlyRate=value;if(key==="materialMarkupPct"&&!p.materialMarkupOverridden)p.materialMarkupPct=value;p.unitPrice=+calculatedPrice(costing(p)).toFixed(2)}renderPositions()});document.getElementById("kofferShowQty").onchange=e=>draft.showQuantities=e.target.checked;document.getElementById("kofferSave").onclick=()=>{const invalid=[...box.querySelectorAll("[data-bath-calc]")].find(x=>!x.checkValidity());if(invalid){invalid.reportValidity();return;}return save()};renderPositions();renderAreaResult();renderMeasureResult();
   }
   function editorContext(){const editor=document.getElementById("koffer");return Object.freeze({editor,jobId:String(editor?.dataset.jobId||""),generation:loadSerial,draft})}
