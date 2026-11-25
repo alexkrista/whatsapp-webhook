@@ -27,7 +27,7 @@
     const c=current;
     const data=await request(`/kristine/api/monthly-days/${encodeURIComponent(c.id)}?from=${c.from}&to=${c.to}`);
     if(c!==current)return;
-    c.days=data.days;c.vacationEntitlement=data.vacationEntitlement;c.drafts={};c.closed=c.days.some(d=>d.date>=c.from&&d.date<=c.to&&d.monthClosed);
+    c.days=data.days;c.correction=data.correction;c.vacationEntitlement=data.vacationEntitlement;c.drafts={};c.closed=c.days.some(d=>d.date>=c.from&&d.date<=c.to&&d.monthClosed);
     await window.KrisMonthly.refreshClosures(c.from.slice(0,7));
     c.person=await window.KrisMonthly.buildPerson(c.employee,c.from,c.to,c.za);
     render();
@@ -46,7 +46,8 @@
     $("employeeReviewTitle").textContent=(c.employee.name||c.id)+" · "+c.from+" bis "+c.to;
     $("employeeReviewModel").textContent="Arbeitszeitmodell: "+(person.modelLabel||"")+" · Personalnummer: "+(person.personnelNumber||"–");
     const status=$("employeeReviewStatus");status.className="employee-review-status"+(c.closed?" closed":"");
-    status.innerHTML=c.closed?'<strong>Monat abgeschlossen – Stunden gesperrt.</strong> Abschluss und PDF bleiben unverändert. Änderungen erfordern eine ausdrückliche Wiederöffnung mit Begründung. <button class="btn secondary" type="button" data-review-reopen>Abgeschlossenen Monat wieder öffnen</button>':'<strong>Offener Monat.</strong> Rot markiert: mehr als 10 Arbeitsstunden pro Tag bzw. mehr als 50 pro Kalenderwoche. Pausen und bezahlte Abwesenheiten zählen dafür nicht als Arbeit. Die Wochensummen enthalten die angezeigten Tage.';
+    status.innerHTML=c.closed?'<strong>Monat abgeschlossen – Stunden gesperrt.</strong> Abschluss und PDF bleiben unverändert. Änderungen erfordern eine ausdrückliche Wiederöffnung mit Begründung. <button class="btn secondary" type="button" data-review-reopen>Korrektur nach Obelisk öffnen</button>':c.correction?'<strong>Lohnkorrektur offen.</strong> Nach dem Speichern die Änderungen prüfen und den Monat wieder sperren.':'<strong>Offener Monat.</strong> Rot markiert: mehr als 10 Arbeitsstunden pro Tag bzw. mehr als 50 pro Kalenderwoche. Pausen und bezahlte Abwesenheiten zählen dafür nicht als Arbeit. Die Wochensummen enthalten die angezeigten Tage.';
+    modal.querySelector("[data-review-close]").textContent=c.correction?"Korrekturen prüfen und erneut sperren":"Speichern & Monat abschließen";
     const byDate=new Map(person.days.map(d=>[d.date,d])),days=c.days.filter(d=>d.date>=c.from&&d.date<=c.to),weeks=new Map();
 
     const vacation=c.vacationEntitlement;
@@ -106,6 +107,16 @@
     const c=current,month=c.from.slice(0,7),last=add(month+"-01",new Date(Number(month.slice(0,4)),Number(month.slice(5)),0).getDate()-1);
     if(c.from!==month+"-01"||c.to!==last||last>=new Date().toISOString().slice(0,10))throw new Error("Zum Abschluss einen vollständigen vergangenen Monat auswählen.");
     await save();
+    if(c.correction){
+      const {changes,balanceChanges,revision}=c.correction;
+      const blocks=rows=>rows.map(row=>[row.from+"–"+row.to,row.reason||kinds[row.type]||row.type,row.code].filter(Boolean).join(" ")).join(", ")||"–";
+      const labels={newTime:"ZA Neustand",newVacation:"Urlaub Rest",z10:"Überstunden +10 %",z50:"Überstunden +50 %"};
+      const lines=[...changes.map(day=>day.date+"\n  Vorher: "+blocks(day.before)+"\n  Nachher: "+blocks(day.after)),...balanceChanges.map(row=>labels[row.key]+": "+(row.before??"–")+" → "+(row.after??"–"))];
+      if(!confirm("Lohnkorrektur für "+c.employee.name+" · "+month+"\n\n"+(lines.join("\n\n")||"Keine Änderungen gegenüber dem letzten Abschluss.")+"\n\nÄnderungen bestätigen und Monat wieder sperren?"))return;
+      await request("/kristine/api/month-close",{method:"POST",body:JSON.stringify({month,people:[c.person],correctionRevision:revision})});
+      window.KrisMonthly.invalidate();await load();message("Korrektur bestätigt. Die Stunden sind wieder gesperrt.");
+      return;
+    }
     if(!confirm(month+" für "+c.employee.name+" verbindlich abschließen? Die Stunden werden gespeichert und danach gesperrt. Spätere Änderungen erfordern eine deutliche Warnung, Begründung und Wiederöffnung."))return;
     await request("/kristine/api/month-close",{method:"POST",body:JSON.stringify({month,people:[c.person]})});
     window.KrisMonthly.invalidate();await load();message("Monat gespeichert und abgeschlossen. Stunden sind gesperrt.");
