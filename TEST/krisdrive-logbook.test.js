@@ -742,3 +742,16 @@ test("unknown distance can be explicitly hidden without changing it to zero",asy
   const row=book.rows[0],r=await fetch(h.base+`/byd/${row.id}/remove`,{method:"POST",headers:{"Content-Type":"application/json","x-admin-token":"logbook-test-only"},body:JSON.stringify({confirmed:true,revision:row.revision})});assert.equal(r.status,200);
   const removed=(await (await h.get()).json()).removedRows;assert.equal(removed[0].distanceKm,null);
 });
+
+test("splits the overnight report at three confirmed ignition cycles and leaves incomplete kilometres open", () => {
+  const {ignitionParts}=require("../krisdrive-logbook");
+  const trip={id:"overnight",deviceId:"1",startedAt:"2026-11-23T21:24:04.000Z",closedAt:"2026-11-24T06:40:00.000Z",distanceKm:20.34};
+  const stamps=["2026-11-23T21:24:04Z","2026-11-23T21:26:58Z","2026-11-24T05:40:50Z","2026-11-24T05:44:22Z","2026-11-24T06:13:38Z","2026-11-24T06:38:59Z"];
+  const events=stamps.map((eventTime,i)=>({deviceId:1,eventTime,type:i%2?"ignitionOff":"ignitionOn"}));
+  const positions=stamps.map((fixTime,i)=>({deviceId:1,fixTime,latitude:i%2?47.22:0,longitude:i%2?9.61:0}));
+  const parts=ignitionParts(trip,events,positions);
+  assert.deepEqual(parts.map(row=>[row.startedAt,row.closedAt]),[0,2,4].map(i=>[new Date(stamps[i]).toISOString(),new Date(stamps[i+1]).toISOString()]));
+  assert.equal(new Set(parts.map(row=>row.id)).size,3);
+  assert.ok(parts.every(row=>row.distanceKm===null&&row.startPoint===null&&row.endPoint));
+  assert.deepEqual(ignitionParts(trip,events.slice(0,-1),positions),[]);
+});

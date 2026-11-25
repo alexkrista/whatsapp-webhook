@@ -193,6 +193,41 @@ function normalizeTrip(trip, vehicleId, deviceId) {
   };
 }
 
+// Only replace a report when complete ignition cycles explain its full interval.
+function ignitionParts(trip, events, positions) {
+  const start = Date.parse(trip.startedAt), end = Date.parse(trip.closedAt), tolerance = 180000;
+  const switches = array(events).filter(row => String(row.deviceId) === trip.deviceId && ["ignitionOn", "ignitionOff"].includes(row.type))
+    .map(row => ({ type: row.type, at: Date.parse(row.eventTime) }))
+    .filter(row => row.at >= start - tolerance && row.at <= end + tolerance).sort((a,b) => a.at - b.at);
+  const cycles = [];
+  let on = null;
+  for (const event of switches) {
+    if (event.type === "ignitionOn") { if (on === null) on = event.at; continue; }
+    if (on !== null && event.at > on) { cycles.push([on, event.at]); on = null; }
+  }
+  if (cycles.length < 2 || on !== null || Math.abs(cycles[0][0] - start) > tolerance || Math.abs(cycles.at(-1)[1] - end) > tolerance) return [];
+  const fixes = array(positions).filter(row => String(row.deviceId) === trip.deviceId && row.valid !== false && !(number(row.accuracy) > 150))
+    .map(row => ({ row, at: Date.parse(row.fixTime || row.deviceTime), point: coordinates(row.latitude,row.longitude) }))
+    .filter(fix => fix.point && Number.isFinite(fix.at)).sort((a,b) => a.at - b.at);
+  return cycles.map(([from,to],index) => {
+    const points = fixes.filter(fix => fix.at >= from && fix.at <= to), first = points[0], last = points.at(-1);
+    const startedAt = new Date(from).toISOString(), closedAt = new Date(to).toISOString();
+    const departure = first && first.at-from <= 15000 ? first : null;
+    const arrival = last && to-last.at <= 15000 ? last : null;
+    const part = { ...trip, id: index ? "trip-" + hash(trip.id + ":" + startedAt) : trip.id,
+      splitReportEnd: trip.closedAt, startedAt, closedAt, startPoint:departure?.point || null, endPoint:arrival?.point || null,
+      startPositionId:"", endPositionId:"", startLocation:location(departure?.row.address,departure?.point), endLocation:location(arrival?.row.address,arrival?.point),
+      odometerStartKm:null, odometerEndKm:null, distanceKm:null, distanceSource:"gps_unverified" };
+    const covered = departure && arrival &&
+      points.every((fix,i) => !i || fix.at-points[i-1].at <= 90000);
+    if (covered) {
+      part.distanceKm = distanceFromPositions(part, points.map(fix => fix.row));
+      if (part.distanceKm !== null) part.distanceSource = "gps_positions";
+    }
+    return part;
+  });
+}
+
 function normalizeLocal(ride, vehicleId) {
   const startedAt = iso(ride.startedAt), closedAt = iso(ride.closedAt);
   if (!ride.id || !startedAt || !closedAt || closedAt < startedAt) return null;
@@ -494,6 +529,23 @@ function registerKrisdriveLogbook(app, options = {}) {
         trips = (await traccar("/api/reports/trips?" + query)).map(row => normalizeTrip(row, ctx.vehicle.id, deviceId)).filter(Boolean);
         for (const trip of trips) originals.set(trip.id, { ...trip });
         const previous = await stateFor(ctx.vehicle.id);
+        const splitTrips = [];
+        for (const trip of trips) {
+          const saved = previous.records[trip.id];
+          if (saved?.data.splitReportEnd === trip.closedAt) continue;
+          const duration = Date.parse(trip.closedAt) - Date.parse(trip.startedAt);
+          if (duration < 3600000 || duration > 86400000 || saved?.removedAt || Object.keys(saved?.edits || {}).length) { splitTrips.push(trip); continue; }
+          let parts = [];
+          try {
+            const window = { deviceId, from:new Date(Date.parse(trip.startedAt)-180000).toISOString(), to:new Date(Date.parse(trip.closedAt)+180000).toISOString() };
+            const eventQuery = new URLSearchParams(window);
+            eventQuery.append('type','ignitionOn'); eventQuery.append('type','ignitionOff');
+            const events = await traccar('/api/reports/events?' + eventQuery, 8000);
+            if (ignitionParts(trip,events,[]).length) parts = ignitionParts(trip,events,await traccar('/api/positions?' + new URLSearchParams(window),8000));
+          } catch { /* Keep the report until GPS and ignition evidence can be loaded. */ }
+          splitTrips.push(...(parts.length ? parts : [trip]));
+        }
+        trips = splitTrips;
         // A report can omit an endpoint while still referring to its original
         // position. Recover that exact fix, not the first later fix while moving.
         const endpoints = trips.filter(trip => previous.records[trip.id]?.edits?.category !== "private").flatMap(trip =>
@@ -523,7 +575,7 @@ function registerKrisdriveLogbook(app, options = {}) {
         const chronological = [...trips].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
         for (let i = 0; i < chronological.length; i += 4) {
           await Promise.all(chronological.slice(i, i + 4).map(async trip => {
-            if (previous.records[trip.id]?.edits?.category === "private") return;
+            if (trip.splitReportEnd || previous.records[trip.id]?.edits?.category === "private") return;
             const old = previous.records[trip.id]?.data;
             if (old?.endPointSource === "stable_gps" && old.closedAt === trip.closedAt) {
               const samePoint = pointKey(trip.endPoint) === pointKey(old.endPoint);
@@ -551,7 +603,7 @@ function registerKrisdriveLogbook(app, options = {}) {
           }));
         }
         await resolveAddresses(trips, previous, force);
-        const suspectTrips = trips.filter(trip => !plausibleDistance({ ...trip, ...distanceEndpoints.get(trip.id) }));
+        const suspectTrips = trips.filter(trip => !trip.splitReportEnd && !plausibleDistance({ ...trip, ...distanceEndpoints.get(trip.id) }));
         for (let i = 0; i < suspectTrips.length; i += 4) {
           await Promise.all(suspectTrips.slice(i, i + 4).map(async trip => {
             const reportedDistanceKm = trip.distanceKm;
@@ -615,7 +667,10 @@ function registerKrisdriveLogbook(app, options = {}) {
         // The report is authoritative when available; the ignition archive is a
         // fallback, never a second copy of the same trip.
         const candidates = gpsOk ? trips : ctx.local.filter(row => Date.parse(row.startedAt) >= range.start - DAY && Date.parse(row.startedAt) < range.end + DAY);
+        const blockedSplits = new Set(candidates.filter(trip => trip.splitReportEnd && originals.has(trip.id) &&
+          (state.records[trip.id]?.removedAt || Object.keys(state.records[trip.id]?.edits || {}).length)).map(trip => trip.splitReportEnd));
         for (const trip of candidates) {
+          if (trip.splitReportEnd && blockedSplits.has(trip.splitReportEnd)) continue;
           if (trip.source === "kristine" && Object.values(state.records).some(record => record.data.source === "traccar" && matchingLocal(record.data, [trip]).length)) continue;
           let record = state.records[trip.id];
           if (!record && trip.source === "traccar") {
@@ -888,4 +943,4 @@ function createCsv(data) {
   return "\uFEFF" + rows.map(row => row.map(cell).join(";")).join("\r\n") + "\r\n";
 }
 
-module.exports = { registerKrisdriveLogbook, trackerMileage, number, coordinates, streetAndTown, dateRange, normalizeTrip, normalizeLocal, view, totals, createCsv, displayDate, decimal, categoryLabel };
+module.exports = { registerKrisdriveLogbook, ignitionParts, trackerMileage, number, coordinates, streetAndTown, dateRange, normalizeTrip, normalizeLocal, view, totals, createCsv, displayDate, decimal, categoryLabel };
