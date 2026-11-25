@@ -743,7 +743,7 @@ test("unknown distance can be explicitly hidden without changing it to zero",asy
   const removed=(await (await h.get()).json()).removedRows;assert.equal(removed[0].distanceKm,null);
 });
 
-test("splits the overnight report at three confirmed ignition cycles and leaves incomplete kilometres open", () => {
+test("splits the overnight report at three confirmed ignition cycles and leaves incomplete kilometres open", async t => {
   const {ignitionParts}=require("../krisdrive-logbook");
   const trip={id:"overnight",deviceId:"1",startedAt:"2026-11-23T21:24:04.000Z",closedAt:"2026-11-24T06:40:00.000Z",distanceKm:20.34};
   const stamps=["2026-11-23T21:24:04Z","2026-11-23T21:26:58Z","2026-11-24T05:40:50Z","2026-11-24T05:44:22Z","2026-11-24T06:13:38Z","2026-11-24T06:38:59Z"];
@@ -754,4 +754,11 @@ test("splits the overnight report at three confirmed ignition cycles and leaves 
   assert.equal(new Set(parts.map(row=>row.id)).size,3);
   assert.ok(parts.every(row=>row.distanceKm===null&&row.startPoint===null&&row.endPoint));
   assert.deepEqual(ignitionParts(trip,events.slice(0,-1),positions),[]);
+  const h = await harness(t,{request:async url=>({ok:true,json:async()=>url.pathname==="/api/reports/events" ? events.map(row=>({...row,deviceId:17})) : url.pathname==="/api/positions" ? positions.map(row=>({...row,deviceId:17})) : url.pathname==="/api/reports/trips" ? [{deviceId:17,startPositionId:101,startTime:trip.startedAt,endTime:trip.closedAt,distance:20340}] : []})});
+  const query="?vehicleId=byd&from=2026-11-23&to=2026-11-24&refresh=1";
+  const first=await (await h.get(query)).json();
+  const second=await (await h.get(query)).json();
+  assert.equal(first.rows.length,3);
+  assert.deepEqual(second.rows.map(row=>row.id),first.rows.map(row=>row.id));
+  assert.equal(first.totals.missingKm,3);
 });
