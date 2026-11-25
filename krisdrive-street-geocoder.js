@@ -3,7 +3,7 @@
 const { setTimeout: sleep } = require("node:timers/promises");
 const DEFAULT_FALLBACK_URL = "https://photon.komoot.io/reverse";
 
-function streetFromPhoton(body, point, maxMetres = 200) {
+function streetFromPhoton(body, point, maxMetres = 200, allowLocality = false) {
   const clean = value => typeof value === "string" ? value.trim().replace(/[,\r\n]+/g, " ").slice(0, 160) : "";
   const candidates = [];
   for (const feature of Array.isArray(body?.features) ? body.features : []) {
@@ -12,13 +12,14 @@ function streetFromPhoton(body, point, maxMetres = 200) {
         !coord.every(value => typeof value === "number" && Number.isFinite(value))) continue;
     const street = clean(p.street) || (p.osm_key === "highway" ? clean(p.name) : "");
     const town = clean(p.city) || clean(p.town) || clean(p.village) || clean(p.locality);
-    if (!street || !town) continue;
+    if (!town || (!street && !allowLocality)) continue;
     const metres = Math.hypot((coord[1]-point.lat)*111195, (coord[0]-point.lng)*111195*Math.cos(point.lat*Math.PI/180));
     if (metres > maxMetres) continue;
     const postcode = clean(p.postcode);
-    candidates.push({ metres, address: `${street}, ${[postcode,town].filter(Boolean).join(" ")}` });
+    const locality = [postcode,town].filter(Boolean).join(" ");
+    candidates.push({ metres, street, address: street ? street + ", " + locality : "Ort: " + locality });
   }
-  candidates.sort((a,b) => a.metres-b.metres);
+  candidates.sort((a,b) => Number(Boolean(b.street))-Number(Boolean(a.street)) || a.metres-b.metres);
   return candidates[0]?.address || "";
 }
 
@@ -43,8 +44,8 @@ function createStreetLookup({ primary, request = globalThis.fetch, fallbackUrl =
         if (response.status === 429) blockedUntil = clock() + Math.max(60000, (Number(response.headers?.get?.("retry-after")) || 60)*1000);
         throw Object.assign(Error("Fallback geocoder unavailable"), { status: response.status });
       }
-      const address = streetFromPhoton(await response.json(), point);
-      if (!address) throw Object.assign(Error("Fallback has no nearby street"), { code: "empty_address" });
+      const address = streetFromPhoton(await response.json(), point, 200, true);
+      if (!address) throw Object.assign(Error("Fallback has no nearby street or locality"), { code: "empty_address" });
       return { address, provider: "photon" };
     });
     tail = run;
