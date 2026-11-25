@@ -465,6 +465,24 @@
         action(section,"+ Aufmaß in "+area,()=>{addGroup({area,title:"Aufmaß",quantity:"",unit:"m²",suggestions:[]});draw();});
       }
     }
+    function addIntake(intake,messages){
+      for(const document of intake.documents){
+        if(seen.has(document.hash))continue;
+        seen.add(document.hash);
+        if(document.groups.length){
+          for(const group of document.groups)addGroup(group);
+          messages.push(document.name+": "+document.groups.length+" Aufmaßgruppen.");
+        }else if(document.text){
+          const details=append(sources,"details");
+          append(details,"summary",document.name+" · Aufmaß manuell zuordnen");
+          const content=append(details,"pre",document.text);
+          content.style.whiteSpace="pre-wrap";
+        }else {
+          messages.push(document.name+(document.unreadable?": Datei konnte nicht gelesen werden.":": Kein auswertbares Aufmaß erkannt."));
+        }
+      }
+      messages.push((intake.subject||"Anfrage")+" gelesen.");
+    }
     async function importFiles(files){
       const context=editorContext();
       if(busy||!editorContextActive(context)||context.editor!==box)return;
@@ -480,22 +498,7 @@
           const result=await api("/admin/api/offer-inquiry",{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:file});
           if(!editorContextActive(context))return;
           const intake=result.intake;
-          for(const document of intake.documents){
-            if(seen.has(document.hash))continue;
-            seen.add(document.hash);
-            if(document.groups.length){
-              for(const group of document.groups)addGroup(group);
-              messages.push(document.name+": "+document.groups.length+" Aufmaßgruppen.");
-            }else if(document.text){
-              const details=append(sources,"details");
-              append(details,"summary",document.name+" · Aufmaß manuell zuordnen");
-              const content=append(details,"pre",document.text);
-              content.style.whiteSpace="pre-wrap";
-            }else {
-              messages.push(document.name+(document.unreadable?": Datei konnte nicht gelesen werden.":": Kein auswertbares Aufmaß erkannt."));
-            }
-          }
-          messages.push((intake.subject||file.name)+" gelesen.");
+          addIntake(intake,messages);
         }catch(error){messages.push(file.name+": "+error.message);}
       }
       busy=false;input.disabled=false;input.value="";
@@ -530,6 +533,13 @@
       renderPositions();renderOfferTotals();renderLivePreview();draw();
       status.textContent=positions.length+" Leistungen übernommen. Bitte Angebotsentwurf speichern.";
     };
+    const pending=window.kristaPendingOfferInquiry;
+    if(pending?.jobId===String(jobId)){
+      const messages=[];
+      pending.intakes.forEach(intake=>addIntake(intake,messages));
+      panel.open=true;status.textContent=messages.join(" ");
+      delete window.kristaPendingOfferInquiry;
+    }
     draw();
   }
   function render(){const host=document.getElementById("kcv2Host");if(!host||!draft||document.getElementById("koffer"))return;document.querySelector('[data-bk-tab="calculation"]')?.replaceChildren(document.createTextNode("Kalkulation / Angebot"));const box=document.createElement("div");box.id="koffer";box.dataset.jobId=jobId;box.className="kcv2-card koffer";box.innerHTML=`<div class="kcv2-section-head"><div><h3>Angebot erstellen</h3><div class="koffer-note">Stammdaten und Terminwissen dieser Baustelle werden übernommen. Positionen und Preise stammen aus deinen Vorlagen.</div></div><span class="bk-source">${esc(job?.contactName||job?.customerMaster?.name||"Kunde noch ergänzen")}</span></div><textarea id="kofferIntro" class="koffer-intro">${esc(draft.intro||defaultIntro())}</textarea><h4>Leistungsumfang / Räume</h4><textarea id="kofferScope" class="koffer-intro" placeholder="z. B. Wohnzimmer, Küche und Gang – Wände und Decken; Türen ausgenommen.">${esc(draft.scopeDescription||"")}</textarea><label style="display:block;margin:10px 0;font-weight:800"><input id="kofferShowQty" type="checkbox" ${draft.showQuantities!==false?"checked":""}> Mengen und Einheiten (z. B. m²) im Kundenangebot anzeigen</label><h4>Angebotsart</h4><div class="koffer-choice">${TYPES.map(x=>`<button data-type="${x.id}" class="${draft.offerType===x.id?"active":""}">${esc(x.label)}</button>`).join("")}</div>${measurementUi()}<div id="kofferBathCalc" style="${["bathroom","bathroom_compact"].includes(draft.offerType)?"":"display:none"}">${bathCalculator()}</div>${pane("interior","Abdeckarbeiten – einmalig auswählen",checks(COVER,"coverSteps")+"<h4>Bauteile</h4>"+checks(PARTS,"parts")+"<h4>Beschichtung und Zusatzarbeiten</h4>"+checks(INTERIOR,"steps"))}${pane("facade","Fassadenarbeiten",checks(FACADE,"facadeSteps"))}${pane("bathroom","Bad – ausführliche Variante",checks(BATH,"bathroomSteps"))}${pane("bathroom_compact","Fugenloses Bad – kompakte Variante",checks(BATH_COMPACT,"bathroomCompactSteps"))}${pane("lime_plaster","Kalkputz",checks(LIME,"limeSteps"))}${pane("wdvs","WDVS – kurz",checks(WDVS,"wdvsSteps"))}<div id="kofferNotepad"></div><h4>Angebotspositionen</h4><div id="kofferPositions" class="koffer-preview"></div><div class="kcv2-savebar" style="position:static;margin-top:12px"><span id="kofferMsg" class="msg"></span><button id="kofferSave" type="button">Angebotsentwurf speichern</button></div>`;host.prepend(box);mountOfferInquiry(box);
@@ -551,7 +561,7 @@
     }
   }
   function normalizeLoadedGroups(){normalizeFacadeGroups();const rooms=draft.rooms||[];for(const [i,room] of rooms.entries()){room.id=room.id||`room-${Date.now()}-${i}`;for(const p of draft.positions||[])if(!p.groupId&&String(p.groupName||"")===String(room.name||""))p.groupId=room.id}if(draft.offerType==="regie_material"&&rooms.length===1){const room=rooms[0],name=String(room.name||"Raum 1").trim(),regie=(draft.positions||[]).find(p=>p.unit==="Std");if(regie&&!(+room.regieHours||0))room.regieHours=Math.max(0,+regie.quantity||0);for(const p of draft.positions||[])if(p.unit==="Std"||/^Material und Maschinen/.test(p.text||"")||p.unit==="VE"){p.groupId=room.id;p.groupName=name}}}
-  function init(){css();observer=new MutationObserver(()=>{if(jobId&&!document.getElementById("koffer"))render()});observer.observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("click",e=>{const row=e.target.closest?.(".job-row[data-job]");if(row)setTimeout(()=>load(row.dataset.job),500)},true);addEventListener("hashchange",()=>setTimeout(()=>load(decodeURIComponent(location.hash.slice(1))),500));const id=decodeURIComponent(location.hash.slice(1));if(id)setTimeout(()=>load(id),700)}
+  function init(){css();document.addEventListener("krista:baustelle-opened",event=>{const id=String(event.detail?.jobId||"");if(id&&window.kristaPendingOfferInquiry?.jobId===id)load(id)});observer=new MutationObserver(()=>{if(jobId&&!document.getElementById("koffer"))render()});observer.observe(document.documentElement,{childList:true,subtree:true});document.addEventListener("click",e=>{const row=e.target.closest?.(".job-row[data-job]");if(row)setTimeout(()=>load(row.dataset.job),500)},true);addEventListener("hashchange",()=>setTimeout(()=>load(decodeURIComponent(location.hash.slice(1))),500));const id=decodeURIComponent(location.hash.slice(1));if(id)setTimeout(()=>load(id),700)}
   async function ensureOfferMaterials(context=editorContext()){requireEditorContext(context);for(const p of context.draft.positions||[])for(const m of p.materials||[]){requireEditorContext(context);const name=String(m.name||"").trim();if(!name||m.materialId)continue;const known=materialMaster.find(x=>String(x.product||x.name||x.label||"").trim().toLowerCase()===name.toLowerCase());if(known){m.materialId=known.materialId||known.id||"";continue}const result=await api("/admin/api/materials/auto",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,unit:m.unit,unitPrice:m.unitPrice})});requireEditorContext(context);if(result.material){m.materialId=result.material.materialId||result.material.id||"";m.name=result.material.product||name;materialMaster.push({...result.material,name:result.material.product||name})}}}
   function mountAutomaticMaterialSave(){const btn=document.getElementById("kofferSave");if(!btn||btn.dataset.materialAuto)return;btn.dataset.materialAuto="1";const original=btn.onclick;btn.onclick=async()=>{const context=editorContext();if(!editorContextActive(context))return original.call(btn,context);btn.disabled=true;const msg=context.editor.querySelector("#kofferMsg");try{msg.textContent="Neue Materialien werden in den Stamm übernommen …";await ensureOfferMaterials(context);await original.call(btn,context)}catch(error){if(document.getElementById("koffer")===context.editor)msg.textContent="Fehler beim Materialstamm: "+error.message;if(editorContextActive(context))btn.disabled=false}}}
   async function prepareFinalOfferPortal(context=editorContext()){requireEditorContext(context);await Promise.all([ensureOfferMaterials(context),ensureOfferTerms()]);requireEditorContext(context);const saved=await save(context);if(!saved)throw new Error("Angebot wurde nicht gespeichert.");context={...context,draft};requireEditorContext(context);const finalized=await api(`/admin/api/job/${encodeURIComponent(context.jobId)}/offer-draft/finalize`,{method:"POST"});requireEditorContext(context);draft=finalized.draft;const refreshed={...context,draft};const portal=await api(`/admin/api/job/${encodeURIComponent(context.jobId)}/customer-portal/invitation`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({purpose:"offer",offerNumber:draft.offerNumber,offerRevision:draft.offerRevision})});requireEditorContext(refreshed);offerPortal=portal;return{portal,context:refreshed}}

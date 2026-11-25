@@ -97,6 +97,38 @@ function onlvMeasurements(xml) {
   return groups.slice(0, 250);
 }
 
+function projectDetails(cover, subject) {
+  const lines = cover.split(/\r?\n/).map(line => line.trim());
+  const find = pattern => lines.findIndex(line => pattern.test(line));
+  const value = (index, pattern) => index < 0 ? "" : lines[index].replace(pattern, "").trim();
+  const project = find(/^Bauvorhaben:/i), owner = find(/^(Auftraggeber|Bauherrschaft):/i);
+  const architect = find(/^(Planung|Architekt(?:urbüro)?):/i);
+  const submission = find(/^Angebotsabgabe(?:\/Anschrift)?:/i);
+  const address = (street = "", place = "") => {
+    const road = street.match(/^([\p{L}][^:\n]*?)\s+(\d+[\p{L}\d/.-]*)$/u);
+    const locality = place.match(/^(?:A[- ]?)?(\d{4})\s+([\p{L}][^:\n]*)$/u);
+    return locality ? { street: road?.[1] || "", house: road?.[2] || "", postal: locality[1], city: locality[2] } : {};
+  };
+  const architectLine = value(architect, /^(Planung|Architekt(?:urbüro)?):/i);
+  const architectParts = architectLine.match(/^(.*),\s*([^,]+),\s*((?:A[- ]?)?\d{4}\s+.+)$/);
+  return {
+    name: value(project, /^Bauvorhaben:/i) || subject,
+    site: project < 0 ? {} : address(lines[project + 1], lines[project + 2]),
+    owner: owner < 0 ? {} : { name: value(owner, /^(Auftraggeber|Bauherrschaft):/i), ...address(lines[owner + 1], lines[owner + 2]) },
+    architect: { name: architectParts?.[1] || architectLine, ...address(architectParts?.[2], architectParts?.[3]), phone: architect < 0 ? "" : (lines[architect + 1]?.match(/^Tel\.?\s*:?\s*(.*)$/i)?.[1] || "") },
+    deadline: value(find(/^Angebotsfrist(?:\/Abgabetermin)?:/i), /^Angebotsfrist(?:\/Abgabetermin)?:/i),
+    start: value(find(/^Leistungsbeginn:/i), /^Leistungsbeginn:/i),
+    submissionEmail: submission < 0 ? "" : (lines[submission + 1]?.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)?.[0] || ""),
+  };
+}
+
+async function pdfText(buffer, pages) {
+  const { PDFParse } = require("pdf-parse");
+  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+  try { return (await parser.getText({ first: pages })).text.slice(0, 60000); }
+  finally { await parser.destroy(); }
+}
+
 async function readInquiry(buffer) {
   const { mail } = parseMsg(buffer);
   const documents = [];
@@ -112,8 +144,11 @@ async function readInquiry(buffer) {
       documents.push({ name: attachment.name, hash, groups: [], text: "", unreadable: true });
     }
   }
-  if (documents.some(document => !document.unreadable)) {
-    return { subject: mail.subject, sender: mail.senderName || mail.senderEmail, body: mail.body.slice(0, 20000), documents };
+  const structuredDocument = documents.find(document => !document.unreadable);
+  if (structuredDocument) {
+    const pdf = mail.attachments.find(item => item.name.toLowerCase() === structuredDocument.name.replace(/\.onlv$/i, ".pdf").toLowerCase());
+    const cover = pdf ? await pdfText(getMsgAttachment(buffer, pdf.index).content, 1).catch(() => "") : "";
+    return { subject: mail.subject, sender: mail.senderName || mail.senderEmail, project: projectDetails(cover || mail.body, mail.subject), documents };
   }
   for (const metadata of mail.attachments.filter(item => /\.pdf$/i.test(item.name)).slice(0, 12)) {
     const attachment = getMsgAttachment(buffer, metadata.index);
@@ -121,14 +156,11 @@ async function readInquiry(buffer) {
     const hash = createHash("sha256").update(attachment.content).digest("hex");
     let source = "";
     try {
-      const { PDFParse } = require("pdf-parse");
-      const parser = new PDFParse({ data: new Uint8Array(attachment.content) });
-      try { source = (await parser.getText({ first: 40 })).text.slice(0, 60000); }
-      finally { await parser.destroy(); }
+      source = await pdfText(attachment.content, 40);
     } catch { /* Keep the attachment listed for manual review. */ }
     documents.push({ name: attachment.name, hash, text: source, groups: measurements(source) });
   }
-  return { subject: mail.subject, sender: mail.senderName || mail.senderEmail, body: mail.body.slice(0, 20000), documents };
+  return { subject: mail.subject, sender: mail.senderName || mail.senderEmail, project: projectDetails(documents.map(document => document.text).find(text => /^Bauvorhaben:/im.test(text)) || mail.body, mail.subject), documents };
 }
 
-module.exports = { readInquiry, measurements, onlvMeasurements };
+module.exports = { readInquiry, measurements, onlvMeasurements, projectDetails };

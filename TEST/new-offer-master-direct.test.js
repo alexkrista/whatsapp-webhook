@@ -99,3 +99,51 @@ test("Baustellen button opens unsaved full Stammdaten as Angebot, never the quic
     dom.window.close();
   }
 });
+
+test("mail prefills the offer and hands off the imported positions after confirmation", async ()=>{
+  const {readInquiry}=require("../offer-inquiry");
+  const fixture=process.env.KRISTINE_OFFER_MAIL_FIXTURE;
+  const intake=fixture?await readInquiry(fs.readFileSync(fixture)):{
+    subject:"Anfrage",project:{
+      name:"Neubau Wohnhaus Kaiser-Frick Röthis",
+      site:{street:"Röslegasse",house:"1",postal:"6832",city:"Röthis"},
+      owner:{name:"Kaiser-Frick",street:"Walgaustrasse",house:"39",postal:"6832",city:"Röthis"},
+      architect:{name:"Marte.Marte Architekten ZT GmbH",street:"Neustadt",house:"37",postal:"6800",city:"Feldkirch"},
+    },documents:[{name:"LV.onlv",hash:"lv",groups:[]}],
+  };
+  const dom=new JSDOM(page,{url:"https://example.test/kristine/baustellen",runScripts:"outside-only"});
+  const w=dom.window, doc=w.document;
+  let created, reloads=0;
+  doc.addEventListener("krista:reload-baustellen",()=>{reloads++;});
+  w.fetch=async(url,options={})=>{
+    const endpoint=new URL(url,w.location.origin).pathname;
+    let data;
+    if(endpoint==="/admin/api/jobs/next-number")data={nextNumber:"26111"};
+    if(endpoint==="/admin/api/offer-inquiry")data={intake};
+    if(endpoint==="/admin/api/jobs"&&options.method==="POST"){
+      created=JSON.parse(options.body);data={jobId:"26111"};
+    }
+    return {ok:!!data,text:async()=>JSON.stringify(data||{error:endpoint})};
+  };
+  try {
+    w.eval(hub);
+    await w.BaustellenKnowledgeHub.newOffer(true);
+    const card=Array.from(doc.querySelectorAll("#bkMasterData > section")).find(el=>el.querySelector("h3")?.textContent==="Neues Angebot mit Mail");
+    await card.ondrop({preventDefault(){},dataTransfer:{files:[new w.File(["mail"],"anfrage.msg")]}});
+    await wait(20);
+    assert.equal(doc.getElementById("bkJobName").value,intake.project.name);
+    assert.equal(doc.getElementById("bkSiteStreet").value,"Röslegasse");
+    assert.equal(doc.getElementById("bkOwnerCustomer").value,intake.project.owner.name);
+    assert.equal(doc.getElementById("bkHomeStreet").value,"Walgaustrasse");
+    assert.equal(doc.getElementById("bkArchitectCompany").value,"Marte.Marte Architekten ZT GmbH");
+    assert.equal(doc.getElementById("bkArchitectStreet").value,"Neustadt");
+    assert.equal(created,undefined);
+    await doc.getElementById("bkSaveMaster").onclick();
+    assert.equal(created.street,"Röslegasse");
+    assert.equal(created.projectContacts.owner.residentialStreet,"Walgaustrasse");
+    assert.equal(created.projectContacts.architect.street,"Neustadt");
+    assert.equal(reloads,1);
+    assert.equal(w.kristaPendingOfferInquiry.jobId,"26111");
+    assert.deepEqual(JSON.parse(JSON.stringify(w.kristaPendingOfferInquiry.intakes[0].documents)),intake.documents);
+  } finally {dom.window.close();}
+});

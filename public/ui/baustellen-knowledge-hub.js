@@ -368,7 +368,65 @@ function groupRegieComparisonRows(rows = []) {
     newOfferDraft=null;
     document.getElementById("detail")?.classList.remove("bk-new-offer");
   }
-  async function openNewOffer(){
+  function mountNewOfferMail(draft){
+    const host=document.getElementById("bkMasterData");
+    const card=document.createElement("section");
+    card.className="bk-card";
+    card.innerHTML='<h3>Neues Angebot mit Mail</h3><label>Outlook-Mail hierher ziehen oder auswählen <input type="file" accept=".msg" multiple></label><p role="status"></p>';
+    host.prepend(card);
+    const input=card.querySelector("input"), status=card.querySelector("[role=status]");
+    const save=document.getElementById("bkSaveMaster");
+    const fill=(id,value)=>{
+      const field=document.getElementById(id);
+      if(field&&value&&!field.value.trim()){
+        field.value=value;
+        field.dispatchEvent(new Event("input",{bubbles:true}));
+      }
+    };
+    const address=(prefix,data)=>{
+      for(const [suffix,key] of [["Street","street"],["House","house"],["Postal","postal"],["City","city"]])fill(prefix+suffix,data[key]);
+    };
+    async function readFiles(files){
+      if(input.disabled||save.disabled||newOfferDraft!==draft)return;
+      input.disabled=true;save.disabled=true;
+      const notes=[];
+      try{
+        for(const file of files){
+          if(!/\.msg$/i.test(file.name)||file.size>20*1024*1024){
+            notes.push(file.name+": Bitte eine .msg-Datei bis 20 MB auswählen.");
+            continue;
+          }
+          status.textContent="Lese "+file.name+" …";
+          try{
+            const {intake}=await api("/admin/api/offer-inquiry",{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:file});
+            if(newOfferDraft!==draft)return;
+            draft.inquiries.push(intake);
+            const {name,site={},owner={},architect={},deadline,start,submissionEmail}=intake.project||{};
+            fill("bkJobName",name);
+            address("bkSite",site);
+            fill("bkOwnerCustomer",owner.name);
+            address("bkHome",owner);
+            fill("bkArchitectCompany",architect.name);
+            address("bkArchitect",architect);
+            fill("bkArchitectPhone",architect.phone);
+            if(submissionEmail&&architect.name)fill("bkArchitectEmail",submissionEmail);
+            if(!site.street||!owner.name||!architect.name)notes.push("Bitte fehlende Stammdaten ergänzen.");
+            notes.push([intake.subject||file.name,deadline&&"Angebotsfrist: "+deadline,start&&"Ausführung: "+start].filter(Boolean).join(" · "));
+          }catch(error){notes.push(file.name+": "+error.message);}
+        }
+      }finally{
+        if(newOfferDraft===draft){
+          status.textContent=notes.join(" / ");
+          save.disabled=false;input.disabled=false;input.value="";
+        }
+      }
+    }
+    input.onchange=()=>readFiles([...input.files]);
+    card.ondragover=event=>{if(event.dataTransfer.types.includes("Files"))event.preventDefault();};
+    card.ondrop=event=>{event.preventDefault();readFiles([...event.dataTransfer.files]);};
+    input.focus();
+  }
+  async function openNewOffer(withMail=false){
     if(newOfferDraft)return;
     ++loadSerial;
     currentJobId="";
@@ -384,7 +442,7 @@ function groupRegieComparisonRows(rows = []) {
     const target=new URL(location.href);
     target.searchParams.delete("newOffer");target.hash="";
     history.replaceState(history.state,"",target.pathname+target.search);
-    newOfferDraft={jobId:"",name:"",status:"Angebot",customerMaster:{},projectContacts:{},__newOffer:true};
+    newOfferDraft={jobId:"",name:"",status:"Angebot",customerMaster:{},projectContacts:{},__newOffer:true,inquiries:[]};
     detail.classList.add("open","bk-new-offer");
     detail.setAttribute("aria-hidden","false");
     document.body.style.overflow="hidden";
@@ -392,6 +450,7 @@ function groupRegieComparisonRows(rows = []) {
     document.getElementById("detailName").textContent="Baustellenmappe · Stammdaten · noch nicht gespeichert";
     selectTab("master");
     renderMasterDataEditor(newOfferDraft);
+    if(withMail)mountNewOfferMail(newOfferDraft);
     const numberField=document.getElementById("bkDraftJobId");
     numberField?.addEventListener("input",()=>{
       const text=numberField.value.trim();
@@ -407,13 +466,23 @@ function groupRegieComparisonRows(rows = []) {
       const status=document.getElementById("bkMasterSaveStatus");
       if(status)status.textContent="Baustellennummer konnte nicht vorgeschlagen werden: "+error.message+". Bitte eine freie Nummer eingeben.";
     }
-    document.getElementById("bkJobName")?.focus();
+    if(!withMail)document.getElementById("bkJobName")?.focus();
   }
   document.addEventListener("krista:baustelle-closed",clearNewOfferMode);
-  document.addEventListener("krista:baustelle-opened",clearNewOfferMode);
+  document.addEventListener("krista:baustelle-opened",event=>{
+    clearNewOfferMode();
+    const id=String(event.detail?.jobId||"");
+    if(id&&new URLSearchParams(location.search).get("offerMail")===id)loadJob(id);
+  });
 
   function openCreatedJobMaster(job){
     const target=new URL(location.href);
+    if(target.searchParams.get("offerMail")===String(job.jobId)){
+      selectTab("calculation");
+      target.searchParams.delete("offerMail");
+      history.replaceState(history.state,"",target.pathname+target.search+target.hash);
+      return;
+    }
     if(target.searchParams.get("editMaster")!==String(job.jobId))return;
     selectTab("master");renderMasterDataEditor(job);
     target.searchParams.delete("editMaster");
@@ -588,6 +657,15 @@ function groupRegieComparisonRows(rows = []) {
           if(!/^[A-Za-z0-9_-]+$/.test(id))throw new Error("Bitte eine gültige Baustellennummer eingeben.");
           if(!payload.name)throw new Error("Bitte die Bezeichnung des Angebots eingeben.");
           const created=await api("/admin/api/jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...payload,jobId:id,status:"Angebot",creationMode:"offer"})});
+          if(j.inquiries?.length){
+            const jobId=String(created.jobId);
+            window.kristaPendingOfferInquiry={jobId,intakes:j.inquiries};
+            const target=new URL(location.href);
+            target.searchParams.set("offerMail",jobId);target.hash=encodeURIComponent(jobId);
+            history.replaceState(history.state,"",target.pathname+target.search+target.hash);
+            document.dispatchEvent(new Event("krista:reload-baustellen"));
+            return;
+          }
           location.href=tokenUrl("/kristine/baustellen?editMaster="+encodeURIComponent(created.jobId)+"#"+encodeURIComponent(created.jobId));
           return;
         }
@@ -969,7 +1047,7 @@ function groupRegieComparisonRows(rows = []) {
     renderProtocols(loadedCollection.job,loadedCollection.days,loadedCollection.documents);
   });
   window.addEventListener("krista:live-hours-updated",renderCollectionStatus);
-  function init(){installCss();installKrisadminSubnav();installHub();wireMasterLinks();hookRows();const params=new URLSearchParams(location.search);if(params.get("newOffer")==="1"){setTimeout(()=>openNewOffer(),100);return}const id=decodeURIComponent(location.hash.slice(1));if(id)setTimeout(()=>loadJob(id),250)}
+  function init(){installCss();installKrisadminSubnav();installHub();wireMasterLinks();hookRows();const params=new URLSearchParams(location.search);if(["1","mail"].includes(params.get("newOffer"))){setTimeout(()=>openNewOffer(params.get("newOffer")==="mail"),100);return}const id=decodeURIComponent(location.hash.slice(1));if(id)setTimeout(()=>loadJob(id),250)}
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
   window.BaustellenKnowledgeHub={version:VERSION,load:loadJob,tab:selectTab,newOffer:openNewOffer};
 })();
