@@ -71,7 +71,7 @@ function withMorningPause(segments){
   const pauseFrom=Math.max(from,start),pauseTo=Math.min(to,end);
   const result=[];
   if(from<pauseFrom)result.push({...segment,to:hm(pauseFrom)});
-  result.push({id:segment.id+"_morning_pause",type:"pause",from:hm(pauseFrom),to:hm(pauseTo)});
+  result.push({id:segment.id+"_morning_pause",type:"pause",from:hm(pauseFrom),to:hm(pauseTo),morningPauseSource:segment});
   if(pauseTo<to)result.push({...segment,id:segment.id+"_after_morning_pause",from:hm(pauseTo)});
   return result;
  });

@@ -72,6 +72,19 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
    assert.equal(restored.segments[0].to,expected);
    assert.equal(restored.correction.undoCount,count-1);
  }
+ const noPause=[{type:"work",from:"08:00",to:"10:00"}];
+ const saveNonOffice=body=>call("put","/kristine/api/monthly-payroll/:employeeId/:date",{params:{employeeId:"p",date:normalDate},body});
+ const getNonOffice=async()=> (await days("p")).find(d=>d.date===normalDate);
+ const correctionBody={reason:"Tageszeit korrigiert",segments:noPause};
+ assert.equal((await saveNonOffice(correctionBody)).statusCode,200);
+ assert.equal((await getNonOffice()).workingMinutes,105);
+ assert.equal((await saveNonOffice({...correctionBody,pauseRemovalReason:" "})).statusCode,400);
+ assert.equal((await saveNonOffice({...correctionBody,pauseRemovalReason:"Kundenbesprechung ohne Unterbrechung"})).statusCode,200);
+ const withoutPause=await getNonOffice();
+ assert.equal(withoutPause.workingMinutes,120);
+ assert.equal(withoutPause.correction.history.at(-1).pauseRemovalReason,"Kundenbesprechung ohne Unterbrechung");
+ assert.equal((await saveNonOffice({undoVersion:withoutPause.correction.undoVersion})).statusCode,200);
+ assert.equal((await getNonOffice()).workingMinutes,105);
  const workBlock={id:"morning",type:"work",from:"07:00",to:"12:00",jobId:"123"};
  const withPause=policy.withMorningPause([workBlock]);
  assert.deepEqual(withPause.map(s=>[s.type,s.from,s.to]),[["work","07:00","09:00"],["pause","09:00","09:15"],["work","09:15","12:00"]]);
