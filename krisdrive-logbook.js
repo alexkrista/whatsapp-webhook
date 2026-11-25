@@ -384,7 +384,7 @@ function registerKrisdriveLogbook(app, options = {}) {
   const { createStreetLookup, DEFAULT_FALLBACK_URL } = require("./krisdrive-street-geocoder");
   const fallbackUrl = options.geocoderFallbackUrl ?? process.env.KRISDRIVE_GEOCODER_FALLBACK_URL ?? DEFAULT_FALLBACK_URL;
   const addressQueue = require("./krisdrive-address-queue").createAddressQueue({
-    file: path.join(root, "address-queue.json"), now: options.now || Date.now, resolverVersion: 3, validateAddress: address => usableAddress(address),
+    file: path.join(root, "address-queue.json"), now: options.now || Date.now, resolverVersion: 4, validateAddress: address => usableAddress(address) || /^Ort: \S/.test(address),
     lookup: createStreetLookup({ request, fallbackUrl, minIntervalMs: options.geocoderFallbackMinIntervalMs ?? 5000,
       primary: async point => {
       const params = new URLSearchParams({ latitude: point.lat, longitude: point.lng });

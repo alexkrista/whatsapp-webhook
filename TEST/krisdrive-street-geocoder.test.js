@@ -45,3 +45,9 @@ test("fallback can be switched off and invalid endpoints are rejected", async()=
   await assert.rejects(disabled(point),e=>e.code==="empty_address");
   assert.throws(()=>createStreetLookup({primary:missing,fallbackUrl:"http://example.org/reverse"}));
 });
+
+test("shows locality when no nearby street is available", async () => {
+  const lookup=createStreetLookup({primary:missing,request:async()=>({ok:true,json:async()=>({features:[feature({osm_key:"place"})]})})});
+  assert.equal((await lookup(point)).address,"Ort: 6820 Frastanz");
+  assert.equal(streetFromPhoton({features:[feature({osm_key:"place"}),feature({street:"Testweg"},[9.6101,47.222])]},point,200,true),"Testweg, 6820 Frastanz");
+});
