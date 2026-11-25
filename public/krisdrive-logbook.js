@@ -57,7 +57,7 @@
     const sum = data.totals;
     $("reviews").innerHTML = '<h3>Tageskontrolle · Alex</h3>' + ((data.reviews || []).filter(review => review.count > 0).filter(review => review.status !== "approved" || review.date >= data.range.from && review.date <= data.range.to).map(review => `<div class="lb-day"><strong>${esc(review.date)}</strong> · ${review.count} Fahrten · ${review.open} zu ergänzen${review.warnings ? ` · ${review.warnings} mit auffälligen Zeiten` : ""} · ${review.status === "approved" ? "Freigegeben von " + esc(review.approvedName) : "Zur Freigabe bei Alex"}<div>${review.vehicles.map(id => `<button type="button" class="btn secondary" data-review-vehicle="${esc(id)}" data-review-date="${esc(review.date)}">${esc(review.vehicleNames?.[id] || id)} prüfen</button>`).join(" ")} <button type="button" class="btn" data-approve="${esc(review.date)}" ${review.status === "approved" || review.open || !review.count ? "disabled" : ""}>Tag freigeben</button></div></div>`).join("") || '<p>Für abgeschlossene Tage mit Fahrten wird automatisch eine Aufgabe erstellt. Heute bleibt bis Tagesende offen.</p>');
     $("totals").innerHTML = [[format(sum.km) + " km", `${sum.count} ${sum.count === 1 ? "Fahrt" : "Fahrten"} insgesamt`], [format(sum.businessKm) + " km", "Geschäftlich"], [format(sum.privateKm) + " km", "Privat"], [String(sum.open), `${sum.open === 1 ? "Fahrt" : "Fahrten"} zu ergänzen`]].map(([n, title], i) => `<div class="lb-total ${i === 3 && sum.open ? "lb-open-count" : ""}"><strong>${esc(n)}</strong><span>${esc(title)}</span></div>`).join("");
-    const notices = [data.warning, data.addressIssue, data.missingAddresses ? `${data.missingAddresses} Fahrten mit fehlender Start- oder Zieladresse. GPS-Abfragen: ${data.addressStatus?.pending || 0} ausstehend. Fehlende Angaben bleiben zur Kontrolle offen.` : ""].filter(Boolean);
+    const notices = [data.rows.some(row => row.timeConflict) ? "Fahrtzeiten widersprechen sich. Betroffene Kilometer fehlen in der Summe. Export bis zur Klärung gesperrt." : "", data.warning, data.addressIssue, data.missingAddresses ? `${data.missingAddresses} Fahrten mit fehlender Start- oder Zieladresse. GPS-Abfragen: ${data.addressStatus?.pending || 0} ausstehend. Fehlende Angaben bleiben zur Kontrolle offen.` : ""].filter(Boolean);
     $("warning").textContent = notices.join(" "); $("warning").hidden = !notices.length;
     $("rows").innerHTML = data.rows.length ? data.rows.map(row => `
       <article class="lb-row">
@@ -65,7 +65,7 @@
         <div class="lb-route">${row.category === "private" ? '<span class="lb-private">Privatfahrt</span>' : `<div>${esc(locationLabel(row.startLocation))}${row.inferredStart ? ' <small>(aus vorheriger Fahrt)</small>' : ""}</div><div>→ ${esc(locationLabel(row.endLocation))}${row.inferredEnd ? ' <small>(aus nächster Fahrt)</small>' : ""}</div>`}</div>
         <div class="lb-assignment"><strong>${esc(row.driver?.employeeName || "Fahrer offen")}</strong><span class="lb-badge ${esc(row.category)}">${esc(label(row.category))}</span>${row.purpose ? `<small class="lb-purpose">${esc(row.purpose)}</small>` : ""}${row.missing.length ? `<small class="lb-missing">Offen: ${esc(row.missing.join(", "))}</small>` : ""}</div>
         <div class="lb-km"><strong>${esc(format(row.distanceKm))}</strong><small>km${row.distanceSource === "gps_positions" ? " · GPS neu berechnet" : row.odometerCorrected ? " · korrigiert" : row.distanceIssue ? " · bitte prüfen" : ""}</small></div>
-        <div><button type="button" class="btn secondary lb-edit" data-edit="${esc(row.id)}" aria-label="Fahrt am ${esc(date(row.startedAt))} um ${esc(time(row.startedAt))} bearbeiten">${row.missing.length ? "Ergänzen" : "Bearbeiten"}</button>${row.distanceKm === 0 || row.distanceKm === null ? `<button type="button" class="btn secondary" data-remove="${esc(row.id)}" style="margin-top:6px">${row.distanceKm === 0 ? "Fahrt löschen" : "Eintrag ausblenden"}</button>` : ""}</div>
+        <div><button type="button" class="btn secondary lb-edit" data-edit="${esc(row.id)}" aria-label="Fahrt am ${esc(date(row.startedAt))} um ${esc(time(row.startedAt))} bearbeiten">${row.missing.length ? "Ergänzen" : "Bearbeiten"}</button>${row.timeConflict || row.distanceKm === 0 || row.distanceKm === null ? `<button type="button" class="btn secondary" data-remove="${esc(row.id)}" style="margin-top:6px">${row.distanceKm === 0 ? "Fahrt löschen" : "Eintrag ausblenden"}</button>` : ""}</div>
       </article>`).join("") : '<div class="lb-empty">Keine gespeicherten Fahrten in diesem Zeitraum.<br>Wähle einen anderen Zeitraum oder rufe die Fahrten erneut ab.</div>';
     $("removed").hidden = !(data.removedRows || []).length;
     $("removed-rows").innerHTML = (data.removedRows || []).map(row => `<div class="lb-day">${esc(date(row.startedAt))} · ${esc(time(row.startedAt))} – ${esc(time(row.closedAt))} · ${row.distanceKm === null ? "Strecke unbekannt" : esc(format(row.distanceKm)) + " km"} <button type="button" class="btn secondary" data-restore="${esc(row.id)}">Wiederherstellen</button></div>`).join("");
@@ -85,7 +85,7 @@
     try {
       const result = await jsonRequest(url(endpoint, query), { signal: controller.signal });
       if (current !== generation) return;
-      data = result; render(); exportsEnabled(true);
+      data = result; render(); exportsEnabled(!data.rows.some(row => row.timeConflict));
       if (data.rows.some(row => row.category !== "private" && (!safeLocation(row.startLocation) || !safeLocation(row.endLocation)))) {
         const retry = () => {
           if (host.hidden) return;
@@ -167,7 +167,7 @@
   async function changeVisibility(id, action) {
     const row = (action === "remove" ? data.rows : data.removedRows).find(row => row.id === id);
     if (!row) return;
-    const message = action === "restore" ? "Diese Fahrt wiederherstellen?" : row.distanceKm === null ? "Die Strecke ist unbekannt, nicht 0 km. Diesen Eintrag ausdrücklich ausblenden? Er bleibt im Protokoll und kann wiederhergestellt werden." : "Diese 0-km-Fahrt löschen? Sie bleibt im Protokoll und kann wiederhergestellt werden.";
+    const message = action === "restore" ? "Diese Fahrt wiederherstellen?" : row.timeConflict ? "Diesen zeitlich widersprüchlichen Eintrag ausblenden? Er bleibt im Protokoll und kann wiederhergestellt werden." : row.distanceKm === null ? "Die Strecke ist unbekannt, nicht 0 km. Diesen Eintrag ausdrücklich ausblenden? Er bleibt im Protokoll und kann wiederhergestellt werden." : "Diese 0-km-Fahrt löschen? Sie bleibt im Protokoll und kann wiederhergestellt werden.";
     if (!confirm(message)) return;
     try { await jsonRequest(url(`${endpoint}/${encodeURIComponent(vehicle.id)}/${encodeURIComponent(id)}/${action}`), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmed: true, revision: row.revision }) }); await load(); }
     catch(e) { error(e.message); }

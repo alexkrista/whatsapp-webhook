@@ -56,6 +56,7 @@ function createDailyReview({ dataDir, collect, day, now = Date.now }) {
     if (!actor || !isAlexander(actor)) deny("Nur Alex darf das Tagesfahrtenbuch freigeben.", 403);
     if (!row || row.date >= day(now())) deny("Dieser Tag ist noch nicht abgeschlossen.");
     if (fingerprint !== row.fingerprint) deny("Die Fahrten wurden inzwischen geändert. Bitte neu laden und erneut prüfen.");
+    if (row.warnings) deny("Bitte zuerst die widersprüchlichen Fahrtzeiten prüfen.");
     if (row.open || !row.count) deny("Bitte zuerst die offenen Angaben in den Fahrten ergänzen.");
     if (row.status !== "approved") {
       Object.assign(row, { status: "approved", approvedAt: new Date(now()).toISOString(), approvedBy: String(actor.id || actor.employeeId), approvedName: actor.name || actor.nickname });

@@ -391,16 +391,20 @@ function resolvedRows(records) {
   // Inferred labels never seed another GPS point.
   linkTripEndpoints(reuseStopAddresses(rows), corrections);
   linkTripEndpoints(reuseStopAddresses(rows), corrections);
+  const moving = rows.filter(row => row.activity !== "standstill");
   for (const row of rows) {
+    row.timeConflict = row.activity !== "standstill" && (row.startedAt >= row.closedAt || moving.some(other =>
+      other.id !== row.id && other.vehicleId === row.vehicleId && other.startedAt < row.closedAt && row.startedAt < other.closedAt));
     row.missing = row.missing.filter(item => item !== "Start/Ziel");
     if (row.category === "business" && (!hasAddress(row.startLocation) || !hasAddress(row.endLocation))) row.missing.push("Start/Ziel");
+    if (row.timeConflict) row.missing.push("Fahrtzeiten widersprechen sich");
   }
   return rows;
 }
 function totals(rows) {
   return rows.reduce((sum, row) => {
     if (row.activity === "standstill") { sum.stops++; return sum; }
-    const value = row.distanceKm || 0;
+    const value = row.timeConflict ? 0 : row.distanceKm || 0;
     sum.count++; sum.km += value;
     sum[row.category + "Km"] += value;
     if (row.missing.length) sum.open++;
@@ -912,11 +916,11 @@ function registerKrisdriveLogbook(app, options = {}) {
       const record = state.records[text(req.params.rideId, 100)];
       if (!record) throw fail("Fahrt nicht gefunden.", 404);
       if (!Number.isInteger(body.revision) || body.revision !== record.revision) throw fail("Diese Fahrt wurde inzwischen geändert. Bitte neu laden.", 409);
-      const row = view(record);
-      if (action === "remove" && row.distanceKm !== 0 && row.distanceKm !== null) throw fail("Nur Fahrten mit 0 km oder unbekannter Strecke können ausgeblendet werden.");
+      const row = resolvedRows(Object.values(state.records)).find(row => row.id === record.data.id) || view(record);
+      if (action === "remove" && row.distanceKm !== 0 && row.distanceKm !== null && !row.timeConflict) throw fail("Nur widersprüchliche Einträge oder Fahrten mit 0 km bzw. unbekannter Strecke können ausgeblendet werden.");
       if (action === "remove" && record.removedAt || action === "restore" && !record.removedAt) throw fail("Der Status dieser Fahrt wurde inzwischen geändert.", 409);
       const at = new Date().toISOString(), actor = text(req.kristineActor?.name || "KRISTINE-Administration", 160);
-      record.history.push({ type: action, at, actor, actorId: text(req.kristineActor?.id || req.headers["x-krista-user-id"], 100), distanceKm: row.distanceKm, reason: action === "remove" ? row.distanceKm === null ? "Strecke unbekannt, manuell ausgeblendet" : "0-km-Fahrt, manuell ausgeblendet" : "Manuell wiederhergestellt" });
+      record.history.push({ type: action, at, actor, actorId: text(req.kristineActor?.id || req.headers["x-krista-user-id"], 100), distanceKm: row.distanceKm, reason: action === "remove" ? row.timeConflict ? "Zeitkonflikt, manuell ausgeblendet" : row.distanceKm === null ? "Strecke unbekannt, manuell ausgeblendet" : "0-km-Fahrt, manuell ausgeblendet" : "Manuell wiederhergestellt" });
       if (action === "remove") { record.removedAt = at; record.removedBy = actor; }
       else { delete record.removedAt; delete record.removedBy; }
       record.revision++;
@@ -927,6 +931,7 @@ function registerKrisdriveLogbook(app, options = {}) {
   app.get(api + "/export.:format", route(async (req, res) => {
     if (!["csv", "pdf"].includes(req.params.format)) throw fail("Unbekanntes Exportformat.");
     const data = await report(req.query);
+    if (data.rows.some(row => row.timeConflict)) throw fail("Export gesperrt. Bitte zuerst widersprüchliche Fahrtzeiten prüfen.", 409);
     const file = `Fahrtenbuch-${data.vehicle.plate || data.vehicle.id}-${data.range.from}-${data.range.to}`.replace(/[^A-Za-z0-9_-]/g, "_");
     res.set("Content-Disposition", `attachment; filename="${file}.${req.params.format}"`);
     if (req.params.format === "csv") res.type("text/csv; charset=utf-8").send(createCsv(data));
