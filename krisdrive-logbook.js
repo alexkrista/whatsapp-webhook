@@ -371,7 +371,7 @@ function resolvedRows(records) {
     const row = record.data;
     if (row.splitReportEnd || row.driver || Object.keys(record.edits || {}).length) return true;
     return !ignitionRows.some(cycle => cycle.vehicleId === row.vehicleId &&
-      row.startedAt >= cycle.startedAt && (row.closedAt <= cycle.closedAt ||
+      row.startedAt >= cycle.startedAt && row.startedAt < cycle.closedAt && (row.closedAt <= cycle.closedAt ||
         (Date.parse(row.closedAt) - Date.parse(cycle.closedAt) <= 15000 &&
          metresBetween(row.endPoint, cycle.endPoint) <= 30)));
   });
