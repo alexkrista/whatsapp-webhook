@@ -8,6 +8,7 @@
   const format = (value, digits = 1) => value == null ? "–" : Number(value).toLocaleString("de-AT", { minimumFractionDigits: digits, maximumFractionDigits: digits });
   const date = value => new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(value));
   const time = value => new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  const timeInput = value => new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Vienna",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).format(new Date(value)).replace(" ","T");
   const today = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Vienna", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const label = category => ({ business: "Geschäftlich", private: "Privat", unassigned: "Fahrtart offen" })[category] || "Offen";
   let vehicle = null, data = null, activeRow = null, generation = 0, controller = null, retryTimer = null;
@@ -31,6 +32,7 @@
       <form id="lb-edit-form"><h3 id="lb-edit-title">Fahrt ergänzen</h3><div id="lb-edit-sub" class="lb-sub"></div>
         <div id="lb-edit-error" class="lb-error" role="alert" hidden></div>
         <div class="lb-fields"><label>Fahrer<select id="lb-driver"></select></label><label>Fahrtart<select id="lb-category"><option value="unassigned">Noch offen</option><option value="business">Geschäftlich</option><option value="private">Privat</option></select></label>
+          <label>Fahrtbeginn<input id="lb-trip-start" type="datetime-local" step="1" required></label><label>Fahrtende<input id="lb-trip-end" type="datetime-local" step="1" required></label>
           <label data-business>Start<input id="lb-start" maxlength="500" autocomplete="off" placeholder="Straße, PLZ Ort"></label><label data-business>Ziel<input id="lb-end" maxlength="500" autocomplete="off" placeholder="Straße, PLZ Ort"></label>
           <label class="full" data-business>Zweck / Kunde / Baustelle<textarea id="lb-purpose" rows="2" maxlength="1000" placeholder="z. B. Baustellenbesprechung · Kunde / Baustelle"></textarea></label>
         </div><div id="lb-private-hint" class="lb-hint" hidden>Privatfahrten werden ohne Ziel- und Zweckangaben angezeigt und exportiert.</div>
@@ -57,7 +59,7 @@
     const sum = data.totals;
     $("reviews").innerHTML = '<h3>Tageskontrolle · Alex</h3>' + ((data.reviews || []).filter(review => review.count > 0).filter(review => review.status !== "approved" || review.date >= data.range.from && review.date <= data.range.to).map(review => `<div class="lb-day"><strong>${esc(review.date)}</strong> · ${review.count} Fahrten · ${review.open} zu ergänzen${review.warnings ? ` · ${review.warnings} mit auffälligen Zeiten` : ""} · ${review.status === "approved" ? "Freigegeben von " + esc(review.approvedName) : "Zur Freigabe bei Alex"}<div>${review.vehicles.map(id => `<button type="button" class="btn secondary" data-review-vehicle="${esc(id)}" data-review-date="${esc(review.date)}">${esc(review.vehicleNames?.[id] || id)} prüfen</button>`).join(" ")} <button type="button" class="btn" data-approve="${esc(review.date)}" ${review.status === "approved" || review.open || !review.count ? "disabled" : ""}>Tag freigeben</button></div></div>`).join("") || '<p>Für abgeschlossene Tage mit Fahrten wird automatisch eine Aufgabe erstellt. Heute bleibt bis Tagesende offen.</p>');
     $("totals").innerHTML = [[format(sum.km) + " km", `${sum.count} ${sum.count === 1 ? "Fahrt" : "Fahrten"} insgesamt`], [format(sum.businessKm) + " km", "Geschäftlich"], [format(sum.privateKm) + " km", "Privat"], [String(sum.open), `${sum.open === 1 ? "Fahrt" : "Fahrten"} zu ergänzen`]].map(([n, title], i) => `<div class="lb-total ${i === 3 && sum.open ? "lb-open-count" : ""}"><strong>${esc(n)}</strong><span>${esc(title)}</span></div>`).join("");
-    const notices = [data.rows.some(row => row.timeConflict) ? "Fahrtzeiten widersprechen sich. Betroffene Kilometer fehlen in der Summe. Export bis zur Klärung gesperrt." : "", data.warning, data.addressIssue, data.missingAddresses ? `${data.missingAddresses} Fahrten mit fehlender Start- oder Zieladresse. GPS-Abfragen: ${data.addressStatus?.pending || 0} ausstehend. Fehlende Angaben bleiben zur Kontrolle offen.` : ""].filter(Boolean);
+    const notices = [data.rows.some(row => row.timeConflict) ? "Fahrtzeiten widersprechen sich. Betroffene Kilometer fehlen in der Summe." : "", data.warning, data.addressIssue, data.missingAddresses ? `${data.missingAddresses} Fahrten mit fehlender Start- oder Zieladresse. GPS-Abfragen: ${data.addressStatus?.pending || 0} ausstehend. Fehlende Angaben bleiben zur Kontrolle offen.` : ""].filter(Boolean);
     $("warning").textContent = notices.join(" "); $("warning").hidden = !notices.length;
     $("rows").innerHTML = data.rows.length ? data.rows.map(row => `
       <article class="lb-row">
@@ -85,7 +87,7 @@
     try {
       const result = await jsonRequest(url(endpoint, query), { signal: controller.signal });
       if (current !== generation) return;
-      data = result; render(); exportsEnabled(!data.rows.some(row => row.timeConflict));
+      data = result; render(); exportsEnabled(true);
       if (data.rows.some(row => row.category !== "private" && (!safeLocation(row.startLocation) || !safeLocation(row.endLocation)))) {
         const retry = () => {
           if (host.hidden) return;
@@ -113,6 +115,7 @@
     if (row.driver?.employeeId && !people.some(person => person.id === row.driver.employeeId)) people.push({ id: row.driver.employeeId, name: row.driver.employeeName });
     $("driver").innerHTML = '<option value="">Noch nicht zugeordnet</option>' + people.map(person => `<option value="${esc(person.id)}">${esc(person.name)}</option>`).join("");
     $("driver").value = row.driver?.employeeId || ""; $("category").value = row.category;
+    $("trip-start").value = timeInput(row.startedAt); $("trip-end").value = timeInput(row.closedAt);
     $("start").value = safeLocation(row.startLocation); $("end").value = safeLocation(row.endLocation); $("purpose").value = row.purpose || "";
     $("km-start").value = row.odometerCorrected ? row.odometerStartKm : ""; $("km-end").value = row.odometerCorrected ? row.odometerEndKm : "";
     $("km-start").placeholder = format(row.odometerStartKm, 2); $("km-end").placeholder = format(row.odometerEndKm, 2);
@@ -128,6 +131,10 @@
     const row = activeRow;
     if (!row) return;
     const body = { revision: row.revision, employeeId: $("driver").value, category: $("category").value, odometerStartKm: $("km-start").value, odometerEndKm: $("km-end").value };
+    for (const [key,input] of [["startedAt","trip-start"],["closedAt","trip-end"]]) {
+      const inputValue = $(input).value;
+      if ((inputValue.length === 16 ? inputValue + ":00" : inputValue) !== timeInput(row[key])) body[key] = inputValue;
+    }
     for (const [key, input] of [["startLocation", "start"], ["endLocation", "end"], ["purpose", "purpose"]]) {
       // A private row is redacted by the server. Leaving a redacted field blank
       // when switching back restores the stored original instead of erasing it.

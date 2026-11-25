@@ -763,14 +763,23 @@ test("splits the overnight report at three confirmed ignition cycles and leaves 
   assert.equal(first.totals.missingKm,3);
 });
 
-test("overlapping trips are excluded from totals and exports until resolved", async t => {
+test("overlapping trips are flagged and can be corrected or exported provisionally", async t => {
   const h=await harness(t);
   h.state.trips.push(trip({startPositionId:102,startTime:"2026-09-22T06:10:00Z",endTime:"2026-09-22T06:20:00Z"}));
   const report=await (await h.get()).json();
   assert.equal(report.rows.length,2);
   assert.ok(report.rows.every(row=>row.timeConflict));
   assert.equal(report.totals.km,0);
-  for(const extension of ["csv","pdf"]) assert.equal((await h.get("/export."+extension+h.query)).status,409);
+  assert.match(await (await h.get("/export.csv"+h.query)).text(),/Vorlaeufig/);
+  const invalid=await h.patch(report.rows[0],{closedAt:"2026-09-22T07:00:00"});
+  assert.equal(invalid.status,400);
+  const corrected=await h.patch(report.rows[0],{startedAt:"2026-09-22T07:45:00",closedAt:"2026-09-22T08:05:00"});
+  assert.equal(corrected.status,200);
+  const reopened=await (await h.get(h.query+"&refresh=1")).json();
+  assert.equal(reopened.rows[0].startedAt,"2026-09-22T05:45:00.000Z");
+  assert.ok(reopened.rows.every(row=>!row.timeConflict));
+  const reset=await h.patch(reopened.rows[0],{startedAt:"2026-09-22T08:00:00",closedAt:"2026-09-22T08:30:00"});
+  assert.equal(reset.status,200);
   const duplicate=report.rows.at(-1);
   const removed=await fetch(h.base+"/byd/"+duplicate.id+"/remove",{method:"POST",headers:{"x-admin-token":"logbook-test-only","content-type":"application/json"},body:JSON.stringify({confirmed:true,revision:duplicate.revision})});
   assert.equal(removed.status,200);

@@ -38,7 +38,7 @@ function createDailyReview({ dataDir, collect, day, now = Date.now }) {
       const fingerprint = signature(rows), old = state.days[date];
       const row = state.days[date] ||= { date, createdAt: at, dueDate: day(Date.parse(date + "T12:00:00Z") + 86400000), status: "open" };
       if (old?.status === "approved" && old.fingerprint !== fingerprint) { state.history.push({ date, type: "reopened", at, approvedAt: old.approvedAt }); row.status = "open"; }
-      Object.assign(row, { assigneeId: String(alex[0].id || alex[0].employeeId), assigneeName: alex[0].nickname || alex[0].rufname || alex[0].name, fingerprint, warnings, snapshot: rows, count: rows.length, open: rows.filter(r => r.missing.length).length,
+      Object.assign(row, { assigneeId: String(alex[0].id || alex[0].employeeId), assigneeName: alex[0].nickname || alex[0].rufname || alex[0].name, fingerprint, warnings, snapshot: rows, count: rows.length, open: rows.filter(r => r.missing.some(field => field !== "Fahrtzeiten widersprechen sich")).length,
         vehicles: [...new Set(rows.map(r => r.vehicleId))], vehicleNames: Object.fromEntries(rows.map(r => [r.vehicleId, r.vehicleLabel || r.vehicleId])), updatedAt: at });
     }
     // Removed/moved trips must also invalidate a previous approval.
@@ -56,7 +56,6 @@ function createDailyReview({ dataDir, collect, day, now = Date.now }) {
     if (!actor || !isAlexander(actor)) deny("Nur Alex darf das Tagesfahrtenbuch freigeben.", 403);
     if (!row || row.date >= day(now())) deny("Dieser Tag ist noch nicht abgeschlossen.");
     if (fingerprint !== row.fingerprint) deny("Die Fahrten wurden inzwischen geändert. Bitte neu laden und erneut prüfen.");
-    if (row.warnings) deny("Bitte zuerst die widersprüchlichen Fahrtzeiten prüfen.");
     if (row.open || !row.count) deny("Bitte zuerst die offenen Angaben in den Fahrten ergänzen.");
     if (row.status !== "approved") {
       Object.assign(row, { status: "approved", approvedAt: new Date(now()).toISOString(), approvedBy: String(actor.id || actor.employeeId), approvedName: actor.name || actor.nickname });
