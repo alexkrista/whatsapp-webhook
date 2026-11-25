@@ -754,7 +754,7 @@ test("splits the overnight report at three confirmed ignition cycles and leaves 
   assert.equal(new Set(parts.map(row=>row.id)).size,3);
   assert.ok(parts.every(row=>row.distanceKm===null&&row.startPoint===null&&row.endPoint));
   assert.deepEqual(ignitionParts(trip,events.slice(0,-1),positions),[]);
-  const h = await harness(t,{request:async url=>({ok:true,json:async()=>url.pathname==="/api/reports/events" ? events.map(row=>({...row,deviceId:17})) : url.pathname==="/api/positions" ? positions.map(row=>({...row,deviceId:17})) : url.pathname==="/api/reports/trips" ? [{deviceId:17,startPositionId:101,startTime:trip.startedAt,endTime:trip.closedAt,distance:20340}] : []})});
+  const h = await harness(t,{request:async url=>({ok:true,json:async()=>url.pathname==="/api/reports/events" ? events.map(row=>({...row,deviceId:17})) : url.pathname==="/api/positions" ? positions.map(row=>({...row,deviceId:17})) : url.pathname==="/api/reports/trips" ? [{deviceId:17,startPositionId:101,startTime:trip.startedAt,endTime:trip.closedAt,distance:20340},{deviceId:17,startPositionId:102,startTime:"2026-11-24T05:43:00Z",endTime:"2026-11-24T05:44:22Z",distance:600}] : []})});
   const query="?vehicleId=byd&from=2026-11-23&to=2026-11-24&refresh=1";
   const first=await (await h.get(query)).json();
   const second=await (await h.get(query)).json();
