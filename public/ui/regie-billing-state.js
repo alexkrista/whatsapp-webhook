@@ -115,34 +115,39 @@
     }
     return [...found.values()];
   }
-  function allocatePartialInvoices(invoices,state){
+  function allocatePartialInvoices(invoices,state,{regieOnly=false}={}){
     const issued=issuedInvoices(invoices),partials=issued.filter(invoice=>String(invoice.kind||"").toUpperCase()==="TR");
-    let partialInvoiceNet=0,regiePartialInvoiceNet=0,linkedRegiePartialNet=0;const issues=[];
+    let partialInvoiceNet=0,regiePartialInvoiceNet=0,linkedRegiePartialNet=0,inferredUnlinkedRegieNet=0;const issues=[];
     const covered=invoice=>reportSubtotal(state.billedRows.filter(row=>documentKey(invoice.sourceId)&&documentKey(invoice.sourceId)===documentKey(row.billedDocumentId)));
     for(const invoice of partials){
       // Legacy transition invoices were written and reviewed in whole euros.
       // New invoices carry progressBilling and retain their exact cent value.
-      const rawNet=number(invoice.net),net=invoice.progressBilling?rawNet:Math.round(rawNet),reports=covered(invoice),explicit=invoice.regieNet;
+      const rawNet=number(invoice.net),net=invoice.progressBilling||invoice.source==="KRISTINE"?rawNet:Math.round(rawNet),reports=covered(invoice),explicit=invoice.regieNet;
       if(net<0){issues.push("Eine negative Teilrechnung muss dem Fix- oder Regieanteil zugeordnet werden.");continue;}
-      const regie=explicit===undefined||explicit===null?Math.min(net,reports):number(explicit);
+      const inferred=explicit===undefined||explicit===null;
+      const regie=inferred?(regieOnly?net:Math.min(net,reports)):number(explicit);
       if(regie<0||regie>net+.02){issues.push(`Regieanteil der Teilrechnung ${invoice.invoiceNumber||""} ist nicht plausibel.`);continue;}
       partialInvoiceNet+=net;regiePartialInvoiceNet+=regie;linkedRegiePartialNet+=Math.min(regie,reports);
+      if(regieOnly&&inferred)inferredUnlinkedRegieNet+=Math.max(0,regie-reports);
     }
     const unlinkedBilled=reportSubtotal(state.billedRows.filter(row=>!row.invoice));
-    const fallbackRegie=Math.min(Math.max(0,partialInvoiceNet-regiePartialInvoiceNet),unlinkedBilled);
+    const alreadyCovered=Math.min(inferredUnlinkedRegieNet,unlinkedBilled);
+    const fallbackRegie=Math.min(Math.max(0,partialInvoiceNet-regiePartialInvoiceNet),unlinkedBilled-alreadyCovered);
     // Alte WW-Teilrechnungen enthalten nicht immer die technische Bericht-ID.
     // In diesem Fall wird der bereits abgerechnete Berichtswert gegen den
     // vorhandenen TR-Gesamtbetrag verrechnet, statt ihn fälschlich dem Fixteil
     // zuzuschlagen oder ein zweites Mal offen zu lassen.
-    regiePartialInvoiceNet+=fallbackRegie;linkedRegiePartialNet+=fallbackRegie;
+    regiePartialInvoiceNet+=fallbackRegie;linkedRegiePartialNet+=fallbackRegie+alreadyCovered;
     const hasClosingInvoice=issued.some(invoice=>String(invoice.kind||"").toUpperCase()==="SR"||String(invoice.kind||"").toUpperCase()==="RE"&&number(invoice.net)>Math.max(covered(invoice),number(invoice.regieNet))+.02);
     return {partialInvoiceNet:cents(partialInvoiceNet),regiePartialInvoiceNet:cents(regiePartialInvoiceNet),linkedRegiePartialNet:cents(linkedRegiePartialNet),
       fixedPartialInvoiceNet:cents(partialInvoiceNet-regiePartialInvoiceNet),hasClosingInvoice,issues};
   }
   function performanceForJob(job={},options={}){
     const c=job.calculation||{},reports=options.reports||job.regieSummary?.reports||[],billing=options.billing||{},state=summarize(reports,billing);
-    const allocation=allocatePartialInvoices(billing.invoices,state),plannedRegieHours=Math.max(0,number(c.plannedRegieHours??job.plannedRegieHours));
-    const reportHours=state.rows.reduce((sum,row)=>sum+row.hours,0),rawFixedTargetHours=c.fixedCalculatedHours??Math.max(0,number(c.calculatedHours)-plannedRegieHours),fixedTargetHours=number(rawFixedTargetHours)>0?Math.round(number(rawFixedTargetHours)):0,issues=[...allocation.issues];
+    const plannedRegieHours=Math.max(0,number(c.plannedRegieHours??job.plannedRegieHours));
+    const reportHours=state.rows.reduce((sum,row)=>sum+row.hours,0),rawFixedTargetHours=c.fixedCalculatedHours??Math.max(0,number(c.calculatedHours)-plannedRegieHours),fixedTargetHours=number(rawFixedTargetHours)>0?Math.round(number(rawFixedTargetHours)):0;
+    const regieOnly=state.rows.length>0&&fixedTargetHours===0&&number(c.kristaAmount??c.contractAmount??job.contractAmount)===0;
+    const allocation=allocatePartialInvoices(billing.invoices,state,{regieOnly}),issues=[...allocation.issues];
     if(!options.reports&&!job.regieSummary?.reports&&number(job.regieSummary?.count)>0)issues.push("Regieberichte für die Abrechnung werden noch geladen.");
     if(state.unknownRows.length)issues.push(`${state.unknownRows.length} Regiebericht(e) haben noch keinen eindeutigen Abrechnungsstatus.`);
     const result=calculatePerformance({...allocation,jobId:job.jobId,jobName:job.name||job.jobName,

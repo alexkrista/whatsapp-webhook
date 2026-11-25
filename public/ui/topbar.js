@@ -224,7 +224,7 @@
   function loadBaustellenKnowledgeStack() {
     if (!isBaustellenPath()) return;
     loadScriptOnce("/public/ui/baustellen-legacy-id-display.js?v=20260823-legacyid1", "data-krista-baustellen-legacy-id-display");
-    loadScriptOnce("/public/ui/regie-billing-state.js?v=20261020-kristine-billed-1", "data-krista-regie-billing-state");
+    loadScriptOnce("/public/ui/regie-billing-state.js?v=20261125-regie-tr", "data-krista-regie-billing-state");
     loadScriptOnce("/public/ui/job-renumber-action.js?v=20261023-general-1", "data-krista-renumber-action");
     loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20261119-pricing-scope", "data-krista-baustellen-knowledge");
     loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20261023-renumber-1", "data-krista-baustellen-cockpit");
@@ -245,7 +245,7 @@
 
   function loadTowerSignals() {
     if (window.location.pathname.toLowerCase().includes("kontrollzentrum")) {
-      loadScriptOnce("/public/ui/regie-billing-state.js?v=20261007-lieferscheine-1", "data-krista-regie-billing-state");
+      loadScriptOnce("/public/ui/regie-billing-state.js?v=20261125-regie-tr", "data-krista-regie-billing-state");
       loadScriptOnce("/public/ui/tower-baustellen-signals.js?v=20261120-cloud-regie-akten-1", "data-krista-tower-signals");
     }
   }
