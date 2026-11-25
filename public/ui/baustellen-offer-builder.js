@@ -395,13 +395,13 @@
         .koffer-inquiry,.koffer-inquiry article,.koffer-inquiry-row,.koffer-inquiry-row label{min-width:0}
         .koffer-inquiry article{margin:8px 0}
         .koffer-inquiry article h5{margin:0 0 6px;font-size:14px}
-        .koffer-inquiry-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(85px,.18fr) auto;gap:8px;align-items:end;margin:8px 0}
+        .koffer-inquiry-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(85px,.18fr) minmax(70px,.14fr) auto;gap:8px;align-items:end;margin:8px 0}
         .koffer-inquiry-row label{display:block;font-size:12px}
         .koffer-inquiry-row input,.koffer-inquiry-row select{box-sizing:border-box;display:block;width:100%;min-width:0;max-width:100%;margin-top:3px}
         .koffer-inquiry-row .koffer-inquiry-free{grid-column:1/-1}
         .koffer-inquiry-row .koffer-inquiry-free[hidden]{display:none}
         .koffer-inquiry-row select{padding:7px;border:1px solid #d2cec4;border-radius:7px;background:white;text-overflow:ellipsis}
-        @media(max-width:740px){.koffer-inquiry-row{grid-template-columns:minmax(0,1fr) minmax(72px,.45fr)}}
+        @media(max-width:740px){.koffer-inquiry-row{grid-template-columns:repeat(2,minmax(0,1fr))}.koffer-inquiry-chooser{grid-column:1/-1}}
       `;
       document.head.append(style);
     }
@@ -445,6 +445,10 @@
       button.onclick=handler;
       return button;
     }
+    function inquiryRowUnit(group,row){
+      const template=row.templateIndex?offerPositionTemplates[Number(row.templateIndex)]:null;
+      return row.unit??(template?.unit?.trim()||group.unit);
+    }
     function addGroup(group){
       groups.push({...group,id:"mail-"+crypto.randomUUID(),rows:group.suggestions.map(text=>({text,quantity:group.quantity}))});
     }
@@ -484,6 +488,7 @@
             const line=append(card,"div");
             line.className="koffer-inquiry-row";
             const chooser=append(line,"div");
+            chooser.className="koffer-inquiry-chooser";
             const search=field(chooser,"Position suchen","",()=>renderOptions(),"search");
             search.placeholder="Leistung oder Positionsgruppe";
             const select=append(append(chooser,"label","Position"),"select");
@@ -504,7 +509,9 @@
               }
               select.value=row.templateIndex||(row.free||row.text?"free":"");
             }
-            field(line,group.unit,row.quantity,value=>{row.quantity=value;},"number");
+            field(line,"Menge",row.quantity,value=>{row.quantity=value;},"number");
+            const unit=field(line,"Einheit",inquiryRowUnit(group,row),value=>{row.unit=value;});
+            unit.maxLength=24;
             action(line,"Entfernen",()=>{group.rows.splice(group.rows.indexOf(row),1);draw();});
             const description=field(line,"Freie Position",row.text,value=>{row.text=value;});
             const freeField=description.closest("label");
@@ -516,6 +523,8 @@
               row.templateIndex=row.free?"":select.value;
               const template=row.templateIndex?offerPositionTemplates[Number(row.templateIndex)]:null;
               if(template){description.value=template.text;row.text=template.text;}
+              delete row.unit;
+              unit.value=inquiryRowUnit(group,row);
               showFree();persist();
               if(row.free)description.focus();
             };
@@ -575,8 +584,8 @@
       const context=editorContext();
       if(!editorContextActive(context)||context.editor!==box)return;
       const selections=groups.flatMap(group=>group.rows.map(row=>({group,row,template:row.templateIndex?offerPositionTemplates[Number(row.templateIndex)]:null})));
-      if(selections.some(({row,template})=>!String(row.text||template?.text).trim()||row.quantity===""||!Number.isFinite(Number(row.quantity))||Number(row.quantity)<0)){
-        status.textContent="Bitte jede Unterposition mit Leistung und gültiger Menge ergänzen.";
+      if(selections.some(({group,row,template})=>!String(row.text||template?.text).trim()||!inquiryRowUnit(group,row).trim()||row.quantity===""||!Number.isFinite(Number(row.quantity))||Number(row.quantity)<0)){
+        status.textContent="Bitte jede Unterposition mit Leistung, Einheit und gültiger Menge ergänzen.";
         return;
       }
       const positions=selections.map(({group,row,template})=>costing({
@@ -586,7 +595,7 @@
         groupName:group.area+" · "+group.title,
         text:(row.text||template?.text).trim()+(group.eventual?" (Eventualposition)":""),
         quantity:Number(row.quantity),
-        unit:group.unit,
+        unit:inquiryRowUnit(group,row).trim(),
         templateId:template?.id||"",
         isCustom:true,
         isAlternative:group.alternative===true,

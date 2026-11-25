@@ -160,14 +160,14 @@ test("incoming measurements survive a second editor mount and a page reload", ()
     w.sessionStorage.setItem("krista-offer-inquiry-pending:26111",JSON.stringify([{subject:"Anfrage",documents:[{
       hash:"sample",name:"Wohnhaus.pdf",groups:[{area:"Innen",title:"Wände",quantity:250.77,unit:"m²",suggestions:["Kalkdünnputz"]}],
     }]}]));
-    const reloadScript=()=>w.eval("(()=>{const offerPositionTemplates=[];"+source.slice(start,end)+";window.mountInquiry=mountOfferInquiry;})()");
+    const reloadScript=()=>w.eval("(()=>{const offerPositionTemplates=[{text:\"Sockelprofil\",unit:\"lfm\"}];"+source.slice(start,end)+";window.mountInquiry=mountOfferInquiry;})()");
     const editor=w.document.getElementById("koffer");
     const mount=()=>{
       editor.querySelector("details")?.remove();
       w.mountInquiry(editor);
       assert.equal(editor.querySelectorAll("article").length,1);
       assert.match(editor.querySelector("article").textContent,/Wände/);
-      return editor.querySelector('article .koffer-inquiry-row input[type="text"]');
+      return editor.querySelector('article .koffer-inquiry-free input');
     };
     reloadScript();
     const row=mount();
@@ -176,5 +176,17 @@ test("incoming measurements survive a second editor mount and a page reload", ()
     assert.equal(mount().value,"Kalkdünnputz bearbeitet");
     reloadScript();
     assert.equal(mount().value,"Kalkdünnputz bearbeitet");
+    const select=editor.querySelector("article select");
+    const unit=editor.querySelector('article input[maxlength="24"]');
+    const quantity=editor.querySelector('.koffer-inquiry-row input[type="number"]');
+    assert.equal(unit.value,"m²");
+    select.value="0";
+    select.dispatchEvent(new w.Event("change"));
+    assert.equal(unit.value,"lfm");
+    assert.equal(quantity.value,"250.77");
+    unit.value="m";
+    unit.dispatchEvent(new w.Event("input"));
+    mount();
+    assert.equal(editor.querySelector('article input[maxlength="24"]').value,"m");
   }finally{dom.window.close();}
 });
