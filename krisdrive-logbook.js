@@ -365,7 +365,16 @@ function reuseStopAddresses(rows) {
   return rows;
 }
 function resolvedRows(records) {
-  records = records.filter(record => !record.removedAt);
+  const active = records.filter(record => !record.removedAt);
+  const ignitionRows = active.map(record => record.data).filter(row => row.splitReportEnd);
+  records = active.filter(record => {
+    const row = record.data;
+    if (row.splitReportEnd || row.driver || Object.keys(record.edits || {}).length) return true;
+    return !ignitionRows.some(cycle => cycle.vehicleId === row.vehicleId &&
+      row.startedAt >= cycle.startedAt && (row.closedAt <= cycle.closedAt ||
+        (Date.parse(row.closedAt) - Date.parse(cycle.closedAt) <= 15000 &&
+         metresBetween(row.endPoint, cycle.endPoint) <= 30)));
+  });
   const rows = records.map(view).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
   const corrections = new Map();
   for (const record of records) {
