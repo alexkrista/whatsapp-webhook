@@ -18,14 +18,14 @@
     .employee-review-table .over-limit{background:#ffe3de;color:#8b2014;font-weight:700}.employee-review-table .week-total{background:#edf1ed;font-weight:700}.employee-review-table small{display:block;color:#57625b}.review-block{white-space:nowrap;margin-bottom:5px}.review-block span{display:inline-block;min-width:112px}.review-edit-grid{display:grid;grid-template-columns:180px 105px 105px minmax(180px,1fr) 45px;gap:8px;margin:8px 0}.review-edit-grid input,.review-edit-grid select{width:100%;min-width:0;padding:8px}.review-edit-box{background:#f5f7f5;padding:12px}.review-edit-box textarea{width:100%;min-height:65px}.employee-review-summary{display:flex;gap:20px;flex-wrap:wrap;padding:12px;background:#edf6ed}.review-warning{color:#a32618;font-weight:700}.review-scroll{overflow-x:auto}@media(max-width:700px){.review-edit-grid{grid-template-columns:1fr 85px 85px 36px}.review-edit-grid .review-context{grid-column:1/-1}.employee-review-dialog{padding:12px}.employee-review-table td{padding:6px}}
   `;document.head.appendChild(style);
   const modal=document.createElement("div");modal.id="monthlyEmployeeModal";modal.className="logic-modal";modal.hidden=true;
-  modal.innerHTML='<section class="employee-review-dialog" role="dialog" aria-modal="true" aria-labelledby="employeeReviewTitle"><div class="employee-review-head"><div><h2 id="employeeReviewTitle">Monatskontrolle</h2><div id="employeeReviewModel"></div></div><button type="button" class="btn secondary" data-review-exit>← Zur Monatsübersicht</button></div><div id="employeeReviewStatus" class="employee-review-status" role="status"></div><div id="employeeReviewContent"></div><div class="employee-review-actions"><span id="employeeReviewSaveStatus" role="status"></span><div><button type="button" class="btn secondary" data-review-save>Änderungen speichern</button> <button type="button" class="btn secondary" data-review-pdf>PDF</button> <button type="button" class="btn primary" data-review-close>Speichern &amp; Monat abschließen</button></div></div></section>';
+  modal.innerHTML='<section class="employee-review-dialog" role="dialog" aria-modal="true" aria-labelledby="employeeReviewTitle"><div class="employee-review-head"><div><h2 id="employeeReviewTitle">Monatskontrolle</h2><div id="employeeReviewModel"></div></div><button type="button" class="btn secondary" data-review-exit>← Zur Monatsübersicht</button></div><div id="employeeReviewStatus" class="employee-review-status" role="status"></div><div id="employeeReviewContent"></div><div class="employee-review-actions"><span id="employeeReviewSaveStatus" role="status"></span><div><button type="button" class="btn secondary" data-review-exit>Zur Monatsübersicht</button> <button type="button" class="btn secondary" data-review-save>Änderungen speichern</button> <button type="button" class="btn secondary" data-review-pdf>PDF</button> <button type="button" class="btn primary" data-review-close>Speichern &amp; Monat abschließen</button></div></div></section>';
   document.body.appendChild(modal);
   function dirty(){return current&&Object.keys(current.drafts).length>0}
   function message(text,error=false){$("employeeReviewSaveStatus").textContent=text;$("employeeReviewSaveStatus").className=error?"review-warning":""}
   function setBusy(value){loading=value;modal.querySelectorAll("[data-review-save],[data-review-close],[data-review-pdf],[data-review-reopen]").forEach(b=>b.disabled=value||Boolean(current?.closed&&!b.hasAttribute("data-review-pdf")&&!b.hasAttribute("data-review-reopen")))}
   async function load(){
     const c=current;
-    const data=await request(`/kristine/api/monthly-days/${encodeURIComponent(c.id)}?from=${c.from}&to=${c.to}`);
+    const data=await request(`/kristine/api/monthly-days/${encodeURIComponent(c.id)}?from=${c.from}&to=${c.to}`,{cache:"no-store"});
     if(c!==current)return;
     c.days=data.days;c.correction=data.correction;c.vacationEntitlement=data.vacationEntitlement;c.drafts={};c.closed=c.days.some(d=>d.date>=c.from&&d.date<=c.to&&d.monthClosed);
     await window.KrisMonthly.refreshClosures(c.from.slice(0,7));
@@ -99,11 +99,10 @@
       for(let i=0;i<sorted.length;i++){const s=sorted[i];if(!s.from||!s.to||minute(s.to)<=minute(s.from)||(i&&minute(sorted[i-1].to)>minute(s.from)))throw new Error(date+": Zeiten prüfen – offen, ungültig oder überlappend.")}
     }
     for(const [date,draft] of Object.entries(c.drafts)){
-      const d=c.days.find(d=>d.date===date),url=d.payrollFixed?"/kristine/api/monthly-payroll/":"/kristine/api/segments/";
-      await request(url+encodeURIComponent(c.id)+"/"+date,{method:"PUT",body:JSON.stringify({employeeName:c.employee.name,segments:draft.segments,reason:draft.reason,correctedBy:"Bettina / Büro"})});
+      await request("/kristine/api/monthly-payroll/"+encodeURIComponent(c.id)+"/"+date,{method:"PUT",body:JSON.stringify({employeeName:c.employee.name,segments:draft.segments,reason:draft.reason,correctedBy:"Bettina / Büro"})});
       delete c.drafts[date];message(date+" gespeichert.");
     }
-    window.KrisMonthly.invalidate();await load();message("Alle Änderungen gespeichert.");
+    window.KrisMonthly.invalidate();await load();message("Gespeichert. Der geänderte Stand ist sichtbar. Der Monat bleibt offen.");
   }
   async function closeMonth(){
     if(current.closed)return;

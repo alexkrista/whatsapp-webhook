@@ -2891,7 +2891,11 @@ const open = taskId
       segments=minutes>0?[{id:"absence_"+date,type:"up",from,to:payrollModel.hm(start+minutes),reason:label,absenceType:type,unproductiveCategory:type==="urlaub"?"vacation":type==="krank"?"sick":"other",unproductiveCode:code}]:[];
       source=label+" · "+schedule.model.name;
     }
-    if(correction){segments=correction.segments;source="Lohnzeit korrigiert";automatic=true}
+    if(correction){
+      segments=correction.segments;
+      source="Lohnzeit korrigiert";
+      automatic ||= schedule.fixedSegments !== null || context.reopenings.some(r=>r.employeeId===employeeId&&r.month===date.slice(0,7));
+    }
     if(!office&&!closed)segments=payrollModel.withMorningPause(segments);
     if(closed){segments=closed.days.find(d=>d.date===date)?.segments||[];source="Abgeschlossen";automatic=true}
     const targetMinutes=closed?.report?.days?.find(d=>d.date===date)?.targetMinutes??(employeeBelongsToDay(employee,date)?schedule.targetMinutes:0);
@@ -2980,7 +2984,6 @@ const open = taskId
       if(await closedMonthFor(employeeId,date))return res.status(409).json({ok:false,error:"Monat abgeschlossen – Stunden gesperrt. Zuerst ausdrücklich mit Begründung wieder öffnen."});
       const context=await monthlyContext(),employee=context.employees.find(e=>String(e.id||e.employeeId)===employeeId);
       if(!employee)return res.status(404).json({ok:false,error:"Mitarbeiter nicht gefunden."});
-      if(payrollModel.schedule(context.models,employee,date).fixedSegments===null&&!context.reopenings.some(r=>r.employeeId===employeeId&&r.month===date.slice(0,7)))return res.status(400).json({ok:false,error:"Dieses Modell verwendet tatsächliche Zeitbuchungen."});
       const reason=String(req.body?.reason||"").trim().slice(0,300),by=String(req.body?.correctedBy||"Bettina / Büro").slice(0,120);
       if(reason.length<5)return res.status(400).json({ok:false,error:"Bitte einen nachvollziehbaren Änderungsgrund eingeben."});
       if(!Array.isArray(req.body?.segments))return res.status(400).json({ok:false,error:"Zeitblöcke fehlen."});
@@ -2994,7 +2997,7 @@ const open = taskId
       if(!row){row={employeeId,date,history:[]};context.corrections.push(row)}
       row.history.push({at:now,by,reason,before,after:segments});Object.assign(row,{segments,reason,updatedAt:now,updatedBy:by});
       await writeJson(PAYROLL_CORRECTIONS,context.corrections);
-      res.json({ok:true,segments,history:row.history});
+      res.json({ok:true,segments:monthlyDay(context,employee,date).segments,history:row.history});
     }catch(error){res.status(500).json({ok:false,error:String(error.message||error)})}
   }));
 

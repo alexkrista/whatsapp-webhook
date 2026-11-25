@@ -50,6 +50,17 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
  const g=await days("g");assert.equal(g.find(d=>d.date==="2026-10-06").targetMinutes,150);assert.equal(g.find(d=>d.date==="2026-10-05").targetMinutes,0);assert.equal(policy.workMinutes(g.find(d=>d.date==="2026-10-06").segments),150);
  const j=await days("j");assert.equal(j.find(d=>d.date==="2026-10-05").targetMinutes,480);assert.equal(j.find(d=>d.date==="2026-10-06").targetMinutes,240);assert.equal(j.find(d=>d.date==="2026-10-08").targetMinutes,0);
  const b=await days("b");assert.equal(b.find(d=>d.date==="2026-10-06").segments[0].from,"07:30");assert.equal(policy.workMinutes(b.find(d=>d.date==="2026-10-06").segments),270);
+ const normalDate="2026-10-06";
+ const regularBefore=await days("b");
+ const regularDay=regularBefore.find(d=>d.date===normalDate);
+ assert.equal(regularDay.payrollFixed,false);
+ const corrected=await call("put","/kristine/api/monthly-payroll/:employeeId/:date",{params:{employeeId:"b",date:normalDate},body:{reason:"Zeiten laut Kontrolle berichtigt",segments:[{type:"up",from:"07:30",to:"09:00"},{type:"up",from:"10:00",to:"12:00"}]}});
+ assert.equal(corrected.statusCode,200,JSON.stringify(corrected.body));
+ const saved=(await days("b")).find(d=>d.date===normalDate);
+ assert.deepEqual(saved.segments.map(s=>[s.from,s.to]),[["07:30","09:00"],["10:00","12:00"]]);
+ assert.deepEqual(saved.originalSegments,regularDay.originalSegments);
+ assert.equal(saved.released,true);
+ assert.equal(saved.monthClosed,false);
  const workBlock={id:"morning",type:"work",from:"07:00",to:"12:00",jobId:"123"};
  const withPause=policy.withMorningPause([workBlock]);
  assert.deepEqual(withPause.map(s=>[s.type,s.from,s.to]),[["work","07:00","09:00"],["pause","09:00","09:15"],["work","09:15","12:00"]]);
