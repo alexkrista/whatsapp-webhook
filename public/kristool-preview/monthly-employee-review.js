@@ -65,7 +65,7 @@
       week.credited+=shown;
       week.worked+=working;
       weeks.set(key,week);
-      html+='<tr'+(working>600?' class="over-limit"':'')+'><td>'+esc(new Date(d.date+"T12:00:00").toLocaleDateString("de-AT",{weekday:"short",day:"2-digit",month:"2-digit"}))+'</td><td>'+ (segments.length?window.KrisMonthly.compactBlocks(segments).map(s=>'<div class="review-block"><span>'+(s.from?esc(s.from)+'–'+esc(s.to||"offen"):"")+'</span> '+hm(s.durationMinutes)+' · '+esc(s.label)+'</div>').join(""):'–')+'<small>'+esc(d.source)+'</small></td><td>'+hm(shown)+'<small>'+decimal(shown)+' Std.</small>'+(working>600?'<strong>Über 10 Std.: +'+hm(working-600)+'</strong>':'')+'</td><td>'+hm(d.targetMinutes)+'</td><td>'+decimal(shown-d.targetMinutes)+'</td><td>'+(d.released?"Freigegeben / Modell":"Noch nicht freigegeben")+(!c.closed?'<br><button class="btn secondary" type="button" data-review-edit="'+d.date+'">Bearbeiten</button>'+(!d.released?' <button class="btn secondary" type="button" data-review-release="'+d.date+'">Tag freigeben</button>':'')+'':'')+'</td></tr>';
+      html+='<tr'+(working>600?' class="over-limit"':'')+'><td>'+esc(new Date(d.date+"T12:00:00").toLocaleDateString("de-AT",{weekday:"short",day:"2-digit",month:"2-digit"}))+'</td><td>'+ (segments.length?window.KrisMonthly.compactBlocks(segments).map(s=>'<div class="review-block"><span>'+(s.from?esc(s.from)+'–'+esc(s.to||"offen"):"")+'</span> '+hm(s.durationMinutes)+' · '+esc(s.label)+'</div>').join(""):'–')+'<small>'+esc(d.source)+'</small></td><td>'+hm(shown)+'<small>'+decimal(shown)+' Std.</small>'+(working>600?'<strong>Über 10 Std.: +'+hm(working-600)+'</strong>':'')+'</td><td>'+hm(d.targetMinutes)+'</td><td>'+decimal(shown-d.targetMinutes)+'</td><td>'+(d.released?"Freigegeben / Modell":"Noch nicht freigegeben")+(!c.closed?'<br><button class="btn secondary" type="button" data-review-edit="'+d.date+'">Bearbeiten</button>'+(d.correction?.undoCount?' <button class="btn secondary" type="button" data-review-undo="'+d.date+'">Rückgängig ('+d.correction.undoCount+')</button>':'')+(!d.released?' <button class="btn secondary" type="button" data-review-release="'+d.date+'">Tag freigeben</button>':'')+'':'')+'</td></tr>';
       html+='<tr id="review-editor-'+d.date+'" hidden><td colspan="6"></td></tr>';
       if(index===days.length-1||monday(days[index+1].date)!==monday(d.date)){const {first,credited,worked}=week;html+='<tr class="week-total'+(worked>3000?' over-limit':'')+'"><td colspan="2">Wochensumme Ist · '+esc(first)+' bis '+esc(d.date)+'</td><td colspan="4">'+hm(credited)+' · '+decimal(credited)+' Std.'+(worked>3000?' · Über 50 Std.: +'+hm(worked-3000):'')+'</td></tr>'}
     });
@@ -158,6 +158,13 @@
     }
     setBusy(true);
     try{
+      if(b.dataset.reviewUndo){
+        if(dirty())throw new Error("Bitte offene Änderungen zuerst speichern oder verwerfen.");
+        const day=current.days.find(d=>d.date===b.dataset.reviewUndo);
+        if(!confirm(day.date+": Letzte gespeicherte Zeitkorrektur rückgängig machen?"))return;
+        await request("/kristine/api/monthly-payroll/"+encodeURIComponent(current.id)+"/"+day.date,{method:"PUT",body:JSON.stringify({undoVersion:day.correction.undoVersion})});
+        window.KrisMonthly.invalidate();await load();message("Letzte Zeitkorrektur rückgängig gemacht.");
+      }
       if(b.dataset.reviewRelease){
         if(dirty())throw new Error("Bitte Änderungen vor der Tagesfreigabe speichern.");
         if(!confirm(b.dataset.reviewRelease+": Zeiten, Regieberichte, Tagesabschluss, Diäten sowie FL/CH-Zuordnung geprüft und Tag freigeben?"))return;
