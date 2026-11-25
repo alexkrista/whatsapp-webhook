@@ -55,10 +55,10 @@
 
     const vacation=c.vacationEntitlement;
     const vacationSummary=vacation?'<span>Urlaubsanspruch (5-Tage-Woche): '+vacation.annualDays+' Tage/Jahr · '+vacation.monthlyDays.toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2})+' Tage/Monat</span>':'';
-    let html='<div class="employee-review-summary"><strong>Stunden: '+hm(person.totals.actualMinutes)+' ('+decimal(person.totals.actualMinutes)+' Std.)</strong><span>Soll: '+hm(person.totals.targetMinutes)+'</span><span>Saldo: '+decimal(person.totals.balanceMinutes)+' Std.</span>'+vacationSummary+'</div><div class="review-scroll"><table class="employee-review-table"><thead><tr><th>Tag</th><th>Arbeitszeiten Von–Bis · Dauer</th><th>Stunden</th><th>Soll</th><th>Saldo</th><th>Kontrolle</th></tr></thead><tbody>';
+    const summaryHtml='<div class="employee-review-summary"><strong>Stunden: '+hm(person.totals.actualMinutes)+' ('+decimal(person.totals.actualMinutes)+' Std.)</strong><span>Soll: '+hm(person.totals.targetMinutes)+'</span><span>Saldo: '+decimal(person.totals.balanceMinutes)+' Std.</span>'+vacationSummary+'</div>';
+    let html='<div class="review-scroll"><table class="employee-review-table"><thead><tr><th>Tag</th><th>Arbeitszeiten Von–Bis · Dauer</th><th>Stunden</th><th>Soll</th><th>Saldo</th><th>Kontrolle</th></tr></thead><tbody>';
     const b=person.balances||{},fmt=n=>n==null?"?":Number(n).toLocaleString("de-AT",{minimumFractionDigits:2,maximumFractionDigits:2});
     const balanceHtml='<div class="employee-review-summary"><span>ZA Vortrag: '+fmt(b.openingTime)+'</span><span>ZA Neustand: '+fmt(b.newTime)+'</span><span>Urlaub Rest: '+fmt(b.newVacation)+'</span><span>?Std. 10 %: '+fmt(b.z10)+'</span><span>?Std. 50 %: '+fmt(b.z50)+'</span>'+(!c.closed&&c.from.slice(0,7)>="2026-11"?'<button type="button" data-review-balance="correction">Korrektur buchen</button><button type="button" data-review-balance="transfer">Umbuchung buchen</button>':'')+'</div>';
-    html=html.replace('<div class="review-scroll">',balanceHtml+'<div class="review-scroll">');
     days.forEach((d,index)=>{
       const r=byDate.get(d.date)||{},segments=c.drafts[d.date]?.segments||d.segments,working=work(segments),paid=total(segments),shown=c.drafts[d.date]?paid:r.actualMinutes??paid;
       const key=monday(d.date),week=weeks.get(key)||{first:d.date,credited:0,worked:0};
@@ -69,7 +69,7 @@
       html+='<tr id="review-editor-'+d.date+'" hidden><td colspan="6"></td></tr>';
       if(index===days.length-1||monday(days[index+1].date)!==monday(d.date)){const {first,credited,worked}=week;html+='<tr class="week-total'+(worked>3000?' over-limit':'')+'"><td colspan="2">Wochensumme Ist · '+esc(first)+' bis '+esc(d.date)+'</td><td colspan="4">'+hm(credited)+' · '+decimal(credited)+' Std.'+(worked>3000?' · Über 50 Std.: +'+hm(worked-3000):'')+'</td></tr>'}
     });
-    $("employeeReviewContent").innerHTML=html+'</tbody></table></div>';setBusy(loading);
+    $("employeeReviewContent").innerHTML=html+'</tbody></table></div>'+summaryHtml+balanceHtml;setBusy(loading);
   }
   function editor(date){
     const c=current,d=c.days.find(d=>d.date===date);if(!d||c.closed)return;

@@ -163,8 +163,7 @@ async function createKriszeitMonthlyPdf(payload = {}) {
     text(amount(balances.z50),461,y,6.7);
     if(balances.source){y-=14;text("Saldoquelle: "+balances.source,left,y,6.5,regular,grey);}
 
-    text(person.monthClosed?"Abgeschlossen - Stunden gesperrt":"Freigegebene Stunden und fixe Modell-Lohnzeiten",left,105,8,bold);
-    text("Rot: Arbeit > 10 Std./Tag oder > 50 Std./KW (gesamte KW inkl. Monatsrand).",left,90,7,regular);
+    if (person.monthClosed) text("Abgeschlossen - Stunden gesperrt",left,105,8,bold);
     rule(32, 0.45);
     text(`${generated} / kriszeit-monatsuebersicht`, left, 20, 6.5, regular, grey);
     text(`- ${pdf.getPageCount()} -`, 289, 20, 6.5, regular, grey);
