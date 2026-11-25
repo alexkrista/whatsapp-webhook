@@ -126,7 +126,7 @@
   }
 
   function loadOfferBuilder() {
-    const src = "/public/ui/baustellen-offer-builder.js?v=20260920-editor-context-1-20261125-angebot-anfrage-11";
+    const src = "/public/ui/baustellen-offer-builder.js?v=20260920-editor-context-1-20261125-angebot-anfrage-12";
     const dataKey = "data-krista-angebot";
     const requestedPath = new URL(src, window.location.href).pathname;
     const ready = () => window.__kristaOfferBuilderInstalled === true;

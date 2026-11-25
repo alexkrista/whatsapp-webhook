@@ -523,9 +523,26 @@
         action(controls,"+ Arbeitsschritt",()=>{model().workSteps.push({text:"",minutes:0});persist();drawCalculator();});
         for(const item of data.materials){
           const fields=append(controls,"div");fields.className="koffer-inquiry-calc-line";
-          field(fields,"Material",item.name,value=>{item.name=value;}).setAttribute("list","kofferMaterialMaster");
+          const material=field(fields,"Material",item.name,value=>{item.name=value;});
+          material.setAttribute("list","kofferMaterialMaster");
           field(fields,"Verbrauch je Einheit",item.consumption,value=>{item.consumption=Number(value);recalculate();},"number");
-          field(fields,"Materialpreis €",item.unitPrice,value=>{item.unitPrice=Number(value);recalculate();},"number");
+          const materialPrice=field(fields,"Materialpreis €",item.unitPrice,value=>{item.unitPrice=Number(value);recalculate();},"number");
+          const applyMaterial=()=>{
+            const name=material.value.trim();
+            const found=materialMaster.find(entry=>String(entry.product||entry.name||entry.label||"").trim().toLowerCase()===name.toLowerCase());
+            if(!found)return;
+            item.materialId=found.materialId||found.id||"";
+            item.unit=found.unit||"";
+            item.unitPrice=Number(found.purchasePrice||found.salePrice||0);
+            materialPrice.value=item.unitPrice;
+            recalculate();
+          };
+          material.addEventListener("input",event=>{
+            if(!event.isComposing){
+              item.materialId="";item.unit="";
+              applyMaterial();persist();
+            }
+          });
           action(fields,"Entfernen",()=>{data.materials.splice(data.materials.indexOf(item),1);recalculate();drawCalculator();});
         }
         action(controls,"+ Material",()=>{model().materials.push({name:"",consumption:0,unitPrice:0});persist();drawCalculator();});
