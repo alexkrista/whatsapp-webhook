@@ -18,7 +18,7 @@
     .employee-review-table .over-limit{background:#ffe3de;color:#8b2014;font-weight:700}.employee-review-table .week-total{background:#edf1ed;font-weight:700}.employee-review-table small{display:block;color:#57625b}.review-block{white-space:nowrap;margin-bottom:5px}.review-block span{display:inline-block;min-width:112px}.review-edit-grid{display:grid;grid-template-columns:180px 105px 105px minmax(180px,1fr) 45px;gap:8px;margin:8px 0}.review-edit-grid input,.review-edit-grid select{width:100%;min-width:0;padding:8px}.review-edit-box{background:#f5f7f5;padding:12px}.review-edit-box textarea{width:100%;min-height:65px}.employee-review-summary{display:flex;gap:20px;flex-wrap:wrap;padding:12px;background:#edf6ed}.review-warning{color:#a32618;font-weight:700}.review-scroll{overflow-x:auto}@media(max-width:700px){.review-edit-grid{grid-template-columns:1fr 85px 85px 36px}.review-edit-grid .review-context{grid-column:1/-1}.employee-review-dialog{padding:12px}.employee-review-table td{padding:6px}}
   `;document.head.appendChild(style);
   const modal=document.createElement("div");modal.id="monthlyEmployeeModal";modal.className="logic-modal";modal.hidden=true;
-  modal.innerHTML='<section class="employee-review-dialog" role="dialog" aria-modal="true" aria-labelledby="employeeReviewTitle"><div class="employee-review-head"><div><h2 id="employeeReviewTitle">Monatskontrolle</h2><div id="employeeReviewModel"></div></div><button type="button" class="btn secondary" data-review-exit>Schließen</button></div><div id="employeeReviewStatus" class="employee-review-status" role="status"></div><div id="employeeReviewContent"></div><div class="employee-review-actions"><span id="employeeReviewSaveStatus" role="status"></span><div><button type="button" class="btn secondary" data-review-save>Änderungen speichern</button> <button type="button" class="btn secondary" data-review-pdf>PDF</button> <button type="button" class="btn primary" data-review-close>Speichern &amp; Monat abschließen</button></div></div></section>';
+  modal.innerHTML='<section class="employee-review-dialog" role="dialog" aria-modal="true" aria-labelledby="employeeReviewTitle"><div class="employee-review-head"><div><h2 id="employeeReviewTitle">Monatskontrolle</h2><div id="employeeReviewModel"></div></div><button type="button" class="btn secondary" data-review-exit>← Zur Monatsübersicht</button></div><div id="employeeReviewStatus" class="employee-review-status" role="status"></div><div id="employeeReviewContent"></div><div class="employee-review-actions"><span id="employeeReviewSaveStatus" role="status"></span><div><button type="button" class="btn secondary" data-review-save>Änderungen speichern</button> <button type="button" class="btn secondary" data-review-pdf>PDF</button> <button type="button" class="btn primary" data-review-close>Speichern &amp; Monat abschließen</button></div></div></section>';
   document.body.appendChild(modal);
   function dirty(){return current&&Object.keys(current.drafts).length>0}
   function message(text,error=false){$("employeeReviewSaveStatus").textContent=text;$("employeeReviewSaveStatus").className=error?"review-warning":""}
@@ -37,7 +37,10 @@
     const item=window.KrisMonthly.personItem(id);if(!item)return;
     const from=$("monthlyFrom").value,to=window.KrisMonthly.reportTo($("monthlyTo").value);
     current={id,employee:item.employee,za:item.za,from,to,days:[],drafts:{},closed:false};
-    modal.hidden=false;$("employeeReviewContent").textContent="Tageszeiten werden geladen …";setBusy(true);
+    $("monthlyReportModal").hidden=true;
+    modal.hidden=false;
+    modal.querySelector("[data-review-exit]").focus();
+    $("employeeReviewContent").textContent="Tageszeiten werden geladen …";setBusy(true);
     try{await load();message("Von/Bis und Stunden aus denselben Daten wie das PDF. Änderungen werden erst mit Speichern übernommen.")}
     catch(error){message(error.message,true)}finally{setBusy(false)}
   }
@@ -126,7 +129,19 @@
   modal.addEventListener("input",event=>{const row=event.target.closest("[data-date]");if(row)capture(row)});
   modal.addEventListener("click",async event=>{
     const b=event.target.closest("button");if(!b||loading)return;
-    if(b.hasAttribute("data-review-exit")){if(!dirty()||confirm("Ungespeicherte Änderungen verwerfen?")){modal.hidden=true;current=null;window.KrisMonthly.refresh().catch(e=>toast(e.message,true))}return}
+    if(b.hasAttribute("data-review-exit")){
+      if(dirty()&&!confirm("Ungespeicherte Änderungen verwerfen?"))return;
+      const employeeId=current.id;
+      modal.hidden=true;
+      current=null;
+      $("monthlyReportModal").hidden=false;
+      try{await window.KrisMonthly.refresh()}catch(error){toast(error.message,true)}
+      if(!$("monthlyReportModal").hidden){
+        const trigger=document.querySelector(`[data-person-review="${CSS.escape(employeeId)}"]`);
+        (trigger||$("closeMonthlyReport")).focus();
+      }
+      return;
+    }
     if(b.dataset.reviewEdit){editor(b.dataset.reviewEdit);return}
     const row=b.closest("[data-date]");
     if(row&&b.hasAttribute("data-review-add")){capture(row);const segments=current.drafts[row.dataset.date].segments,last=segments.at(-1);segments.push({id:"review_"+Date.now(),type:"up",from:last?.to||"07:00",to:"",reason:"Büro",unproductiveCategory:"other",unproductiveCode:""});editor(row.dataset.date);return}
