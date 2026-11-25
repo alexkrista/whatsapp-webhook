@@ -762,3 +762,17 @@ test("splits the overnight report at three confirmed ignition cycles and leaves 
   assert.deepEqual(second.rows.map(row=>row.id),first.rows.map(row=>row.id));
   assert.equal(first.totals.missingKm,3);
 });
+
+test("overlapping trips are excluded from totals and exports until resolved", async t => {
+  const h=await harness(t);
+  h.state.trips.push(trip({startPositionId:102,startTime:"2026-09-22T06:10:00Z",endTime:"2026-09-22T06:20:00Z"}));
+  const report=await (await h.get()).json();
+  assert.equal(report.rows.length,2);
+  assert.ok(report.rows.every(row=>row.timeConflict));
+  assert.equal(report.totals.km,0);
+  for(const extension of ["csv","pdf"]) assert.equal((await h.get("/export."+extension+h.query)).status,409);
+  const duplicate=report.rows.at(-1);
+  const removed=await fetch(h.base+"/byd/"+duplicate.id+"/remove",{method:"POST",headers:{"x-admin-token":"logbook-test-only","content-type":"application/json"},body:JSON.stringify({confirmed:true,revision:duplicate.revision})});
+  assert.equal(removed.status,200);
+  assert.equal((await h.get("/export.csv"+h.query)).status,200);
+});
