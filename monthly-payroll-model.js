@@ -1,12 +1,15 @@
 "use strict";
 const minute=v=>{const m=/^(\d{1,2}):(\d{2})$/.exec(String(v||""));return m&&+m[1]<24&&+m[2]<60?+m[1]*60+ +m[2]:null};
 const hm=v=>String(Math.floor(v/60)).padStart(2,"0")+":"+String(v%60).padStart(2,"0");
+function assignedModel(models,e){
+ return e.worktimeModelId ? models.find(m=>String(m.id)===String(e.worktimeModelId)) : undefined;
+}
 function modelFor(models,e){
- const direct=models.find(m=>String(m.id)===String(e.worktimeModelId||""));
- if(direct&&direct.id!=="krista-standard")return direct;
+ const direct=assignedModel(models,e);
+ if(direct)return direct;
  const n=String(e.name||e.employeeName||e.nickname||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
  const id=/\balex(?:ander)?\b/.test(n)?"office-alex":/\bbettina\b/.test(n)?"office-bettina":/\bdunja\b/.test(n)?"office-dunja":/\bgeri\b|\bgerry\b|\bgerald\b/.test(n)?"office-geri":/\bjudith\b/.test(n)?"office-judith":"";
- return models.find(m=>m.id===id)||direct||null;
+ return models.find(m=>m.id===id)||null;
 }
 function split(row,id="model"){
  const a=minute(row.from),b=minute(row.to);if(a===null||b===null||b<=a)return [];
@@ -37,11 +40,9 @@ function obeliskSchedule(model,employee,weekday){
  return {model,targetMinutes,fixedSegments};
 }
 function schedule(models,e,date){
- const model=modelFor(models,e),d=new Date(date+"T12:00:00Z"),weekday=d.getUTCDay()||7;
- if(Number.isFinite(+d)){
-  const obelisk=obeliskSchedule(model,e,weekday);
-  if(obelisk)return obelisk;
- }
+ const assigned=assignedModel(models,e),model=assigned||modelFor(models,e),d=new Date(date+"T12:00:00Z"),weekday=d.getUTCDay()||7;
+ const obelisk=Number.isFinite(+d)?obeliskSchedule(model,e,weekday):null;
+ if(!assigned&&!model?.blocks?.finkTarget?.rows?.length&&obelisk)return obelisk;
  if(!model||!Number.isFinite(+d))return {model:null,targetMinutes:0,fixedSegments:null};
  const rows=model.blocks?.finkTarget?.rows,matching=Array.isArray(rows)?rows.filter(r=>(r.days||[]).map(Number).includes(weekday)):null;
  const factor=model.configured===true||model.officeModel||model.id!=="krista-standard"?1:Math.max(0,Number(e.employmentPercent??e.employmentPercentage??e.workPercent??100)||0)/100;
@@ -49,7 +50,8 @@ function schedule(models,e,date){
  const targetMinutes=Math.round((matching?matching.reduce((n,r)=>n+net(r),0):Number(legacy.payrollTargetHours??legacy.shouldHours??legacy.targetHours??0)*60)*factor);
  const fixed=model.blocks?.finkFixed;
  const fixedRows=fixed?.enabled===true?(fixed.rows||[]).filter(r=>(r.days||[]).map(Number).includes(weekday)):[];
- return {model,targetMinutes,fixedSegments:fixed?.enabled===true?fixedRows.flatMap((r,i)=>split(r,"fixed_"+date+"_"+i)):null};
+ return {model,targetMinutes,fixedSegments:fixed?.enabled===true?fixedRows.flatMap((r,i)=>split(r,"fixed_"+date+"_"+i)):null,
+  regularWeekMinutes:obelisk?.regularWeekMinutes,contractOvertimeWeekMinutes:obelisk?.contractOvertimeWeekMinutes};
 }
 function workMinutes(segments){return segments.filter(s=>["work","up"].includes(s.type)&&!["900","901","902","903","904","911","930","945","946"].includes(String(s.unproductiveCode||""))&&!/urlaub|krank|feiertag|zeitausgleich/i.test(s.reason||"")).reduce((n,s)=>n+Math.max(0,(minute(s.to)??0)-(minute(s.from)??0)),0)}
 function withMorningPause(segments){
