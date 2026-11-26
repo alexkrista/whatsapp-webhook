@@ -22,7 +22,8 @@ const html='<div id="monthlyReportModal"></div><button id="openKriszeitPdf"></bu
    {type:"lunch",from:"12:00",to:"12:30"},{type:"work",from:"12:30",to:"17:00"}
  ]);
  assert.equal(JSON.stringify(Array.from(blocks,b=>[b.from,b.to,b.durationMinutes,b.label])),JSON.stringify([
-   ["07:00","12:00",285,"Arbeit"],["09:00","09:15",15,"Pause (Abzug)"],
+   ["07:00","09:00",120,"Arbeit"],["09:00","09:15",15,"Pause (Abzug)"],
+   ["09:15","12:00",165,"Arbeit"],
    ["12:00","12:30",30,"Mittag"],["12:30","17:00",270,"Arbeit"]
  ]));
  const settle=async()=>{for(let i=0;i<15;i++)await new Promise(r=>setImmediate(r))};

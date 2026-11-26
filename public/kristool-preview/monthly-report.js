@@ -14,26 +14,21 @@
   function allocateZa(days,wanted,isBuak,seed){let rest=Math.max(0,Math.round(wanted));const sundays=days.filter(d=>new Date(`${d.date}T12:00:00`).getDay()===0&&d.actualMinutes>0),saturdays=days.filter(d=>new Date(`${d.date}T12:00:00`).getDay()===6&&d.actualMinutes>60);for(const day of [...sundays,...saturdays]){const isSaturday=new Date(`${day.date}T12:00:00`).getDay()===6,available=Math.max(0,day.actualMinutes-(isSaturday?60:0)),take=Math.min(rest,available);day.zaOldMinutes=take;rest-=take;if(!rest)break}const weekdays=days.filter(day=>{const w=new Date(`${day.date}T12:00:00`).getDay();if(w<1||w>5||day.label)return false;day.zaFloorMinutes=isBuak?(w===5?182:542):362;day.zaAvailableMinutes=Math.max(0,day.actualMinutes-day.zaFloorMinutes);return day.zaAvailableMinutes>0});const hash=[...String(seed)].reduce((s,c)=>(s*31+c.charCodeAt(0))>>>0,0),chunks=[47,23,61,35,52,29,43,67],ordered=weekdays.slice().sort((a,b)=>((hash+ +a.date.slice(-2)*17)%97)-((hash+ +b.date.slice(-2)*17)%97));let round=0;while(rest>0&&ordered.some(d=>d.zaAvailableMinutes>(d.zaOldMinutes||0))){const d=ordered[round%ordered.length],available=d.zaAvailableMinutes-(d.zaOldMinutes||0),take=Math.min(rest,available,chunks[(round+hash)%chunks.length]);if(take)d.zaOldMinutes=(d.zaOldMinutes||0)+take;rest-=take;if(++round>10000)break}for(const d of days){d.payrollMinutes=d.actualMinutes-(d.zaOldMinutes||0);d.balanceMinutes=d.payrollMinutes-d.targetMinutes;if(d.zaOldMinutes){const pauses=d.printBlocks.filter(block=>block.type==="pause"||block.type==="lunch");d.printBlocks=[...trim(d.blocks,d.zaOldMinutes),...pauses].sort((a,b)=>a.from.localeCompare(b.from))}}return rest}
   function compactBlocks(segments){
     const blocks=[];
-    let work=null,pauses=[],end=null;
+    let work=null;
     const flush=()=>{
       if(work)blocks.push(work);
-      blocks.push(...pauses);
       work=null;
-      pauses=[];
-      end=null;
     };
     for(const segment of segments){
       const {type,from,to}=segment;
       const durationMinutes=from&&to?Math.max(0,mins(to)-mins(from)):0;
       const block={type,from:segment.durationOnly?"":from,to:segment.durationOnly?"":to,durationMinutes,label:type==="work"?"Arbeit":type==="pause"?"Pause (Abzug)":type==="lunch"?"Mittag":String(segment.reason||"Unproduktiv")};
-      if(work&&end!==from)flush();
+      if(work&&work.to!==from)flush();
       if(type==="work"){
         if(work){work.to=to;work.durationMinutes+=durationMinutes;}
         else work=block;
-        end=to;
         continue;
       }
-      if(type==="pause"&&work){pauses.push(block);end=to;continue;}
       flush();
       blocks.push(block);
     }
