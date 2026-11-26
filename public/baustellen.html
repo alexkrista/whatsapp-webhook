@@ -54,6 +54,7 @@
       <div class="kpi"><div class="kpi-label">Eingeplant</div><div id="detailPlanned" class="kpi-value">–</div><div class="kpi-note">ab heute</div></div>
       <div class="kpi"><div class="kpi-label">Auftragssumme</div><div id="detailAmount" class="kpi-value">–</div><div class="kpi-note">hinterlegter Wert</div></div>
     </div>
+    <p><button id="reassignJobTimes" type="button">Zeiten umbuchen</button></p>
     <div id="deleteEmptyWrap" class="delete-empty-wrap" hidden><div><strong>Fehlanlage ohne Daten</strong><span id="deleteEmptyReason" role="status"></span></div><button id="deleteEmptyJob" type="button">Fehlanlage löschen</button></div>
     <div class="detail-grid">
       <div class="detail-card"><h3>Baustelle</h3><div id="detailInfo" class="info-grid"></div></div>
@@ -133,6 +134,75 @@ async function showEmptyDeleteCheck(job,checkEmpty){
     if(serial===emptyCheckSerial)note.textContent=error.message;
   }
 }
+function openJobReassignment(){
+  const sourceId=decodeURIComponent(location.hash.slice(1));
+  const source=jobs.find(job=>String(job.jobId)===sourceId);
+  if(!source)return;
+  const dialog=document.createElement('dialog');
+  dialog.style.cssText='width:min(650px,calc(100% - 24px));padding:20px;border:1px solid #ddd9cf;border-radius:12px';
+  dialog.innerHTML='<h3>Zeiten umbuchen</h3><p data-source></p><p data-status role="status"></p><label>Zielbaustelle suchen <input type="search"></label><p><label>Zielbaustelle <select style="max-width:100%"></select></label></p><label><input type="checkbox"> Quellmappe anschließend löschen, wenn sie leer ist</label><p><button type="button" data-run disabled>Umbuchung bestätigen</button> <button type="button" data-close>Schließen</button></p>';
+  const find=selector=>dialog.querySelector(selector);
+  const search=find('input[type=search]'),select=find('select'),run=find('[data-run]'),close=find('[data-close]'),status=find('[data-status]'),remove=find('input[type=checkbox]');
+  find('[data-source]').textContent='Quelle: '+sourceId+' · '+source.name;
+  let rows=[],busy=false,ready=false;
+  function refresh(){
+    const selected=select.value,term=search.value.trim().toLocaleLowerCase('de-AT');
+    select.replaceChildren(new Option('Bitte auswählen',''));
+    for(const job of jobs){
+      const id=String(job.jobId),title=id+' · '+(job.name||'');
+      if(id!==sourceId&&!pendingEmptyDeletes.has(id)&&!BaustellenData.isCollection(job)&&title.toLocaleLowerCase('de-AT').includes(term))select.add(new Option(title,id));
+    }
+    if([...select.options].some(option=>option.value===selected))select.value=selected;
+    run.disabled=busy||!ready||!select.value||!rows.length||rows.some(row=>row.segments.some(segment=>!segment.to));
+  }
+  const path='/kristine/api/job-reassignment/'+encodeURIComponent(sourceId);
+  async function readPreview(){
+    ready=false;refresh();status.textContent='Zeitbuchungen werden geprüft …';
+    try{
+      ({rows}=await api(path));
+      const count=rows.reduce((sum,row)=>sum+row.segments.length,0);
+      const dates=rows.map(row=>row.date).sort();
+      status.textContent=count?count+' Zeitabschnitt(e) an '+rows.length+' Mitarbeitertagen · '+dates[0]+' bis '+dates.at(-1):'Keine Zeitabschnitte auf der Quellmappe gefunden.';
+      if(rows.some(row=>row.segments.some(segment=>!segment.to)))status.textContent+=' Laufende Abschnitte zuerst abschließen.';
+      ready=true;refresh();
+    }catch(error){status.textContent=error.message;}
+  }
+  search.oninput=refresh;
+  select.onchange=()=>{run.disabled=busy||!ready||!select.value||!rows.length||rows.some(row=>row.segments.some(segment=>!segment.to));};
+  close.onclick=()=>{if(!busy)dialog.close();};
+  dialog.oncancel=event=>{if(busy)event.preventDefault();};
+  dialog.onclose=()=>dialog.remove();
+  run.onclick=async()=>{
+    const targetId=select.value,targetName=select.selectedOptions[0].textContent,removeAfter=remove.checked;
+    if(!confirm('Zeitbuchungen von '+sourceId+' auf '+targetName+' umbuchen?'+(removeAfter?' Die Quellmappe wird anschließend gelöscht, sofern die Löschprüfung sie freigibt.':'')))return;
+    busy=true;ready=false;run.disabled=true;close.disabled=true;search.disabled=true;select.disabled=true;remove.disabled=true;
+    let processed=0;
+    try{
+      for(const row of rows){
+        status.textContent='Bucht um: '+row.employeeName+' · '+row.date+' ('+(processed+1)+'/'+rows.length+')';
+        await api('/kristine/api/segments/'+encodeURIComponent(row.employeeId)+'/'+encodeURIComponent(row.date)+'?scope=project',{
+          method:'PUT',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({employeeName:row.employeeName,reason:'Umbuchung der Baustellenzeiten',note:sourceId+' → '+targetId,reassign:{sourceJobId:sourceId,targetJobId:targetId,expected:row.segments}})
+        });
+        processed++;
+      }
+      const result=await api(path);
+      if(result.rows.length)throw new Error('Auf der Quelle sind noch Zeitabschnitte vorhanden.');
+      if(removeAfter){
+        const check=await api('/admin/api/job/'+encodeURIComponent(sourceId)+'/empty-delete-check');
+        if(check.reasons.length)throw new Error('Quellmappe bleibt erhalten: '+check.reasons.join(' · '));
+        await api('/admin/api/job/'+encodeURIComponent(sourceId)+'?emptyOnly=1',{method:'DELETE'});
+        completedEmptyDeletes.add(sourceId);
+        jobs=jobs.filter(job=>String(job.jobId)!==sourceId);
+        closeDetail();
+      }
+      status.textContent='Umbuchung abgeschlossen. '+processed+' Mitarbeitertage verarbeitet.'+(removeAfter?' Quellmappe gelöscht.':'');
+      await load();
+    }catch(error){status.textContent=processed+' Mitarbeitertage verarbeitet. '+error.message;}
+    finally{busy=false;close.disabled=false;}
+  };
+  document.body.appendChild(dialog);dialog.showModal();readPreview();
+}
 function showEmptyDeleteStatus(){
   const node=document.getElementById('emptyDeleteStatus');
   const pending=pendingEmptyDeletes.size;
@@ -168,7 +238,7 @@ function deleteEmptyJob(){
 }
 function closeDetail(){++emptyCheckSerial;const d=document.getElementById('detail');d.classList.remove('open');d.setAttribute('aria-hidden','true');document.body.style.overflow='';history.replaceState(null,'',location.pathname+location.search);window.scrollTo(0,scrollBeforeDetail);document.dispatchEvent(new CustomEvent('krista:baustelle-closed'))}
 async function load(){try{const results=await Promise.allSettled([api('/admin/api/jobs'),api('/kristine/api/bootstrap')]);if(results[0].status!=='fulfilled')throw results[0].reason;jobs=BaustellenData.catalog(results[0].value).filter(job=>!completedEmptyDeletes.has(String(job.jobId)));canonicalHours=results[0].value.baustellenHours||null;window.kristineCustomerPortalJobs=jobs;window.dispatchEvent(new CustomEvent('kristine:jobs-loaded',{detail:jobs}));bootstrap=results[1].status==='fulfilled'?results[1].value||{}:{};renderKpis();renderList();setText('footerNote','Live aus KRISTINE · aktualisiert '+new Date().toLocaleTimeString('de-AT',{hour:'2-digit',minute:'2-digit'}));const hash=decodeURIComponent(location.hash.slice(1));if(hash){const resolved=jobs.find(j=>String(j.jobId)===hash||(j.previousJobIds||[]).includes(hash));if(resolved){if(String(resolved.jobId)!==hash)location.hash=encodeURIComponent(resolved.jobId);openDetail(resolved.jobId)}}}catch(e){document.getElementById('jobList').innerHTML='<div class="empty warn">Ladefehler: '+esc(e.message)+'</div>'}}
-document.getElementById('search').addEventListener('input',renderList);document.getElementById('statusFilter').addEventListener('change',renderList);document.getElementById('detailBack').addEventListener('click',closeDetail);document.getElementById('deleteEmptyJob').addEventListener('click',deleteEmptyJob);document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('detail').classList.contains('open'))closeDetail()});document.getElementById('newOffer').addEventListener('click',()=>{if(window.BaustellenKnowledgeHub?.newOffer)window.BaustellenKnowledgeHub.newOffer();else location.href=withToken('/kristine/baustellen?newOffer=1')});document.addEventListener('krista:reload-baustellen',load);document.getElementById('newOfferMail').addEventListener('click',()=>{if(window.BaustellenKnowledgeHub?.newOffer)window.BaustellenKnowledgeHub.newOffer(true);else location.href=withToken('/kristine/baustellen?newOffer=mail')});document.getElementById('newJob').addEventListener('click',()=>location.href=withToken('/kristine?newJob=1&returnTo=%2Fkristine%2Fbaustellen'));load();
+document.getElementById('search').addEventListener('input',renderList);document.getElementById('statusFilter').addEventListener('change',renderList);document.getElementById('detailBack').addEventListener('click',closeDetail);document.getElementById('deleteEmptyJob').addEventListener('click',deleteEmptyJob);document.getElementById('reassignJobTimes').addEventListener('click',openJobReassignment);document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('detail').classList.contains('open'))closeDetail()});document.getElementById('newOffer').addEventListener('click',()=>{if(window.BaustellenKnowledgeHub?.newOffer)window.BaustellenKnowledgeHub.newOffer();else location.href=withToken('/kristine/baustellen?newOffer=1')});document.addEventListener('krista:reload-baustellen',load);document.getElementById('newOfferMail').addEventListener('click',()=>{if(window.BaustellenKnowledgeHub?.newOffer)window.BaustellenKnowledgeHub.newOffer(true);else location.href=withToken('/kristine/baustellen?newOffer=mail')});document.getElementById('newJob').addEventListener('click',()=>location.href=withToken('/kristine?newJob=1&returnTo=%2Fkristine%2Fbaustellen'));load();
 </script>
 </body>
 </html>

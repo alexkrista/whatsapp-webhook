@@ -3970,7 +3970,13 @@ async function emptyJobDeletionReasons(jobId) {
   if (hasRecordedHours) reasons.push("Erfasste Arbeits- oder Regiestunden");
   if (hasPlanning) reasons.push("Planungseinträge");
   if (hasTimeEvents) reasons.push("Zeitbuchungen auf dieser Baustelle");
+  const [archive,reviews]=await Promise.all(["project-time-archive.json","day-review-entries.json"].map(file=>
+    fsp.readFile(path.join(DATA_DIR,"_kristine",file),"utf8").then(JSON.parse).catch(error=>{if(error.code==="ENOENT")return [];throw error;})));
+  if(archive.some(row=>row.segments?.some(segment=>String(segment.jobId||"")===jobId)))reasons.push("Archivierte Baustellenzeiten");
+  if(reviews.some(row=>String(row.jobId||"")===jobId))reasons.push("Verknüpfte Tagesbuchungen");
+  if(fs.existsSync(offerDraftPath(jobId)))reasons.push("Gespeicherter Angebotsentwurf");
   if (hasRegieReports) reasons.push("Regieberichte");
+  if (documentation.some(row=>row?.type!=="regie_report")) reasons.push("Dokumente oder Belege");
   if (hasWorkData) reasons.push("Bautage: " + days.slice(0, 5).join(", ") + (days.length > 5 ? " …" : ""));
   if (hasFinancialData) reasons.push("Auftragswert oder Sollstunden");
   return reasons;

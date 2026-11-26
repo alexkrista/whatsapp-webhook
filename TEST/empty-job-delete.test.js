@@ -13,7 +13,9 @@ assert.match(page, /Fehlanlage löschen/);
 assert.match(page, /a<=\.005&&t<=\.005&&p<=\.005&&contractAmount\(j\)<=\.005/);
 assert.match(page, /\?emptyOnly=1/);
 assert.match(server, /String\(req\.query\.emptyOnly \|\| ""\) === "1"/);
-assert.match(server, /hasPlanning \|\| hasTimeEvents \|\| hasRegieReports \|\| hasWorkData \|\| hasFinancialData \|\| hasRecordedHours/);
-assert.match(server, /kann deshalb nicht als Fehlanlage gelöscht werden/);
+for(const check of ["hasPlanning","hasTimeEvents","hasRegieReports","hasWorkData","hasFinancialData","hasRecordedHours"])assert.match(server,new RegExp("if \\("+check+"\\) reasons.push"));
+assert.match(server, /Löschen gesperrt/);
+assert.match(page, /Umbuchung bestätigen/);
+assert.match(page, /empty-delete-check/);
 
 console.log("empty job delete tests passed");

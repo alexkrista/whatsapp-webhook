@@ -2820,6 +2820,32 @@ const open = taskId
     }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
   }));
 
+  app.get("/kristine/api/job-reassignment/:jobId", async (req,res)=>{
+    if(!requireAdmin(req,res))return;
+    await startupReady;
+    const jobId=String(req.params.jobId||"");
+    try{
+      const [events,archive,states,closures]=await Promise.all([
+        readJson(TIME_EVENTS,[]),readJson(PROJECT_TIME_ARCHIVE,[]),readJson(STATES,{}),readJson(MONTH_CLOSURES,[]),
+      ]);
+      const days=new Map();
+      for(const row of [...events.filter(row=>String(row.jobId||"")===jobId&&!row.detachedFromProject),...archive.filter(row=>row.segments?.some(segment=>segment.type==="work"&&String(segment.jobId)===jobId))]){
+        if(row.employeeId&&/^\d{4}-\d{2}-\d{2}$/.test(row.date))days.set(row.employeeId+"|"+row.date,row);
+      }
+      const rows=[];
+      for(const row of days.values()){
+        const employeeId=String(row.employeeId),date=row.date;
+        const closed=closures.some(item=>String(item.employeeId)===employeeId&&item.month===date.slice(0,7));
+        const project=archive.find(item=>String(item.employeeId)===employeeId&&item.date===date);
+        const segments=closed?(project?.segments||[]):buildEditableSegments(events,employeeId,date,states[employeeId]||{});
+        const matched=segments.filter(segment=>segment.type==="work"&&String(segment.jobId)===jobId);
+        if(matched.length)rows.push({employeeId,employeeName:row.employeeName||employeeId,date,segments:matched.map(({from,to})=>({from,to})),closed});
+      }
+      res.setHeader("Cache-Control","private, no-store");
+      res.json({ok:true,rows});
+    }catch(error){res.status(500).json({ok:false,error:String(error.message||error)});}
+  });
+
   app.get("/kristine/api/segments/:employeeId/:date", async (req, res) => {
     if (!requireAdmin(req, res)) return;
     await startupReady;
@@ -3466,7 +3492,24 @@ const open = taskId
       const copiedFromRaw = req.body?.copiedFrom && typeof req.body.copiedFrom === "object" ? req.body.copiedFrom : null;
       const copiedFrom = copiedFromRaw ? { employeeId: String(copiedFromRaw.employeeId || "").slice(0, 100), employeeName: String(copiedFromRaw.employeeName || "").trim().slice(0, 160) } : null;
       const moveLinked = true; // Zeitblock ist die Wahrheit: verknüpfte Einträge werden immer mitgeführt.
-      const incoming = Array.isArray(req.body?.segments) ? req.body.segments : [];
+      const reassign=req.body?.reassign;
+      let incoming = Array.isArray(req.body?.segments) ? req.body.segments : [];
+      if(reassign){
+        const source=String(reassign.sourceJobId||""),target=String(reassign.targetJobId||"");
+        if(!projectScope||!source||source===target||!/^[a-z0-9_-]+$/i.test(source)||!/^[a-z0-9_-]+$/i.test(target))
+          return res.status(400).json({ok:false,error:"Ungültige Quell- oder Zielbaustelle."});
+        const [sourceMeta,targetMeta]=await Promise.all([readJobMeta(source),readJobMeta(target)]);
+        if(!sourceMeta?.name||!targetMeta?.name)return res.status(409).json({ok:false,error:"Quell- oder Zielbaustelle fehlt."});
+        const events=await readJson(TIME_EVENTS,[]),states=await readJson(STATES,{});
+        const archive=closed?await readJson(PROJECT_TIME_ARCHIVE,[]):[];
+        incoming=closed?(archive.find(row=>String(row.employeeId)===employeeId&&row.date===date)?.segments||[]):buildEditableSegments(events,employeeId,date,states[employeeId]||{});
+        const matched=incoming.filter(segment=>segment.type==="work"&&String(segment.jobId)===source);
+        if(!matched.length)return res.status(409).json({ok:false,error:"Die Quellbuchungen wurden inzwischen geändert. Bitte erneut prüfen."});
+        if(matched.some(segment=>!segment.to))return res.status(409).json({ok:false,error:"Laufender Zeitabschnitt. Bitte zuerst abschließen."});
+        const seen=matched.map(({from,to})=>({from,to}));
+        if(JSON.stringify(seen)!==JSON.stringify(reassign.expected))return res.status(409).json({ok:false,error:"Zeitabschnitte wurden inzwischen geändert. Bitte erneut prüfen."});
+        incoming=incoming.map(segment=>segment.type==="work"&&String(segment.jobId)===source?{...segment,jobId:target,jobName:targetMeta.name}:segment);
+      }
       let segments = incoming.map((segment, index) => ({
         id: String(segment.id || `seg_${Date.now()}_${index}`),
         type: ["work", "pause", "lunch", "up"].includes(segment.type) ? segment.type : "work",
