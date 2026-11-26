@@ -306,15 +306,34 @@ function groupRegieComparisonRows(rows = []) {
   function nextSegmentStart(){const last=timeEdit.segments.at(-1);return last?.to||last?.from||"07:00"}
   function addTimeSegment(type){timeEdit.segments.push({id:`manual_${Date.now()}_${timeEdit.segments.length}`,type,from:nextSegmentStart(),to:"",jobId:type==="work"?currentJobId:"",jobName:type==="work"?(jobById(currentJobId)?.name||currentJobId):"",reason:""});renderTimeDialog()}
   function timeKindLabel(type){return ({work:"Arbeit",pause:"Pause",lunch:"Mittag",up:"Unproduktiv"})[type]||type}
+  const timeUnproductiveReasons=[
+  ["022","Büro"],["900","Urlaub"],["901","Krank"],["902","Arzt"],
+  ["903","Berufsschule"],["904","Feiertag"],["905","Schulung extern"],
+  ["909","Schulung intern"],["911","Sonderurlaub"],["912","Musterung"],
+  ["913","Werkstatt"],["917","Firma aufräumen"],["918","Lehrlingswettbewerb"],
+  ["927","Betriebsausflug"],["930","Zeitausgleich"],["945","Quarantäne"],
+  ["946","Kurzarbeit"],["9999","Sanierung"]
+];
+  function timeUnproductiveOptions(segment){
+    const reason=String(segment.reason||"");
+    const known=timeUnproductiveReasons.find(([code,label])=>code===segment.unproductiveCode||label===reason);
+    const legacy=reason&&!known?`<option value="legacy" selected>${esc(reason)}</option>`:"";
+    return '<option value="">Grund wählen</option>'+legacy+timeUnproductiveReasons.map(([code,label])=>
+      `<option value="${code}" ${known?.[0]===code?"selected":""}>${esc(code+" · "+label)}</option>`).join("");
+  }
   function renderTimeDialog(){
     const dialog=ensureTimeDialog(),host=dialog.querySelector("#bkTimeRows");
     dialog.querySelector("#bkTimeTitle").textContent=`${timeEdit.employeeName||timeEdit.employeeId} · ${fmtDate(timeEdit.date)}`;
     dialog.querySelector("#bkTimeSubtitle").textContent="Zeiten korrigieren, Arbeitsabschnitte löschen oder über die Baustellenauswahl umbuchen.";
-    const rows=timeEdit.segments.map((segment,index)=>{const context=segment.type==="work"?`<select data-time-job="${index}">${timeJobOptions(segment.jobId)}</select>`:segment.type==="up"?`<input data-time-reason="${index}" value="${esc(segment.reason||"")}" placeholder="Grund">`:`<span class="bk-note">${timeKindLabel(segment.type)}</span>`;return `<tr><td><select class="kind" data-time-type="${index}">${["work","pause","lunch","up"].map(type=>`<option value="${type}" ${type===segment.type?"selected":""}>${timeKindLabel(type)}</option>`).join("")}</select></td><td><input class="time" data-time-from="${index}" value="${esc(segment.from||"")}" placeholder="07:00"></td><td><input class="time" data-time-to="${index}" value="${esc(segment.to||"")}" placeholder="16:30"></td><td>${context}</td><td><button type="button" class="remove" data-time-remove="${index}" title="Abschnitt löschen">×</button></td></tr>`}).join("");
+    const rows=timeEdit.segments.map((segment,index)=>{const context=segment.type==="work"?`<select data-time-job="${index}">${timeJobOptions(segment.jobId)}</select>`:segment.type==="up"?`<select data-time-reason="${index}" aria-label="Grund für unproduktive Zeit">${timeUnproductiveOptions(segment)}</select>`:`<span class="bk-note">${timeKindLabel(segment.type)}</span>`;return `<tr><td><select class="kind" data-time-type="${index}">${["work","pause","lunch","up"].map(type=>`<option value="${type}" ${type===segment.type?"selected":""}>${timeKindLabel(type)}</option>`).join("")}</select></td><td><input class="time" data-time-from="${index}" value="${esc(segment.from||"")}" placeholder="07:00"></td><td><input class="time" data-time-to="${index}" value="${esc(segment.to||"")}" placeholder="16:30"></td><td>${context}</td><td><button type="button" class="remove" data-time-remove="${index}" title="Abschnitt löschen">×</button></td></tr>`}).join("");
     host.innerHTML=`<div style="overflow:auto"><table class="bk-time-editor"><thead><tr><th>Art</th><th>Von</th><th>Bis</th><th>Baustelle / Grund</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="bk-note">Keine Zeitabschnitte mehr – beim Speichern wird dieser Mitarbeitertag aus der Stundenberechnung entfernt.</td></tr>'}</tbody></table></div>`;
     host.querySelectorAll("[data-time-from]").forEach(input=>input.onchange=()=>{const row=timeEdit.segments[Number(input.dataset.timeFrom)];if(row)row.from=input.value});
     host.querySelectorAll("[data-time-to]").forEach(input=>input.onchange=()=>{const row=timeEdit.segments[Number(input.dataset.timeTo)];if(row)row.to=input.value});
-    host.querySelectorAll("[data-time-reason]").forEach(input=>input.onchange=()=>{const row=timeEdit.segments[Number(input.dataset.timeReason)];if(row)row.reason=input.value});
+    host.querySelectorAll("[data-time-reason]").forEach(input=>input.onchange=()=>{const row=timeEdit.segments[Number(input.dataset.timeReason)];if(!row||input.value==="legacy")return;
+      const selected=timeUnproductiveReasons.find(([code])=>code===input.value);
+      row.reason=selected?.[1]||"";row.unproductiveCode=selected?.[0]||"";
+      row.unproductiveCategory="";row.absenceType="";
+    });
     host.querySelectorAll("[data-time-type]").forEach(input=>input.onchange=()=>{const row=timeEdit.segments[Number(input.dataset.timeType)];if(!row)return;row.type=input.value;if(row.type==="work"&&!row.jobId){row.jobId=currentJobId;row.jobName=jobById(currentJobId)?.name||currentJobId}renderTimeDialog()});
     host.querySelectorAll("[data-time-job]").forEach(input=>input.onchange=()=>{const row=timeEdit.segments[Number(input.dataset.timeJob)];if(!row)return;row.jobId=input.value;row.jobName=input.selectedOptions[0]?.dataset.name||""});
     host.querySelectorAll("[data-time-remove]").forEach(button=>button.onclick=()=>{timeEdit.segments.splice(Number(button.dataset.timeRemove),1);renderTimeDialog()});
