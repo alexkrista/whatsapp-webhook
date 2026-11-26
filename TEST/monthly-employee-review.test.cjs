@@ -35,7 +35,12 @@ const model=(id,targets,fixed=null)=>({id,name:id,officeModel:id!=="krista-stand
  assert.equal(monthlyTarget(employees[3]),88*60);
  for(const personnelNumber of ["20","39"]){
    const employee={personnelNumber,worktimeModelId:"krista-standard"};
-   assert.equal(monthlyTarget(employee),173*60);
+   assert.equal(monthlyTarget(employee),193*60+30);
+   const buakModel=model("buak",[row([1,2,3,4,5],"07:00","15:00")]);
+   const buakDay=policy.schedule([...models,buakModel],{...employee,worktimeModelId:"buak"},"2026-11-02");
+   assert.equal(buakDay.model.id,"buak");
+   assert.equal(buakDay.targetMinutes,480);
+   assert.equal(buakDay.contractOvertimeWeekMinutes,60);
    assert.equal(policy.schedule(models,employee,"2026-10-01").contractOvertimeWeekMinutes,60);
  }
  assert.equal(policy.modelFor(models,{...employees[0],worktimeModelId:"krista-standard"}).id,"krista-standard");
