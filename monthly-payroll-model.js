@@ -42,6 +42,8 @@ function obeliskSchedule(model,employee,weekday){
 function schedule(models,e,date){
  const assigned=assignedModel(models,e),model=assigned||modelFor(models,e),d=new Date(date+"T12:00:00Z"),weekday=d.getUTCDay()||7;
  const obelisk=Number.isFinite(+d)?obeliskSchedule(model,e,weekday):null;
+ // Until BUAK has its own assigned model, keep the existing 40-hour schedule.
+ if(obelisk?.contractOvertimeWeekMinutes&&(!assigned||assigned.id==="krista-standard"))return obelisk;
  if(!assigned&&!model?.blocks?.finkTarget?.rows?.length&&obelisk)return obelisk;
  if(!model||!Number.isFinite(+d))return {model:null,targetMinutes:0,fixedSegments:null};
  const rows=model.blocks?.finkTarget?.rows,matching=Array.isArray(rows)?rows.filter(r=>(r.days||[]).map(Number).includes(weekday)):null;
