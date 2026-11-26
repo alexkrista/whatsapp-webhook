@@ -3949,7 +3949,7 @@ app.delete("/admin/api/job/:jobId/day/:day", async (req, res) => {
 });
 
 // Admin API: delete full job
-async function dayDirectoryHasContent(dir) {
+async function dayDirectoryHasContent(dir, generatedProtocol) {
   let entries;
   try {
     entries = await fsp.readdir(dir, { withFileTypes: true });
@@ -3961,6 +3961,9 @@ async function dayDirectoryHasContent(dir) {
     const file = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       if (await dayDirectoryHasContent(file)) return true;
+    } else if (entry.isFile() && entry.name === generatedProtocol) {
+      // The downloadable protocol is generated from the day log and media.
+      continue;
     } else if (entry.isFile() && entry.name === "log.jsonl") {
       if ((await fsp.readFile(file, "utf8")).trim()) return true;
     } else return true;
@@ -3982,8 +3985,11 @@ async function emptyJobDeletionReasons(jobId) {
   const documentation = await readDocumentation(jobId);
   const hasRegieReports = documentation.some(row => row?.type === "regie_report");
   const recordedDays = await listDaysForJob(jobId);
-  const hasContent = await Promise.all(recordedDays.map(async day =>
-    (await dayDirectoryHasContent(dayDirNew(jobId,day))) || (await dayDirectoryHasContent(dayDirOld(jobId,day)))));
+  const hasContent = await Promise.all(recordedDays.map(async day => {
+    const generatedProtocol = `Baustellenprotokoll_${jobId}_${day}.pdf`;
+    return (await dayDirectoryHasContent(dayDirNew(jobId, day), generatedProtocol))
+      || (await dayDirectoryHasContent(dayDirOld(jobId, day), generatedProtocol));
+  }));
   const days = recordedDays.filter((_day,index)=>hasContent[index]);
   const hasWorkData = days.length > 0;
   const hasFinancialData = calculation.contractAmount > .005 || calculation.calculatedHours > .005;
