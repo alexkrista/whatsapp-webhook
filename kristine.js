@@ -3898,7 +3898,16 @@ const open = taskId
     });
 
   // Derselbe Dialogkern wird vom Browser-Simulator und vom echten WhatsApp-Webhook verwendet.
-  return { handleMessage, localDateISO, startupReady, getHoursBootstrap:async()=>{const b=await getBootstrap();return {states:b.states,timeEvents:b.timeEvents,projectTimeArchive:b.projectTimeArchive,employees:b.employees,today:localDateISO()}} };
+  return { handleMessage, localDateISO, startupReady, getHoursBootstrap:async()=>{
+    const [b,closures]=await Promise.all([getBootstrap(),readJson(MONTH_CLOSURES,[])]);
+    const closedMonths=new Set(closures.map(row=>String(row.employeeId)+"|"+row.month));
+    const archivedDays=new Set(b.projectTimeArchive.filter(row=>
+      closedMonths.has(String(row.employeeId)+"|"+String(row.date).slice(0,7))&&
+      row.segments?.some(segment=>segment.type==="work"&&segment.jobId)
+    ).map(row=>String(row.employeeId)+"|"+row.date));
+    return {states:b.states,timeEvents:b.timeEvents.filter(row=>!archivedDays.has(String(row.employeeId)+"|"+row.date)),
+      projectTimeArchive:b.projectTimeArchive,employees:b.employees,today:localDateISO()};
+  } };
 }
 
 module.exports = { registerKristine };

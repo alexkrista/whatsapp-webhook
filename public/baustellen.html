@@ -90,7 +90,10 @@ function hour(v){return new Intl.NumberFormat('de-AT',{maximumFractionDigits:1})
 function todayISO(){const d=new Date(),off=d.getTimezoneOffset();return new Date(d.getTime()-off*60000).toISOString().slice(0,10)}
 function statusKey(s){return s==='Fertig – nicht abgerechnet'?'Fertig':String(s||'').replace(/[^A-Za-z]/g,'')}
 function calc(j){return j?.calculation||{}}
-function actualHours(j){return BaustellenData.members(j,jobs).reduce((sum,row)=>sum+BaustellenData.actualHours(row),0)}
+function actualHours(j){
+  const snapshot=canonicalHours?.byJob?.[String(j?.jobId||'')];
+  return snapshot?num(snapshot.total):BaustellenData.members(j,jobs).reduce((sum,row)=>sum+BaustellenData.actualHours(row),0);
+}
 function targetHours(j){return BaustellenData.members(j,jobs).reduce((sum,row)=>sum+BaustellenData.totalTarget(row),0)}
 function openOrderHours(j){return BaustellenData.openHours(j,jobs)}
 function contractAmount(j){return num(j?.collectionSummary?.contractAmount ?? j.contractAmount ?? calc(j).contractAmount)}
