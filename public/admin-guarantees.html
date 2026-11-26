@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Haftungen · KRISADMIN</title>
+<style>
+:root{font:15px system-ui;color:#21342a;background:#f4f5f0}body{margin:0}main{max-width:1450px;margin:auto;padding:24px}header,nav,.actions,.cards{display:flex;gap:12px;align-items:center;flex-wrap:wrap}header{justify-content:space-between}h1{margin:12px 0 20px}h2{font-size:1rem}button,input,select{font:inherit;border:1px solid #c4cec3;border-radius:7px;padding:8px;background:#fff;color:inherit}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}.primary{background:#346449;color:#fff;border-color:#346449}a{color:#346449}.panel,.card{background:#fff;border:1px solid #dce3d9;border-radius:12px;padding:16px;margin:12px 0}.card strong{font-size:1.25em;display:block}.table{overflow:auto}table{border-collapse:collapse;width:100%}th,td{padding:9px;text-align:left;border-bottom:1px solid #e1e7df;white-space:nowrap}td:nth-child(2){white-space:normal;min-width:140px}.number{text-align:right}.warn{color:#8e4a13}.message{min-height:1.5em}form{display:grid;gap:12px}label{display:grid;gap:4px}dialog{max-width:min(680px,90vw);border:1px solid #c4cec3;border-radius:12px;padding:20px}dialog::backdrop{background:#15251988}.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}.fields input,.fields select{min-width:0;width:100%;box-sizing:border-box}
+</style>
+</head>
+<body>
+<main>
+<header><div><a id="back" href="/admin">‹ KRISADMIN</a><h1>Haftungen und Kundeneinbehalte</h1></div><div class="actions"><button id="add">+ Eintrag</button><button id="bank">Bankrahmen</button><button id="import">Excel einlesen</button><input id="workbook" type="file" accept=".xlsx" hidden><button id="save" class="primary" disabled>Speichern</button></div></header>
+<p id="message" class="message" role="status"></p>
+<section id="summary" class="cards" aria-label="Bankrahmen und Einbehalte"></section>
+<section class="panel">
+<nav aria-label="Filter"><label>Ansicht<select id="filter"><option value="active">Offene Einträge</option><option value="all">Alle inkl. Verlauf</option><option value="guarantee">Bankhaftungen</option><option value="retention">Kundeneinbehalte</option></select></label><label>Ablauf<select id="year"><option value="">Alle Jahre</option></select></label><label>Suche<input id="search" type="search" placeholder="Empfänger, Baustelle, Bank"></label></nav>
+<div class="table"><table><thead><tr><th>Ablauf</th><th>Empfänger / Baustelle</th><th>Typ</th><th>Bank</th><th class="number">Betrag</th><th>Status</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+</section>
+</main>
+<dialog id="edit"><form id="entry">
+<h2 id="editTitle">Eintrag bearbeiten</h2>
+<div class="fields">
+<label>Empfänger<input name="recipient" required maxlength="500"></label>
+<label>Baustelle<input name="project" maxlength="500"></label>
+<label>Typ<select name="type"><option value="guarantee">Bankhaftung</option><option value="retention">Kundeneinbehalt</option></select></label>
+<label>Bank<input name="bank" list="banks" maxlength="500"><datalist id="banks"></datalist></label>
+<label>Ausgestellt am<input name="issued" type="date"></label>
+<label>Ablaufdatum<input name="expiry" type="date"></label>
+<label>Währung<select name="currency"><option>EUR</option><option>CHF</option></select></label>
+<label>Betrag<input name="amount" type="number" min="0.01" step="0.01" required></label>
+<label>EUR-Gegenwert bei CHF<input name="eur" type="number" min="0.01" step="0.01"></label>
+<label>Status<select name="status"><option value="active">Offen</option><option value="released">Freigegeben</option><option value="historical">Historisch</option></select></label>
+</div>
+<label>Notiz<input name="note" maxlength="500"></label>
+<div class="actions"><button type="button" id="cancel">Abbrechen</button><button class="primary">Übernehmen</button></div>
+</form></dialog>
+<dialog id="bankEdit"><form id="bankForm"><h2>Bankrahmen in EUR</h2><label>Bank<input name="name" list="banks" required></label><label>Rahmen<input name="limit" type="number" min="0" step="0.01" required></label><div class="actions"><button type="button" id="bankCancel">Abbrechen</button><button class="primary">Übernehmen</button></div></form></dialog>
+<script>
+"use strict";
+const el = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+if (params.has("token")) history.replaceState(null,"",location.pathname);
+const endpoint = "/admin/api/haftungen";
+let state, editing, dirty = false;
+const dateFormat = s => s ? s.split("-").reverse().join(".") : "Unbefristet";
+const format = (n, currency = "EUR") => new Intl.NumberFormat("de-AT",{style:"currency",currency}).format(n/100);
+const message = (text, warning=false) => { el("message").textContent=text; el("message").classList.toggle("warn",warning); };
+const today = () => new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Vienna",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+async function api(path, method="GET", body) {
+  const r = await fetch(path,{method, ...(body ? {headers:{"Content-Type":"application/json"},body:JSON.stringify(body)} : {})});
+  const data = await r.json().catch(()=>null);
+  if (!r.ok || !data) throw new Error(data?.error || "Laden fehlgeschlagen (HTTP " + r.status + ").");
+  return data;
+}
+function node(tag,text,className) {
+  const n=document.createElement(tag);
+  if (text) n.textContent=text;
+  if (className) n.className=className;
+  return n;
+}
+function render() {
+  const summary=el("summary");
+  summary.replaceChildren();
+  const open=state.rows.filter(row=>row.status==="active");
+  const card=(title,value,detail)=>{
+    const n=node("article","","card"); n.append(node("div",title),node("strong",value),node("div",detail));summary.append(n);
+  };
+  for(const bank of state.banks) {
+    const used=open.filter(row=>row.type==="guarantee"&&row.bank===bank.name).reduce((n,row)=>n+row.eur,0);
+    card(bank.name+" · Freier Rahmen",format(bank.limit-used),"Rahmen "+format(bank.limit)+" · Belegt "+format(used));
+  }
+  const unassigned=open.filter(row=>row.type==="guarantee"&&!state.banks.some(bank=>bank.name===row.bank));
+  if(unassigned.length)card("Haftungen ohne zugeordneten Rahmen",format(unassigned.reduce((n,row)=>n+row.eur,0)));
+  card("Offene Kundeneinbehalte",format(open.filter(row=>row.type==="retention").reduce((n,row)=>n+row.eur,0)));
+  const year=el("year"), selected=year.value;
+  year.replaceChildren(new Option("Alle Jahre",""));
+  for(const y of [...new Set(state.rows.map(row=>row.expiry.slice(0,4)||"Unbefristet"))].sort()) year.add(new Option(y,y));
+  if ([...year.options].some(o=>o.value===selected)) year.value=selected;
+  el("banks").replaceChildren(...state.banks.map(bank=>new Option(bank.name)));
+  filterRows();
+  el("save").disabled=!dirty;
+}
+function filterRows() {
+  if(!state)return;
+  const tbody=el("rows"); tbody.replaceChildren();
+  const mode=el("filter").value, year=el("year").value, search=el("search").value.trim().toLocaleLowerCase("de-AT");
+  const rows=state.rows.filter(row=>(mode==="all" || (row.status==="active" && (mode==="active" || row.type===mode))) &&
+    (!year || year===(row.expiry.slice(0,4)||"Unbefristet")) &&
+    (!search || [row.recipient,row.project,row.bank,row.note].join(" ").toLocaleLowerCase("de-AT").includes(search)))
+    .sort((a,b)=>(a.expiry||"9999").localeCompare(b.expiry||"9999")||a.recipient.localeCompare(b.recipient,"de-AT"));
+  let group;
+  const currentDate=today();
+  for(const row of rows) {
+    const nextGroup=row.expiry.slice(0,4)||"Unbefristet";
+    if(nextGroup!==group){
+      group=nextGroup;
+      const header=node("tr"),cell=node("th",group);cell.colSpan=7;cell.scope="rowgroup";header.append(cell);tbody.append(header);
+    }
+    const tr=node("tr");
+    const expired=row.expiry && row.expiry<currentDate && row.status==="active";
+    const status=expired?(row.type==="guarantee"?"Freigabe prüfen":"Fälligkeit prüfen"):{active:"Offen",released:"Freigegeben",historical:"Historisch"}[row.status];
+    tr.append(node("td",dateFormat(row.expiry)),node("td",[row.recipient,row.project].filter(Boolean).join(" · ")),
+      node("td",row.type==="guarantee"?"Bankhaftung":"Kundeneinbehalt"),node("td",row.bank || "–"),
+      node("td",format(row.amount,row.currency)+(row.currency==="CHF"?" · "+format(row.eur):""),"number"),
+      node("td",status,expired?"warn":""));
+    const action=node("td"), button=node("button","Bearbeiten");button.onclick=()=>showEntry(row);action.append(button);tr.append(action);tbody.append(tr);
+  }
+  if(!rows.length){const tr=node("tr"),td=node("td","Keine Einträge in dieser Ansicht.");td.colSpan=7;tr.append(td);tbody.append(tr);}
+}
+function changed(text="Änderungen zur Übernahme speichern.") {dirty=true;message(text);render();}
+function showEntry(row={type:"guarantee",currency:"EUR",status:"active"}) {
+  if (!state) return;
+  editing=row;
+  for(const input of el("entry").querySelectorAll("[name]")){
+    const value=row[input.name];input.value=value==null?"":(["amount","eur"].includes(input.name)?value/100:value);
+  }
+  el("entry").elements.currency.onchange();
+  el("edit").showModal();
+}
+el("entry").elements.currency.onchange=()=>{el("entry").elements.eur.required=el("entry").elements.currency.value==="CHF";};
+el("edit").addEventListener("close",()=>{el("entry").elements.eur.required=false;});
+el("entry").onsubmit=event=>{
+  event.preventDefault();
+  const values=Object.fromEntries(new FormData(event.target));
+  if(values.currency==="CHF" && Number(values.eur)<=0){event.target.elements.eur.reportValidity();event.target.elements.eur.focus();return;}
+  const amount=Math.round(Number(values.amount)*100);
+  const row={...editing,...values,amount,eur:values.currency==="EUR"?amount:Math.round(Number(values.eur)*100)};
+  const index=state.rows.indexOf(editing);
+  if(index<0)state.rows.push(row);else state.rows[index]=row;
+  el("edit").close();changed();
+};
+el("bankForm").elements.name.onchange=event=>{
+  const bank=state.banks.find(bank=>bank.name===event.target.value.trim());
+  el("bankForm").elements.limit.value=bank?bank.limit/100:"";
+};
+el("bankForm").onsubmit=event=>{
+  event.preventDefault();
+  const form=new FormData(event.target),name=String(form.get("name")).trim(),limit=Math.round(Number(form.get("limit"))*100);
+  const bank=state.banks.find(bank=>bank.name===name);
+  if(bank)bank.limit=limit;else state.banks.push({name,limit});
+  el("bankEdit").close();changed();
+};
+el("bank").onclick=()=>{if(state){el("bankForm").reset();el("bankEdit").showModal();}};
+el("bankCancel").onclick=()=>el("bankEdit").close();
+el("cancel").onclick=()=>el("edit").close();
+el("add").onclick=()=>showEntry();
+for(const id of ["filter","year","search"])el(id).oninput=filterRows;
+el("import").onclick=()=>{if(state)el("workbook").click();};
+el("workbook").onchange=async event=>{
+  const file=event.target.files[0];event.target.value="";
+  if (!file) return;
+  if (file.size>2_000_000){message("Bitte eine XLSX-Datei bis 2 MB auswählen.",true);return;}
+  el("import").disabled=true;
+  try{
+    const reader=new FileReader();
+    const data=await new Promise((resolve,reject)=>{reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(file);});
+    const preview=await api(endpoint+"/import","POST",{xlsx:data.split(",")[1]});
+    const key=row=>[row.source,row.recipient,row.issued].join("|");
+    const seen=new Set(state.rows.filter(row=>row.source).map(key));
+    const rows=preview.rows.filter(row=>{const id=key(row);if(seen.has(id))return false;seen.add(id);return true;});
+    state.rows.push(...rows);
+    for(const bank of preview.banks)if(!state.banks.some(item=>item.name===bank.name))state.banks.push(bank);
+    changed(rows.length+" Einträge zur Vorschau übernommen. Beträge, Typen und Status prüfen und dann speichern.");
+  }catch(error){message(error.message,true);}finally{el("import").disabled=false;}
+};
+el("save").onclick=async()=>{
+  el("save").disabled=true;
+  for(const id of ["add","bank","import","rows","edit","bankEdit"])el(id).inert=true;
+  try{state=await api(endpoint,"PUT",state);dirty=false;render();message("Gespeichert.");}
+  catch(error){message(error.message,true);el("save").disabled=false;}
+  finally{for(const id of ["add","bank","import","rows","edit","bankEdit"])el(id).inert=false;}
+};
+window.addEventListener("beforeunload",event=>{if(dirty){event.preventDefault();event.returnValue="";}});
+api(endpoint).then(data=>{state=data;render();}).catch(error=>message(error.message,true));
+</script>
+</body>
+</html>
