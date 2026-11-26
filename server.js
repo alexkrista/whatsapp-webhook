@@ -3949,6 +3949,47 @@ app.delete("/admin/api/job/:jobId/day/:day", async (req, res) => {
 });
 
 // Admin API: delete full job
+async function emptyJobDeletionReasons(jobId) {
+  const meta = await readJobMeta(jobId);
+  const companySummary = await calculationSummary();
+  const hours = await summarizeJobHours(jobId);
+  const calculation = calculateJobBudget(meta, companySummary.currentBillingRate, hours);
+  const assignmentsPath = path.join(DATA_DIR, "_kristine", "assignments.json");
+  const timeEventsPath = path.join(DATA_DIR, "_kristine", "time-events.json");
+  const assignments = await fsp.readFile(assignmentsPath, "utf8").then(JSON.parse).catch(() => []);
+  const timeEvents = await fsp.readFile(timeEventsPath, "utf8").then(JSON.parse).catch(() => []);
+  const hasPlanning = (Array.isArray(assignments) ? assignments : []).some(row => String(row?.jobId || row?.siteId || "") === jobId);
+  const hasTimeEvents = (Array.isArray(timeEvents) ? timeEvents : []).some(row => String(row?.jobId || row?.siteId || "") === jobId);
+  const documentation = await readDocumentation(jobId);
+  const hasRegieReports = documentation.some(row => row?.type === "regie_report");
+  const days = await listDaysForJob(jobId);
+  const hasWorkData = days.length > 0;
+  const hasFinancialData = calculation.contractAmount > .005 || calculation.calculatedHours > .005;
+  const hasRecordedHours = calculation.actualHours > .005 || calculation.actualRegieHours > .005;
+  const reasons = [];
+  if (hasRecordedHours) reasons.push("Erfasste Arbeits- oder Regiestunden");
+  if (hasPlanning) reasons.push("Planungseinträge");
+  if (hasTimeEvents) reasons.push("Zeitbuchungen auf dieser Baustelle");
+  if (hasRegieReports) reasons.push("Regieberichte");
+  if (hasWorkData) reasons.push("Bautage: " + days.slice(0, 5).join(", ") + (days.length > 5 ? " …" : ""));
+  if (hasFinancialData) reasons.push("Auftragswert oder Sollstunden");
+  return reasons;
+}
+
+app.get("/admin/api/job/:jobId/empty-delete-check", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const jobId = String(req.params.jobId);
+  if (!isSafeJobId(jobId)) return res.status(400).json({ok:false,error:"Ungültige Baustellennummer."});
+  try {
+    await fsp.access(path.join(DATA_DIR,jobId));
+    const reasons = await emptyJobDeletionReasons(jobId);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json({ok:true,reasons});
+  } catch (error) {
+    res.status(error.code==="ENOENT"?404:500).json({ok:false,error:"Löschprüfung konnte nicht geladen werden."});
+  }
+});
+
 app.delete("/admin/api/job/:jobId", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
@@ -3957,24 +3998,9 @@ app.delete("/admin/api/job/:jobId", async (req, res) => {
     const jobDir = path.join(DATA_DIR, jobId);
     if (!fs.existsSync(jobDir)) return res.status(404).json({ ok: false, error: "Job not found" });
     if (String(req.query.emptyOnly || "") === "1") {
-      const meta = await readJobMeta(jobId);
-      const companySummary = await calculationSummary();
-      const hours = await summarizeJobHours(jobId);
-      const calculation = calculateJobBudget(meta, companySummary.currentBillingRate, hours);
-      const assignmentsPath = path.join(DATA_DIR, "_kristine", "assignments.json");
-      const timeEventsPath = path.join(DATA_DIR, "_kristine", "time-events.json");
-      const assignments = await fsp.readFile(assignmentsPath, "utf8").then(JSON.parse).catch(() => []);
-      const timeEvents = await fsp.readFile(timeEventsPath, "utf8").then(JSON.parse).catch(() => []);
-      const hasPlanning = (Array.isArray(assignments) ? assignments : []).some(row => String(row?.jobId || row?.siteId || "") === jobId);
-      const hasTimeEvents = (Array.isArray(timeEvents) ? timeEvents : []).some(row => String(row?.jobId || row?.siteId || "") === jobId);
-      const documentation = await readDocumentation(jobId);
-      const hasRegieReports = documentation.some(row => row?.type === "regie_report");
-      const days = await listDaysForJob(jobId);
-      const hasWorkData = days.length > 0;
-      const hasFinancialData = calculation.contractAmount > .005 || calculation.calculatedHours > .005;
-      const hasRecordedHours = calculation.actualHours > .005 || calculation.actualRegieHours > .005;
-      if (hasPlanning || hasTimeEvents || hasRegieReports || hasWorkData || hasFinancialData || hasRecordedHours) {
-        return res.status(409).json({ ok: false, error: "Diese Baustelle enthält bereits Stunden, Planung, Auftragswerte, Regieberichte oder Bautage und kann deshalb nicht als Fehlanlage gelöscht werden." });
+      const reasons = await emptyJobDeletionReasons(jobId);
+      if (reasons.length) {
+        return res.status(409).json({ok:false,error:"Löschen gesperrt. "+reasons.join(" · "),reasons});
       }
     }
     const sizeBytes = await dirSizeBytes(jobDir);
