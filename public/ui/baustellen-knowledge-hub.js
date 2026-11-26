@@ -372,7 +372,7 @@ function groupRegieComparisonRows(rows = []) {
     const host=document.getElementById("bkMasterData");
     const card=document.createElement("section");
     card.className="bk-card";
-    card.innerHTML='<h3>Neues Angebot mit Mail</h3><label>Outlook-Mail hierher ziehen oder auswählen <input type="file" accept=".msg" multiple></label><p role="status"></p>';
+    card.innerHTML='<h3>Neues Angebot mit Mail</h3><label>Outlook-Mail oder ONLV hierher ziehen oder auswählen <input type="file" accept=".msg,.onlv" multiple></label><p role="status"></p>';
     host.prepend(card);
     const input=card.querySelector("input"), status=card.querySelector("[role=status]");
     const save=document.getElementById("bkSaveMaster");
@@ -392,13 +392,13 @@ function groupRegieComparisonRows(rows = []) {
       const notes=[];
       try{
         for(const file of files){
-          if(!/\.msg$/i.test(file.name)||file.size>20*1024*1024){
-            notes.push(file.name+": Bitte eine .msg-Datei bis 20 MB auswählen.");
+          if(!/\.(msg|onlv)$/i.test(file.name)||file.size>20*1024*1024){
+            notes.push(file.name+": Bitte eine .msg- oder .onlv-Datei bis 20 MB auswählen.");
             continue;
           }
           status.textContent="Lese "+file.name+" …";
           try{
-            const {intake}=await api("/admin/api/offer-inquiry",{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:file});
+            const {intake}=await api("/admin/api/offer-inquiry"+(/\.onlv$/i.test(file.name)?"?format=onlv":""),{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:file});
             if(newOfferDraft!==draft)return;
             draft.inquiries.push(intake);
             const {name,site={},owner={},architect={},deadline,start,submissionEmail,hints=[]}=intake.project||{};

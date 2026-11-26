@@ -126,7 +126,7 @@
   }
 
   function loadOfferBuilder() {
-    const src = "/public/ui/baustellen-offer-builder.js?v=20260920-editor-context-1-20261125-angebot-anfrage-13";
+    const src = "/public/ui/baustellen-offer-builder.js?v=20260920-editor-context-1-20261125-angebot-anfrage-14";
     const dataKey = "data-krista-angebot";
     const requestedPath = new URL(src, window.location.href).pathname;
     const ready = () => window.__kristaOfferBuilderInstalled === true;
@@ -226,7 +226,7 @@
     loadScriptOnce("/public/ui/baustellen-legacy-id-display.js?v=20260823-legacyid1", "data-krista-baustellen-legacy-id-display");
     loadScriptOnce("/public/ui/regie-billing-state.js?v=20261125-regie-tr", "data-krista-regie-billing-state");
     loadScriptOnce("/public/ui/job-renumber-action.js?v=20261023-general-1", "data-krista-renumber-action");
-    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20261125-mail-aufmass-uebergabe", "data-krista-baustellen-knowledge");
+    loadScriptOnce("/public/ui/baustellen-knowledge-hub.js?v=20261126-onlv-angebot", "data-krista-baustellen-knowledge");
     loadScriptOnce("/public/ui/baustellen-cockpit.js?v=20261023-renumber-1", "data-krista-baustellen-cockpit");
     loadScriptOnce("/public/ui/baustellen-chronik.js?v=20261008-color-concept-1", "data-krista-baustellen-chronik");
     loadScriptOnce("/public/ui/baustellen-intelligence.js?v=20260903-valid-dates", "data-krista-baustellen-intelligence");

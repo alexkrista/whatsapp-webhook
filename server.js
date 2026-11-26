@@ -3619,13 +3619,15 @@ app.get("/admin/api/offer-supplier-document/:id/positions",async(req,res)=>{if(!
 app.post("/admin/api/offer-inquiry", express.raw({ type: "application/octet-stream", limit: "20mb" }), async (req, res) => {
   if (!requireAdmin(req, res)) return;
   if (!Buffer.isBuffer(req.body) || !req.body.length) {
-    return res.status(400).json({ ok: false, error: "Bitte eine Outlook-Datei (.msg) auswählen." });
+    return res.status(400).json({ ok: false, error: "Bitte eine Outlook-Datei (.msg) oder eine ONLV-Datei auswählen." });
   }
   try {
     res.set("Cache-Control", "private, no-store");
-    res.json({ ok: true, intake: await require("./offer-inquiry").readInquiry(req.body) });
+    const {readInquiry,readOnlvInquiry}=require("./offer-inquiry");
+    const intake=req.query.format==="onlv"?readOnlvInquiry(req.body):await readInquiry(req.body);
+    res.json({ok:true,intake});
   } catch {
-    res.status(422).json({ ok: false, error: "Die Outlook-Datei konnte nicht gelesen werden." });
+    res.status(422).json({ ok: false, error: "Die Anfragedatei konnte nicht gelesen werden." });
   }
 });
 const offerPositionTemplatesPath=path.join(DATA_DIR,"_kristine","offer-position-templates.json");

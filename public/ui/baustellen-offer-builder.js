@@ -449,7 +449,7 @@
       `;
       document.head.append(style);
     }
-    panel.innerHTML='<summary>Angebot aus Anfrage</summary><p><label>Outlook-Mail hierher ziehen oder auswählen <input type="file" accept=".msg" multiple></label></p><p role="status"></p><div data-inquiry-documents></div><div data-inquiry-groups></div><p><button type="button" data-inquiry-transfer disabled>Ins Angebot übernehmen</button></p>';
+    panel.innerHTML='<summary>Angebot aus Anfrage</summary><p><label>Outlook-Mail oder ONLV hierher ziehen oder auswählen <input type="file" accept=".msg,.onlv" multiple></label></p><p role="status"></p><div data-inquiry-documents></div><div data-inquiry-groups></div><p><button type="button" data-inquiry-transfer disabled>Ins Angebot übernehmen</button></p>';
     box.querySelector(".kcv2-section-head")?.after(panel);
     const input=panel.querySelector("input"), status=panel.querySelector("[role=status]");
     const sources=panel.querySelector("[data-inquiry-documents]"), groupsHost=panel.querySelector("[data-inquiry-groups]");
@@ -513,7 +513,7 @@
       return row.unit??(template?.unit?.trim()||group.unit);
     }
     function addGroup(group){
-      groups.push({...group,id:"mail-"+crypto.randomUUID(),rows:group.suggestions.map(text=>({text,quantity:group.quantity}))});
+      groups.push({...group,id:"mail-"+crypto.randomUUID(),rows:group.suggestions.map(text=>({text,quantity:group.quantity,unitPrice:group.unitPrice}))});
     }
     function mountInquiryCalculation(line,row,price){
       const panel=append(line,"details");
@@ -786,6 +786,11 @@
     }
     documents.forEach(showDocument);
     function addIntake(intake,messages){
+      if(intake.offer){
+        const offer=intake.offer;
+        messages.push("Abgegebenes Angebot · ONLV netto: "+money.format(offer.net??0)+
+          (offer.matches?" · Positionssumme stimmt.":" · Abweichung prüfen. Positionssumme: "+money.format(offer.calculated)));
+      }
       for(const document of intake.documents){
         if(seen.has(document.hash))continue;
         seen.add(document.hash);
@@ -807,13 +812,13 @@
       busy=true;input.disabled=true;transfer.disabled=true;
       const messages=[];
       for(const file of files){
-        if(!/\.msg$/i.test(file.name)||file.size>20*1024*1024){
-          messages.push(file.name+": Bitte eine .msg-Datei bis 20 MB auswählen.");
+        if(!/\.(msg|onlv)$/i.test(file.name)||file.size>20*1024*1024){
+          messages.push(file.name+": Bitte eine .msg- oder .onlv-Datei bis 20 MB auswählen.");
           continue;
         }
         status.textContent="Lese "+file.name+" …";
         try{
-          const result=await api("/admin/api/offer-inquiry",{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:file});
+          const result=await api("/admin/api/offer-inquiry"+(/\.onlv$/i.test(file.name)?"?format=onlv":""),{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:file});
           if(!editorContextActive(context))return;
           const intake=result.intake;
           addIntake(intake,messages);

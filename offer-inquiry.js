@@ -44,7 +44,7 @@ function measurements(text) {
   return groups;
 }
 
-function onlvMeasurements(xml) {
+function onlvMeasurements(xml, info = {}) {
   const { SaxesParser } = require("saxes");
   const parser = new SaxesParser({ xmlns: true });
   const stack = [], groups = [];
@@ -52,6 +52,8 @@ function onlvMeasurements(xml) {
   parser.on("doctype", () => { throw new Error("DTD in Leistungsverzeichnis"); });
   parser.on("opentag", tag => {
     const name = tag.local.toLowerCase();
+    if(!stack.length&&name!=="onlv")throw new Error("Kein ONLV-Leistungsverzeichnis");
+    if(name==="angebots-lv")info.submitted=true;
     const attr = key => Object.values(tag.attributes).find(value => value.local === key)?.value || "";
     const frame = { name, number: attr(name === "folgeposition" ? "ftnr" : "nr"), text: "" };
     stack.push(frame);
@@ -68,7 +70,15 @@ function onlvMeasurements(xml) {
       const group = stack.findLast(item => item.name === "ulg");
       if (group) group.title = value;
     }
+    const parent=stack.at(-1)?.name;
+    if(parent==="kenndaten"&&frame.name==="vorhaben")info.projectName=value;
+    if(parent==="kenndaten"&&frame.name==="lvcode")info.code=value;
+    if(parent==="firma"&&frame.name==="name"&&stack.some(item=>item.name==="auftraggeber"))info.owner=value;
+    if(parent==="firma"&&frame.name==="name"&&stack.some(item=>item.name==="lversteller"))info.author=value;
+    if(["gesamtpreis","ustsatz","ustbetrag","angebotspreis"].includes(frame.name)&&stack.some(item=>item.name==="summenormalausfuehrung"))info[frame.name]=Number(value.replace(",","."));
     if (!position) return;
+    if(parent==="preis"&&frame.name==="gesamt"&&value)position.unitPrice=Number(value.replace(",","."));
+    if(parent==="pos-eigenschaften"&&frame.name==="pospreis"&&value)position.lineTotal=Number(value.replace(",","."));
     if (stack.at(-1)?.name === "pos-eigenschaften") {
       if (frame.name === "stichwort") position.title = value;
       if (frame.name === "einheit") position.unit = value;
@@ -78,7 +88,7 @@ function onlvMeasurements(xml) {
     const quantity = position.quantity ? Number(position.quantity.replace(",", ".")) : NaN;
     if (position.unit && position.title && Number.isFinite(quantity) && quantity >= 0) {
       const group = stack.findLast(item => item.name === "ulg");
-      const outer = /außen|aussen|fassade|sockel/i.test((group?.title || "") + " " + position.title);
+      const outer = /außen|aussen|fassade|sockel|wdvs/i.test((group?.title || "") + " " + position.title);
       const number = stack.filter(item => ["og", "lg", "ulg", "grundtextnr"].includes(item.name))
         .map(item => item.number).filter(Boolean).join(".") + (stack.at(-1)?.name === "folgeposition" ? stack.at(-1).number : "");
       groups.push({
@@ -89,12 +99,15 @@ function onlvMeasurements(xml) {
         eventual: position.eventual,
         alternative: position.eventual,
         suggestions: [position.title],
+        ...(Number.isFinite(position.unitPrice)?{unitPrice:position.unitPrice}:{}),
+        ...(Number.isFinite(position.lineTotal)?{lineTotal:position.lineTotal}:{}),
       });
     }
     position = null;
   });
   parser.write(xml).close();
-  return groups.slice(0, 250);
+  if(groups.length>250)throw new Error("Das LV enthält mehr als 250 Positionen");
+  return groups;
 }
 
 function projectDetails(cover, subject, mail = {}) {
@@ -138,6 +151,20 @@ async function pdfText(buffer, pages) {
   finally { await parser.destroy(); }
 }
 
+function readOnlvInquiry(buffer){
+  const info={};
+  const groups=onlvMeasurements(buffer.toString("utf8"),info);
+  if(!groups.length)throw new Error("Das ONLV enthält keine importierbaren Positionen");
+  const cent=value=>Math.round(value*100);
+  const calculated=groups.filter(group=>!group.eventual).reduce((sum,group)=>sum+cent(group.quantity*(group.unitPrice??0)),0);
+  const source=info.gesamtpreis;
+  const offer=info.submitted?{net:source,gross:info.angebotspreis,vatRate:info.ustsatz,calculated:calculated/100,
+    matches:Number.isFinite(source)&&cent(source)===calculated&&groups.every(group=>Number.isFinite(group.unitPrice))}:null;
+  const subject=info.projectName||info.code||"ONLV-Angebot";
+  return {subject,project:{name:subject,owner:{name:info.owner},architect:{name:info.author}},offer,
+    documents:[{name:info.code||"ONLV",hash:createHash("sha256").update(buffer).digest("hex"),groups,text:""}]};
+}
+
 async function readInquiry(buffer) {
   const { mail } = parseMsg(buffer);
   const documents = [];
@@ -172,4 +199,4 @@ async function readInquiry(buffer) {
   return { subject: mail.subject, sender: mail.senderName || mail.senderEmail, project: projectDetails(documents.map(document => document.text).find(text => /^Bauvorhaben:/im.test(text)) || mail.body, mail.subject, mail), documents };
 }
 
-module.exports = { readInquiry, measurements, onlvMeasurements, projectDetails };
+module.exports = { readInquiry, readOnlvInquiry, measurements, onlvMeasurements, projectDetails };
