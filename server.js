@@ -3949,6 +3949,25 @@ app.delete("/admin/api/job/:jobId/day/:day", async (req, res) => {
 });
 
 // Admin API: delete full job
+async function dayDirectoryHasContent(dir) {
+  let entries;
+  try {
+    entries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+  for (const entry of entries) {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (await dayDirectoryHasContent(file)) return true;
+    } else if (entry.isFile() && entry.name === "log.jsonl") {
+      if ((await fsp.readFile(file, "utf8")).trim()) return true;
+    } else return true;
+  }
+  return false;
+}
+
 async function emptyJobDeletionReasons(jobId) {
   const meta = await readJobMeta(jobId);
   const companySummary = await calculationSummary();
@@ -3962,7 +3981,10 @@ async function emptyJobDeletionReasons(jobId) {
   const hasTimeEvents = (Array.isArray(timeEvents) ? timeEvents : []).some(row => String(row?.jobId || row?.siteId || "") === jobId);
   const documentation = await readDocumentation(jobId);
   const hasRegieReports = documentation.some(row => row?.type === "regie_report");
-  const days = await listDaysForJob(jobId);
+  const recordedDays = await listDaysForJob(jobId);
+  const hasContent = await Promise.all(recordedDays.map(async day =>
+    (await dayDirectoryHasContent(dayDirNew(jobId,day))) || (await dayDirectoryHasContent(dayDirOld(jobId,day)))));
+  const days = recordedDays.filter((_day,index)=>hasContent[index]);
   const hasWorkData = days.length > 0;
   const hasFinancialData = calculation.contractAmount > .005 || calculation.calculatedHours > .005;
   const hasRecordedHours = calculation.actualHours > .005 || calculation.actualRegieHours > .005;
@@ -3977,7 +3999,7 @@ async function emptyJobDeletionReasons(jobId) {
   if(fs.existsSync(offerDraftPath(jobId)))reasons.push("Gespeicherter Angebotsentwurf");
   if (hasRegieReports) reasons.push("Regieberichte");
   if (documentation.some(row=>row?.type!=="regie_report")) reasons.push("Dokumente oder Belege");
-  if (hasWorkData) reasons.push("Bautage: " + days.slice(0, 5).join(", ") + (days.length > 5 ? " …" : ""));
+  if (hasWorkData) reasons.push("Bautage mit Inhalt: " + days.slice(0, 5).join(", ") + (days.length > 5 ? " …" : ""));
   if (hasFinancialData) reasons.push("Auftragswert oder Sollstunden");
   return reasons;
 }
