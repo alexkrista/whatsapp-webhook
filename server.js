@@ -381,6 +381,7 @@ const alexWhatsAppScenes = require("./alex-whatsapp-scene-cloud").createAlexScen
 });
 alexWhatsAppScenes.installRoutes(app,requireAdmin);
 require("./enable-banking-personal").register(app, { dataDir: DATA_DIR, requireAdmin });
+require("./krisadmin-guarantees").register(app, { dataDir: DATA_DIR, requireAdmin });
 
 registerKristineActivityAudit(app, {
   dataDir: DATA_DIR,
