@@ -58,6 +58,16 @@ function authenticatedUrl(url) {
         ...(options.headers || {}),
       },
     });
+    if (url === "/kristine/api/bootstrap" && [401,403].includes(response.status)) {
+      const session = await fetch("/auth/me", {credentials:"same-origin", cache:"no-store"}).catch(() => null);
+      if (session?.status === 401) {
+        const returnUrl = new URL(location.href);
+        returnUrl.searchParams.delete("token");
+        const target = returnUrl.pathname + returnUrl.search + returnUrl.hash;
+        location.replace("/anmelden?return=" + encodeURIComponent(target));
+        throw new Error("Bitte melde dich mit deinem WhatsApp-Code an.");
+      }
+    }
     const text = await response.text();
     let data;
     try { data = text ? JSON.parse(text) : {}; }
