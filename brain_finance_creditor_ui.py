@@ -47,7 +47,7 @@ def install(ns):
  document.addEventListener('click',event=>{const row=event.target.closest('#rows .row[data-creditor-key],#unknown .row[data-creditor-key]');if(!row||event.target.closest('input,a,button,select'))return;const x=items.get(row.dataset.creditorKey);if(x)openItem(x)});
  fees.addEventListener('input',updateTotal);document.getElementById('creditorCancel').onclick=close;modal.addEventListener('click',e=>{if(e.target===modal)close()});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modal.classList.contains('open'))close()});
  save.onclick=async()=>{if(!current)return;const actor=editor.value.trim();if(!actor){error.textContent='Bitte Bearbeiterin oder Bearbeiter auswählen.';editor.focus();return}save.disabled=true;error.textContent='';try{const q=await fetch('/incoming/creditor-details',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:current.source,id:current.id,dunningLevel:Number(level.value||0),feesAmount:Number(String(fees.value||0).replace(',','.'))||0,note:note.value,updatedBy:actor})}),d=await q.json();if(!q.ok||!d.ok)throw Error(d.error||'Speichern fehlgeschlagen');location.reload()}catch(e){error.textContent=e.message;save.disabled=false}};
- const observer=new MutationObserver(()=>decorate());document.querySelectorAll('#rows,#unknown').forEach(x=>observer.observe(x,{childList:true,subtree:true}));refresh().catch(e=>console.error('Kreditoren-Details:',e));
+ const observer=new MutationObserver(()=>decorate());document.querySelectorAll('#rows,#unknown').forEach(x=>observer.observe(x,{childList:true}));refresh().catch(e=>console.error('Kreditoren-Details:',e));
 })();
 </script>
 '''
